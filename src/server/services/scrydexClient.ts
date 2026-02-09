@@ -41,14 +41,15 @@ export const fetchExpansions = async (): Promise<ScrydexExpansion[]> => {
   await limiter.take();
   trackApiCall("scrydex").catch(() => {});
   const { data } = await client.get("/expansions", { params: { language: "en" } });
-  return data.expansions.map((exp: any) => ({
+  const items = data.data ?? data.expansions ?? [];
+  return items.map((exp: any) => ({
     id: exp.id,
     name: exp.name,
     code: exp.code,
     series: exp.series,
-    releaseDate: exp.releaseDate ?? null,
-    printedTotal: exp.printedTotal ?? null,
-    logoUrl: exp.logoUrl ?? null
+    releaseDate: exp.release_date ?? exp.releaseDate ?? null,
+    printedTotal: exp.printed_total ?? exp.printedTotal ?? null,
+    logoUrl: exp.logo ?? exp.logoUrl ?? null
   }));
 };
 
@@ -56,9 +57,15 @@ export const fetchCardsPage = async (page: number) => {
   await limiter.take();
   trackApiCall("scrydex").catch(() => {});
   const { data } = await client.get("/cards", {
-    params: { page, pageSize: 100, language: "en", include: "prices" }
+    params: { page, page_size: 100, language: "en", include: "prices" }
   });
-  return data;
+  const items = data.data ?? data.cards ?? [];
+  const totalCount = data.total_count ?? 0;
+  const pageSize = data.page_size ?? 100;
+  return {
+    cards: items,
+    hasMore: page * pageSize < totalCount
+  };
 };
 
 export const fetchAllCards = async (onPage?: (page: number, count: number) => void) => {
@@ -66,18 +73,22 @@ export const fetchAllCards = async (onPage?: (page: number, count: number) => vo
   let page = 1;
   while (true) {
     const data = await fetchCardsPage(page);
-    const batch: ScrydexCard[] = data.cards.map((card: any) => ({
-      id: card.id,
-      name: card.name,
-      number: card.number,
-      printedTotal: card.expansion?.printedTotal ?? null,
-      rarity: card.rarity ?? null,
-      supertype: card.supertype ?? null,
-      subtypes: card.subtypes ?? [],
-      images: card.images ?? {},
-      expansionId: card.expansion?.id,
-      prices: card.prices ?? {}
-    }));
+    const batch: ScrydexCard[] = data.cards.map((card: any) => {
+      // Card ID contains expansion prefix: "me2pt5-1" → expansion "me2pt5"
+      const expansionId = card.expansion?.id ?? card.id?.split("-").slice(0, -1).join("-") ?? "";
+      return {
+        id: card.id,
+        name: card.name,
+        number: card.number ?? card.printed_number ?? null,
+        printedTotal: card.printed_total ?? card.printedTotal ?? null,
+        rarity: card.rarity ?? null,
+        supertype: card.supertype ?? null,
+        subtypes: card.subtypes ?? [],
+        images: card.images ?? {},
+        expansionId,
+        prices: card.prices ?? {}
+      };
+    });
     cards.push(...batch);
     onPage?.(page, batch.length);
     if (!data.hasMore) break;

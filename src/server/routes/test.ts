@@ -1,11 +1,9 @@
 import { Router } from "express";
-import axios from "axios";
 import { requireAuth } from "../services/auth.js";
 import { searchItems } from "../services/ebayClient.js";
 import { fetchExpansions, fetchCardsPage } from "../services/scrydexClient.js";
 import { pool } from "../db/pool.js";
 import { getUsdToGbpRate } from "../services/exchangeRate.js";
-import { config } from "../config.js";
 
 const router = Router();
 
@@ -36,30 +34,22 @@ router.get("/ebay", requireAuth, async (_req, res, next) => {
   }
 });
 
-// Test Scrydex API: raw response to debug structure
+// Test Scrydex API: fetches expansions + first page of cards via client
 router.get("/scrydex", requireAuth, async (_req, res, next) => {
   try {
     const start = Date.now();
-    // Raw request to see actual response structure
-    const { data: rawExpansions } = await axios.get("https://api.scrydex.com/pokemon/v1/expansions", {
-      params: { language: "en" },
-      headers: { "X-Api-Key": config.SCRYDEX_API_KEY, "X-Team-ID": config.SCRYDEX_TEAM_ID },
-      timeout: 15000
-    });
-    const { data: rawCards } = await axios.get("https://api.scrydex.com/pokemon/v1/cards", {
-      params: { page: 1, pageSize: 3, language: "en", include: "prices" },
-      headers: { "X-Api-Key": config.SCRYDEX_API_KEY, "X-Team-ID": config.SCRYDEX_TEAM_ID },
-      timeout: 15000
-    });
+    const expansions = await fetchExpansions();
+    const cardsPage = await fetchCardsPage(1);
     const elapsed = Date.now() - start;
     res.json({
       ok: true,
       provider: "scrydex",
       elapsed_ms: elapsed,
-      raw_expansions_keys: Object.keys(rawExpansions),
-      raw_expansions_sample: typeof rawExpansions === "object" ? JSON.stringify(rawExpansions).slice(0, 500) : String(rawExpansions).slice(0, 500),
-      raw_cards_keys: Object.keys(rawCards),
-      raw_cards_sample: typeof rawCards === "object" ? JSON.stringify(rawCards).slice(0, 500) : String(rawCards).slice(0, 500)
+      expansions_count: expansions.length,
+      cards_page1_count: cardsPage.cards?.length ?? 0,
+      has_more_cards: cardsPage.hasMore ?? false,
+      sample_expansions: expansions.slice(0, 3).map((e: any) => ({ name: e.name, code: e.code, series: e.series })),
+      sample_cards: (cardsPage.cards ?? []).slice(0, 3).map((c: any) => ({ id: c.id, name: c.name, number: c.number, prices: c.prices }))
     });
   } catch (error: any) {
     res.status(502).json({
