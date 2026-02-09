@@ -10,12 +10,13 @@
   - [1.5 Flawed Assumptions](#15-flawed-assumptions)
 - [Part 2: Ground-Up Redesign](#part-2-ground-up-redesign)
   - [2.1 High-Level Architecture](#21-high-level-architecture)
-  - [2.2 Data Collection Layer](#22-data-collection-layer)
-  - [2.3 Normalization Pipeline](#23-normalization-pipeline)
-  - [2.4 Matching Engine](#24-matching-engine)
-  - [2.5 Confidence Scoring & Validation](#25-confidence-scoring--validation)
-  - [2.6 Accuracy Measurement & Enforcement](#26-accuracy-measurement--enforcement)
-  - [2.7 Implementation Roadmap](#27-implementation-roadmap)
+  - [2.2 API Budget & Rate Limit Constraints](#22-api-budget--rate-limit-constraints)
+  - [2.3 Data Collection Layer](#23-data-collection-layer)
+  - [2.4 Normalization Pipeline](#24-normalization-pipeline)
+  - [2.5 Matching Engine](#25-matching-engine)
+  - [2.6 Confidence Scoring & Validation](#26-confidence-scoring--validation)
+  - [2.7 Accuracy Measurement & Enforcement](#27-accuracy-measurement--enforcement)
+  - [2.8 Implementation Roadmap](#28-implementation-roadmap)
 
 ---
 
@@ -280,7 +281,110 @@ Each relaxation increases match volume but also increases false positive rate. W
 
 ---
 
-### 2.2 Data Collection Layer
+### 2.2 API Budget & Rate Limit Constraints
+
+Every design decision must account for two hard API constraints. Overage charges on Scrydex and rate-limit suspensions on eBay are both unacceptable.
+
+#### Scrydex API Limits
+
+| Constraint | Value | Notes |
+|---|---|---|
+| **Monthly credit cap** | **50,000 credits** | Hard budget — no overage charges permitted |
+| **Per-second rate limit** | **100 requests/second** | Applied across all endpoints globally |
+| **Standard request cost** | 1 credit | Cards, expansions, sealed products |
+| **Price history request cost** | 3 credits | `/cards/{id}/listings` endpoint |
+| **Usage refresh lag** | 20-30 minutes | `GET /account/v1/usage` updates are delayed |
+
+**Budget allocation (monthly):**
+
+| Purpose | Credits | % of Budget | Frequency |
+|---|---|---|---|
+| Catalog sync | ~500 | 1% | Daily (3-5 paginated calls × 30 days) |
+| Card matching (primary) | ~35,000 | 70% | Per-listing Scrydex queries |
+| Card matching (fallbacks) | ~8,000 | 16% | Padded/wildcard/scoped retries |
+| Usage monitoring | ~720 | 1.4% | Hourly usage checks (24/day × 30) |
+| Manual searches | ~2,000 | 4% | Dashboard search, ad-hoc queries |
+| **Safety buffer** | **~3,780** | **7.6%** | **Unallocated — prevents overage** |
+
+**Daily budget derivation:**
+
+```
+Base daily budget = 50,000 ÷ 30 = 1,666 credits/day
+Safety margin (10%) = 1,666 × 0.9 = 1,500 credits/day (usable)
+
+Dynamic adjustment:
+  remaining_credits = 50,000 - month_to_date_usage
+  days_remaining = days_left_in_billing_cycle
+  effective_daily = floor(remaining_credits × 0.9 / days_remaining)
+  clamped_daily = clamp(effective_daily, 100, 3,000)
+```
+
+The system must check `GET /account/v1/usage` every hour to track actual consumption and dynamically adjust the daily budget. If `remaining_credits < 2,000`, halt all automated scanning and alert the operator.
+
+**Credit-aware query strategy:**
+
+The matching engine must minimize Scrydex API calls per listing:
+
+1. **Cache-first:** Check the local query cache before any API call. The beta's `queriedCards` map (expansion:number → card data) should be persisted to Redis/database so it survives restarts.
+2. **One-shot matching preferred:** The primary `expansion.id:{id} number:{number}` query costs 1 credit. If it hits, no further credits are spent on that listing.
+3. **Fallback budget:** Each fallback strategy costs 1 additional credit. Cap total fallback attempts at **2 per listing** (down from the beta's 5). At 40 listings/scan × 2 fallbacks worst-case = 120 credits/scan max.
+4. **Batch where possible:** The daily catalog sync should use `page_size=100` to minimize pagination calls (e.g., ~350 EN expansions = 4 calls = 4 credits).
+5. **Never call price_history:** At 3 credits per call, the `/listings` endpoint is too expensive for automated use. Use `?include=prices` on card queries instead (included in the 1-credit card request).
+6. **Kill switch:** If `daily_credits_used >= effective_daily_budget`, stop scanning immediately. Do not queue — halt.
+
+**Rate limit handling (100 req/s):**
+
+At 100 requests/second, this is unlikely to be a bottleneck for a single-instance scanner. However:
+- Implement a token-bucket rate limiter (100 tokens, refills at 100/second)
+- On HTTP 429 response, back off exponentially: 1s → 2s → 4s → max 30s
+- Log all 429 responses as warnings for monitoring
+- The catalog sync (which fetches multiple pages rapidly) should insert a 50ms delay between paginated requests to stay well under the limit
+
+#### eBay Browse API Limits
+
+eBay's exact rate limits vary by account tier and are not publicly documented at fixed numbers. The beta observed these constraints:
+
+| Constraint | Observed Value | Notes |
+|---|---|---|
+| **Per-call rate limit** | ~5,000 calls/day (varies) | Returns HTTP 429 when exceeded |
+| **Results per search** | Max 200 items (paginated) | `limit` param, max 200 per page |
+| **OAuth token lifetime** | 2 hours | Must refresh before expiry |
+| **Category filter** | 183454 | Pokemon CCG Singles |
+| **Market** | EBAY-GB | UK-only marketplace |
+
+**eBay budget strategy:**
+
+Since eBay's exact limits are opaque and account-dependent:
+
+1. **Query the Analytics API:** `GET /developer/analytics/v1_beta/rate_limit/` returns your actual rate limits, remaining calls, and reset time. Check this before each scan cycle.
+2. **Conservative scan scheduling:**
+   ```
+   Operating hours: 06:00 - 23:00 UK time (17 hours)
+   Scans per day target: ~80-120 (depends on eBay allowance)
+   Scan interval: dynamically calculated = operating_minutes_remaining / scans_remaining
+   Clamped to: [10 minutes, 30 minutes]
+   ```
+3. **Listings per scan:** 40 items (1 API call). The beta used `limit=40` which balances coverage vs. credit consumption. Increasing to 200 would give broader coverage per scan but fewer total scans per day.
+4. **Exponential backoff on 429:** 1 min → 2 min → 4 min → max 5 min. Reset consecutive counter on successful request.
+5. **Avoid item-level enrichment calls:** The beta made additional per-item API calls for condition enrichment. In v2, extract everything needed from the initial search response (which includes `itemSpecifics` and `conditionDescriptors`).
+
+#### Combined Credit Budget Tracking
+
+The footer status bar must display:
+
+```
+Scrydex: 1,240 / 50,000 (monthly) | 312 / 1,500 (today) | Buffer: 3,780
+eBay: 1,847 / ~5,000 (daily) | Status: OK
+```
+
+Both APIs must have independent circuit breakers:
+- **Scrydex exhausted:** Stop all automated scanning + card resolution. Dashboard still works (cached data). Alert via Telegram.
+- **eBay rate-limited:** Pause scanning, show countdown to retry. Resume automatically when backoff expires.
+- **Both healthy:** Normal operation.
+
+---
+
+### 2.3 Data Collection Layer
 
 #### eBay Poller
 
@@ -337,7 +441,7 @@ interface LocalExpansion {
 
 ---
 
-### 2.3 Normalization Pipeline
+### 2.4 Normalization Pipeline
 
 This is the core improvement. Instead of parsing a title into a guess, we extract **signals from multiple sources** and merge them.
 
@@ -466,7 +570,7 @@ interface NormalizedListing {
 
 ---
 
-### 2.4 Matching Engine
+### 2.5 Matching Engine
 
 The matching engine takes a `NormalizedListing` and returns a `MatchResult`. It is a **pure function** (given the same inputs and catalog state, it produces the same output). It does not store deals, track diagnostics, or manage caches.
 
@@ -630,7 +734,7 @@ function calculateCompositeConfidence(scores: ConfidenceScores): number {
 
 ---
 
-### 2.5 Confidence Scoring & Validation
+### 2.6 Confidence Scoring & Validation
 
 #### Validation Layers
 
@@ -696,7 +800,7 @@ This audit table is the foundation for measuring and improving accuracy over tim
 
 ---
 
-### 2.6 Accuracy Measurement & Enforcement
+### 2.7 Accuracy Measurement & Enforcement
 
 #### How to Measure Accuracy
 
@@ -767,7 +871,7 @@ describe('Match accuracy corpus', () => {
 
 ---
 
-### 2.7 Implementation Roadmap
+### 2.8 Implementation Roadmap
 
 #### Phase 1: Foundation (Week 1-2)
 
