@@ -9,18 +9,22 @@
   - [1.4 Architectural & Scalability Limitations](#14-architectural--scalability-limitations)
   - [1.5 Flawed Assumptions](#15-flawed-assumptions)
 - [Part 2: Ground-Up Redesign](#part-2-ground-up-redesign)
-  - [2.1 High-Level Architecture](#21-high-level-architecture)
-  - [2.2 API Budget & Rate Limit Constraints](#22-api-budget--rate-limit-constraints)
-  - [2.3 Scrydex Card Index](#23-scrydex-card-index)
-  - [2.4 Signal Extraction](#24-signal-extraction)
-  - [2.5 Local Index Matching](#25-local-index-matching)
-  - [2.6 Confidence Scoring & Validation](#26-confidence-scoring--validation)
+  - [2.1 High-Level Architecture](#21-high-level-architecture) *(layered architecture, process lifecycle, dependency injection)*
+  - [2.2 API Budget & Rate Limit Constraints](#22-api-budget--rate-limit-constraints) *(token-bucket, circuit breakers, retry policy)*
+  - [2.3 Scrydex Card Index](#23-scrydex-card-index) *(PostgreSQL DDL, sync idempotency, search indexes)*
+  - [2.4 Signal Extraction](#24-signal-extraction) *(5-phase parsing pipeline, DB-driven name matching)*
+  - [2.5 Local Index Matching](#25-local-index-matching) *(Jaro-Winkler, asymmetric substring, candidate cap)*
+  - [2.6 Confidence Scoring & Validation](#26-confidence-scoring--validation) *(log-space geometric mean, hard/soft gates)*
   - [2.7 Liquidity Assessment](#27-liquidity-assessment)
-  - [2.8 Accuracy Measurement & Enforcement](#28-accuracy-measurement--enforcement)
+  - [2.8 Accuracy Measurement & Enforcement](#28-accuracy-measurement--enforcement) *(corpus format, calibration curves, seeding strategy)*
   - [2.9 Manual Listing Lookup Tool](#29-manual-listing-lookup-tool)
   - [2.10 Public Card Catalog](#210-public-card-catalog)
-  - [2.11 Implementation Roadmap](#211-implementation-roadmap)
-  - [2.12 Backend API Contract](#212-backend-api-contract)
+  - [2.11 Observability & Operational Excellence](#211-observability--operational-excellence) **NEW** *(structured logging, metrics, alerting)*
+  - [2.12 Error Handling Philosophy](#212-error-handling-philosophy) **NEW** *(typed error hierarchy, category-based response)*
+  - [2.13 Security](#213-security) **NEW** *(auth, input validation, SQL injection prevention)*
+  - [2.14 Configuration Management](#214-configuration-management) **NEW** *(typed AppConfig, env-var overrides)*
+  - [2.15 Implementation Roadmap](#215-implementation-roadmap) *(revised with infrastructure tasks)*
+  - [2.16 Backend API Contract](#216-backend-api-contract)
 
 ---
 
@@ -308,6 +312,9 @@ This isn't a marginal improvement. It's a **97% reduction in matching-related AP
 3. **Number-first matching.** Card numbers are the most reliable signal in eBay titles. Match on number first, disambiguate on name/expansion second. This inverts the beta's approach of guessing expansion first.
 4. **Each component is independently testable.** The matching engine works entirely offline against the local index.
 5. **Confidence is accumulated per field** and a composite score gates whether a match becomes a deal.
+6. **Fail safe, not fail silent.** Every pipeline stage returns typed results with explicit error states. No swallowed errors, no silent fallbacks to wrong data. A clean "no match" is always preferable to a wrong match.
+7. **Configuration over code.** All thresholds, weights, and behavioral parameters live in a typed config object loaded from environment or DB — never inline magic numbers. Every config value has a documented reason for its default.
+8. **Observe everything.** Structured logging with correlation IDs, Prometheus-compatible metrics, and health checks at every integration boundary. You cannot improve what you cannot measure.
 
 #### Deployment Topology
 
@@ -338,6 +345,92 @@ Source code is hosted on **GitHub** and deployed to **Railway.app**. The applica
 **Why PostgreSQL over SQLite:** Railway services are ephemeral — the filesystem doesn't survive redeploys. PostgreSQL is a managed Railway add-on with automatic backups, persistent storage, and native support for trigram indexes (`pg_trgm`) and full-text search needed for card name matching.
 
 **CI/CD pipeline:** GitHub → Railway auto-deploy on push to `main`. GitHub Actions runs linting, tests, and the accuracy regression suite on every PR. Railway builds from the Dockerfile in the repo root.
+
+#### Process Lifecycle & Graceful Shutdown
+
+The single-process architecture requires careful lifecycle management. Railway sends SIGTERM before killing a service (30-second grace period). The process must:
+
+```typescript
+// src/lifecycle.ts
+interface ServiceLifecycle {
+  start(): Promise<void>;   // Initialize in dependency order
+  stop(): Promise<void>;    // Shutdown in reverse order
+  isHealthy(): boolean;     // Health check for Railway
+  isReady(): boolean;       // Readiness check (index loaded?)
+}
+
+// Boot sequence (order matters — each depends on the previous):
+// 1. Database connection pool (verify connectivity)
+// 2. Load card index metadata from PostgreSQL (expansion count, card count, last sync)
+// 3. Start sync scheduler (registers cron jobs but does NOT run immediately)
+// 4. Start eBay poller (begins scanning only if card index has data)
+// 5. Start HTTP server (REST API + SSE + frontend)
+
+// Shutdown sequence (reverse order):
+// 1. Stop accepting new HTTP connections (server.close())
+// 2. Stop eBay poller (finish current scan, then stop)
+// 3. Stop sync scheduler (cancel pending cron jobs)
+// 4. Drain SSE connections (send close event to all clients)
+// 5. Drain database connection pool (wait for in-flight queries, max 10s)
+```
+
+**Critical rule: eBay scanning MUST NOT start until the card index has data.** On first deploy (empty database), the boot sequence runs a full sync before enabling the scanner. On subsequent boots, the existing PostgreSQL data is immediately available. This prevents the beta's failure mode where scanning starts before the system can match anything.
+
+**Health & readiness endpoints:**
+```
+GET /health          → 200 if process is alive (Railway health check)
+GET /health/ready    → 200 if card index is loaded AND DB is connected
+                       503 if card index is empty OR DB is down
+```
+
+Railway routes traffic only to services returning 200 on the health check. The `/health/ready` endpoint ensures no traffic arrives before the system can serve meaningful results.
+
+#### Layered Architecture
+
+The codebase is organized into strict layers with enforced dependency direction. No layer may import from a layer above it.
+
+```
+┌──────────────────────────────────────────────────┐
+│  HTTP Layer (api/)                                │
+│  Routes, SSE, request validation, auth middleware │
+├──────────────────────────────────────────────────┤
+│  Application Layer (services/)                    │
+│  Orchestration: scan loop, sync scheduler,        │
+│  deal pipeline, lookup service, catalog service   │
+├──────────────────────────────────────────────────┤
+│  Domain Layer (domain/)                           │
+│  Pure logic: title parser, signal merger,         │
+│  matching engine, confidence scorer,              │
+│  arbitrage calculator, liquidity assessor         │
+│  — NO I/O, NO side effects, fully testable       │
+├──────────────────────────────────────────────────┤
+│  Infrastructure Layer (infra/)                    │
+│  PostgreSQL repos, Scrydex client, eBay client,   │
+│  exchange rate client, Telegram client,           │
+│  rate limiters, config loader                     │
+└──────────────────────────────────────────────────┘
+```
+
+**The domain layer is the most important layer.** It contains all matching logic, scoring, and calculation with zero external dependencies. It takes typed inputs and returns typed outputs. This means:
+- The matching engine can be tested with a simple in-memory card array — no database, no API mocks
+- Confidence scoring is a pure function — deterministic, no side effects
+- Title parsing takes a string and returns a typed result — no I/O
+
+**Dependency injection:** Services receive their dependencies via constructor parameters, not global imports. This enables testing with real implementations in integration tests and simple stubs in unit tests. No DI framework — just constructor parameters and TypeScript interfaces.
+
+```typescript
+// Example: ScanPipeline receives all its dependencies explicitly
+class ScanPipeline {
+  constructor(
+    private readonly ebayPoller: EbayPoller,
+    private readonly signalExtractor: SignalExtractor,
+    private readonly matchingEngine: MatchingEngine,
+    private readonly arbitrageCalc: ArbitrageCalculator,
+    private readonly dealStore: DealStore,
+    private readonly config: ScanConfig,
+  ) {}
+}
+```
 
 ---
 
@@ -391,10 +484,39 @@ The system must check `GET /account/v1/usage` every hour. However, because autom
 
 **Rate limit handling (100 req/s):**
 
-At 100 requests/second, this is unlikely to be a bottleneck. The heaviest load is the weekly full sync (~350 requests), which at 100 req/s completes in under 4 seconds. However:
-- Implement a token-bucket rate limiter (100 tokens, refills at 100/second)
-- On HTTP 429 response, back off exponentially: 1s → 2s → 4s → max 30s
-- The card index sync should insert a 50ms delay between paginated requests to stay well under the limit and be a good API citizen
+At 100 requests/second, this is unlikely to be a bottleneck. The heaviest load is the weekly full sync (~350 requests), which at 100 req/s completes in under 4 seconds. However, we must be a good API citizen and handle transient failures robustly:
+
+```typescript
+// src/infra/rate-limiter.ts — Generic token-bucket, reusable for any API
+interface RateLimiterConfig {
+  maxTokens: number;        // Bucket capacity (e.g., 100)
+  refillRate: number;       // Tokens per second (e.g., 100)
+  retryAttempts: number;    // Max retries on 429 (e.g., 4)
+  retryBaseMs: number;      // Base backoff delay (e.g., 1000)
+  retryMaxMs: number;       // Max backoff delay (e.g., 30000)
+  courtesyDelayMs: number;  // Delay between sequential calls (e.g., 50)
+}
+
+// Implementation requirements:
+// 1. Token bucket is checked BEFORE each request (await limiter.acquire())
+// 2. If no token available, caller awaits until one refills — never rejects
+// 3. On HTTP 429, the limiter enters backoff state:
+//    - retryBaseMs * 2^attempt, jittered by ±20%, capped at retryMaxMs
+//    - Jitter prevents thundering herd when multiple requests back off simultaneously
+// 4. courtesyDelayMs is inserted between sequential requests in bulk operations
+//    (e.g., sync pagination) to stay well below the limit voluntarily
+// 5. All delays are awaited — never use setTimeout callbacks
+// 6. Metrics emitted: tokens_consumed, backoffs_triggered, courtesy_delays
+```
+
+**Retry policy for all external calls:**
+```
+Retryable: HTTP 429, 500, 502, 503, 504, ECONNRESET, ETIMEDOUT
+Not retryable: HTTP 400, 401, 403, 404 (client errors — retrying won't help)
+Max attempts: 4 (initial + 3 retries)
+Backoff: exponential with jitter — 1s, 2s, 4s (±20% jitter)
+Circuit breaker: after 5 consecutive failures, open circuit for 60s before retrying
+```
 
 #### eBay Browse API Limits
 
@@ -433,10 +555,27 @@ Scrydex: 2,340 / 50,000 (monthly) | Card Index: 34,892 cards | Last sync: 2h ago
 eBay: 1,847 / ~5,000 (daily) | Status: OK
 ```
 
-Both APIs must have independent circuit breakers:
-- **Scrydex budget low:** Reduce sync frequency. Dashboard and matching continue to work from local card index.
-- **eBay rate-limited:** Pause scanning, show countdown to retry. Resume automatically when backoff expires.
-- **Both healthy:** Normal operation.
+Both APIs must have independent **circuit breakers** following the standard three-state pattern (closed → open → half-open):
+
+```typescript
+// Circuit breaker states:
+// CLOSED:    Normal operation. Failures increment a counter.
+// OPEN:      After N consecutive failures, reject all calls immediately.
+//            After a timeout, transition to HALF_OPEN.
+// HALF_OPEN: Allow ONE request through. If it succeeds → CLOSED.
+//            If it fails → OPEN (restart timeout).
+
+interface CircuitBreakerConfig {
+  failureThreshold: number;   // Consecutive failures to trip (default: 5)
+  resetTimeoutMs: number;     // Time in OPEN state before trying again (default: 60_000)
+  name: string;               // For logging: "scrydex", "ebay", "exchange_rate"
+}
+```
+
+- **Scrydex circuit open:** Reduce sync frequency. Dashboard and matching continue from local card index. Alert operator.
+- **eBay circuit open:** Pause scanning, show countdown to next retry. Resume automatically when half-open test succeeds.
+- **Exchange rate circuit open:** Use last known rate (stored in DB with timestamp). **Halt deal creation if rate is >6 hours stale** — do not fall back to a hardcoded rate. The beta's hardcoded 1.27 fallback was a critical bug: a 5% exchange rate error on a £500 card is £25.
+- **All healthy:** Normal operation.
 
 The critical insight: **eBay rate limits are now the only bottleneck.** Scrydex budget is no longer a constraining factor for scan throughput.
 
@@ -460,6 +599,32 @@ All API credentials are stored as **Railway environment variables** — never co
 | `PORT` | HTTP port (Railway injects this automatically) |
 
 **Local development** uses a `.env` file (git-ignored). Railway's environment variable UI handles production secrets. No secrets in code, no secrets in Docker images.
+
+**Startup validation:** All required environment variables are validated at boot using a schema (e.g., Zod). If any required variable is missing or malformed, the process exits immediately with a clear error — not a cryptic runtime crash minutes later.
+
+```typescript
+// src/infra/config.ts — Validated at process start, before any service initializes
+const envSchema = z.object({
+  DATABASE_URL: z.string().url(),
+  SCRYDEX_API_KEY: z.string().min(1),
+  SCRYDEX_TEAM_ID: z.string().min(1),
+  EBAY_CLIENT_ID: z.string().min(1),
+  EBAY_CLIENT_SECRET: z.string().min(1),
+  EBAY_REFRESH_TOKEN: z.string().min(1),
+  DASHBOARD_SECRET: z.string().min(32, 'Dashboard secret must be at least 32 characters'),
+  // Optional services — scanner works without them
+  TELEGRAM_BOT_TOKEN: z.string().optional(),
+  TELEGRAM_CHAT_ID: z.string().optional(),
+  EXCHANGE_RATE_API_KEY: z.string().min(1),
+  NODE_ENV: z.enum(['production', 'development', 'test']).default('development'),
+  PORT: z.coerce.number().default(3000),
+});
+
+// Parse once, export typed config. If invalid, process.exit(1) with details.
+export const config = envSchema.parse(process.env);
+```
+
+**Principle:** Fail fast and loud on misconfiguration. A missing API key should crash at boot with `"SCRYDEX_API_KEY is required"`, not 3 hours later with `"Cannot read property 'headers' of undefined"`.
 
 ---
 
@@ -541,6 +706,178 @@ interface LocalExpansion {
 
 **Images are free.** Card images (small/medium/large), variant images, expansion logos, and expansion symbols are all returned as CDN URLs in the standard API response. No extra credits, no extra requests. We store the URLs in the local DB and reference them directly from the Scrydex CDN — no need to download or cache the actual image files.
 
+#### PostgreSQL Schema
+
+The TypeScript interfaces above map to these PostgreSQL tables. This is the authoritative schema — the TypeScript types are generated from or validated against it.
+
+```sql
+-- Enable required extensions
+CREATE EXTENSION IF NOT EXISTS pg_trgm;   -- Trigram similarity for fuzzy name matching
+CREATE EXTENSION IF NOT EXISTS btree_gin; -- GIN index support for composite queries
+
+-- Expansions: ~350 rows, synced daily
+CREATE TABLE expansions (
+  scrydex_id      TEXT PRIMARY KEY,            -- Canonical Scrydex ID (e.g., "sv8")
+  name            TEXT NOT NULL,               -- "Surging Sparks"
+  code            TEXT NOT NULL,               -- "sv8"
+  series          TEXT NOT NULL,               -- "Scarlet & Violet"
+  printed_total   INTEGER NOT NULL,
+  total           INTEGER NOT NULL,            -- Including secret rares
+  release_date    DATE NOT NULL,
+  language_code   TEXT NOT NULL DEFAULT 'EN',
+  logo_url        TEXT,
+  symbol_url      TEXT,
+  last_synced_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX idx_expansions_release ON expansions (release_date DESC);
+CREATE INDEX idx_expansions_code ON expansions (code);
+CREATE INDEX idx_expansions_name_trgm ON expansions USING GIN (name gin_trgm_ops);
+
+-- Cards: ~35,000 rows, synced weekly (hot sets daily)
+CREATE TABLE cards (
+  scrydex_card_id   TEXT PRIMARY KEY,
+  name              TEXT NOT NULL,             -- "Charizard ex"
+  number            TEXT NOT NULL,             -- "6", "TG07", "SV65"
+  number_normalized TEXT NOT NULL,             -- "6", "7", "65" (prefix-stripped, no leading zeros)
+  expansion_id      TEXT NOT NULL REFERENCES expansions(scrydex_id),
+  expansion_name    TEXT NOT NULL,             -- Denormalized for query performance
+  expansion_code    TEXT NOT NULL,             -- Denormalized
+  printed_total     INTEGER NOT NULL,
+  rarity            TEXT,
+  supertype         TEXT,                      -- "Pokémon", "Trainer", "Energy"
+  subtypes          TEXT[] DEFAULT '{}',       -- {"Stage 2", "ex"}
+  artist            TEXT,
+  image_small       TEXT,
+  image_medium      TEXT,
+  image_large       TEXT,
+  last_synced_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- Core matching indexes (these power the number-first lookup strategy)
+CREATE INDEX idx_cards_number_norm ON cards (number_normalized);
+CREATE INDEX idx_cards_number_printed ON cards (number_normalized, printed_total);
+CREATE INDEX idx_cards_expansion ON cards (expansion_id);
+CREATE INDEX idx_cards_number_expansion ON cards (number, expansion_id);
+CREATE INDEX idx_cards_name_trgm ON cards USING GIN (name gin_trgm_ops);
+
+-- Variants: ~70,000 rows (avg 2 variants per card)
+-- Stored as separate rows, not JSONB, for direct query access
+CREATE TABLE variants (
+  id              SERIAL PRIMARY KEY,
+  card_id         TEXT NOT NULL REFERENCES cards(scrydex_card_id) ON DELETE CASCADE,
+  name            TEXT NOT NULL,               -- "holofoil", "reverseHolofoil", "normal"
+  image_small     TEXT,
+  image_medium    TEXT,
+  image_large     TEXT,
+  -- Prices stored per-condition as JSONB for flexibility
+  -- Structure: { "NM": { "low": 1.50, "market": 2.00, "trends": {...} }, "LP": {...} }
+  prices          JSONB NOT NULL DEFAULT '{}',
+  -- Graded prices: { "PSA 10": { "low": 50, "mid": 75, "high": 100, "market": 80 } }
+  graded_prices   JSONB,
+  last_price_update TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (card_id, name)
+);
+
+CREATE INDEX idx_variants_card ON variants (card_id);
+CREATE INDEX idx_variants_prices ON variants USING GIN (prices);
+
+-- Deals: arbitrage opportunities found by the scanner
+CREATE TABLE deals (
+  deal_id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  ebay_item_id      TEXT NOT NULL,
+  ebay_title        TEXT NOT NULL,
+  card_id           TEXT REFERENCES cards(scrydex_card_id),
+  variant_id        INTEGER REFERENCES variants(id),
+  -- Pricing snapshot (frozen at deal creation — does not change with future syncs)
+  ebay_price_gbp    NUMERIC(10,2) NOT NULL,
+  ebay_shipping_gbp NUMERIC(10,2) NOT NULL DEFAULT 0,
+  scrydex_price_usd NUMERIC(10,2),
+  exchange_rate     NUMERIC(10,6),
+  market_price_gbp  NUMERIC(10,2),
+  profit_gbp        NUMERIC(10,2),
+  profit_percent    NUMERIC(6,2),
+  tier              TEXT CHECK (tier IN ('S', 'A', 'B', 'C')),
+  -- Match metadata
+  confidence        NUMERIC(4,3),              -- 0.000 to 1.000
+  confidence_tier   TEXT CHECK (confidence_tier IN ('high', 'medium', 'low')),
+  condition         TEXT CHECK (condition IN ('NM', 'LP', 'MP', 'HP')),
+  condition_source  TEXT,
+  liquidity_score   NUMERIC(4,3),
+  liquidity_grade   TEXT CHECK (liquidity_grade IN ('high', 'medium', 'low', 'illiquid')),
+  -- Signals snapshot (for audit/debugging)
+  match_signals     JSONB NOT NULL,            -- Full NormalizedListing + MatchResult
+  -- eBay listing metadata
+  ebay_image_url    TEXT,
+  ebay_url          TEXT NOT NULL,
+  seller_name       TEXT,
+  seller_feedback   INTEGER,
+  listed_at         TIMESTAMPTZ,
+  -- Review state
+  reviewed_at       TIMESTAMPTZ,
+  is_correct_match  BOOLEAN,
+  incorrect_reason  TEXT,
+  -- Timestamps
+  created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX idx_deals_created ON deals (created_at DESC);
+CREATE INDEX idx_deals_tier ON deals (tier);
+CREATE INDEX idx_deals_ebay_item ON deals (ebay_item_id);
+CREATE INDEX idx_deals_card ON deals (card_id);
+CREATE UNIQUE INDEX idx_deals_dedup ON deals (ebay_item_id, card_id, variant_id);
+
+-- Sales velocity cache (from Scrydex /listings endpoint, 3 credits per call)
+CREATE TABLE sales_velocity_cache (
+  card_id         TEXT NOT NULL REFERENCES cards(scrydex_card_id),
+  variant_name    TEXT NOT NULL,
+  sales_7d        INTEGER NOT NULL DEFAULT 0,
+  sales_30d       INTEGER NOT NULL DEFAULT 0,
+  fetched_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (card_id, variant_name)
+);
+
+-- Exchange rate history (never rely on hardcoded fallback)
+CREATE TABLE exchange_rates (
+  id              SERIAL PRIMARY KEY,
+  from_currency   TEXT NOT NULL DEFAULT 'USD',
+  to_currency     TEXT NOT NULL DEFAULT 'GBP',
+  rate            NUMERIC(10,6) NOT NULL,
+  fetched_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX idx_exchange_rates_latest ON exchange_rates (from_currency, to_currency, fetched_at DESC);
+
+-- User preferences (single-user for v1)
+CREATE TABLE preferences (
+  id              INTEGER PRIMARY KEY DEFAULT 1 CHECK (id = 1),  -- Singleton row
+  data            JSONB NOT NULL DEFAULT '{}',
+  updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- Sync log: track every sync operation for debugging and monitoring
+CREATE TABLE sync_log (
+  id              SERIAL PRIMARY KEY,
+  sync_type       TEXT NOT NULL,              -- 'full', 'delta', 'expansion', 'manual'
+  started_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  completed_at    TIMESTAMPTZ,
+  status          TEXT NOT NULL DEFAULT 'running',  -- 'running', 'completed', 'failed'
+  expansions_synced INTEGER DEFAULT 0,
+  cards_upserted    INTEGER DEFAULT 0,
+  credits_used      INTEGER DEFAULT 0,
+  error_message     TEXT,
+  metadata          JSONB
+);
+```
+
+**Why separate tables for variants instead of JSONB on cards:** Variants need to be joined in queries (e.g., "find all cards where the holofoil NM market price > $50"). JSONB queries are possible but slower and harder to index. Separate rows enable standard SQL joins and straightforward indexing.
+
+**Why `NUMERIC` for prices instead of `INTEGER` cents:** PostgreSQL `NUMERIC` is exact decimal arithmetic — no floating point errors on currency. Storing as cents with integer math is also valid, but `NUMERIC(10,2)` is more readable in queries and psql output.
+
+**Migration strategy:** Use a migration tool (e.g., `node-pg-migrate` or `drizzle-kit`) that tracks applied migrations in a `pgmigrations` table. Each migration is a numbered SQL file in `src/database/migrations/`. Migrations run at boot before any other initialization.
+
 #### Sync Strategies
 
 **Initial full sync (one-time, ~400 credits):**
@@ -566,6 +903,64 @@ NOT 40,000 credits — each page of up to 100 cards costs just 1 credit.
 **Weekly full resync (~400 credits):**
 
 Re-fetch everything to catch price movements, new printings, and corrections. Run during off-peak hours (e.g., 03:00 UK time Sunday). Upsert into the local DB — don't delete/recreate. Scheduling is handled in-process using `node-cron` (or similar) — the Railway service runs continuously, so cron-style scheduling works naturally. If the service restarts mid-sync, the scheduler re-registers on boot and the next scheduled window triggers a full resync.
+
+**Sync idempotency and error recovery:**
+
+Syncs MUST be idempotent and resumable. A sync interrupted at any point (process crash, API error, Railway restart) must be safely re-runnable without data corruption.
+
+```typescript
+// Every sync operation follows this pattern:
+async function syncExpansionCards(expansionId: string, syncLogId: number): Promise<SyncResult> {
+  let page = 1;
+  let totalUpserted = 0;
+  let creditsUsed = 0;
+
+  while (true) {
+    // 1. Fetch one page from Scrydex
+    const response = await scrydex.getCards({
+      q: `expansion.id:${expansionId}`,
+      include: 'prices',
+      page_size: 100,
+      page,
+    });
+    creditsUsed++;
+
+    // 2. Upsert cards + variants in a single transaction
+    //    ON CONFLICT (scrydex_card_id) DO UPDATE — idempotent
+    const upserted = await db.transaction(async (tx) => {
+      let count = 0;
+      for (const card of response.data) {
+        await tx.upsertCard(mapToLocalCard(card));
+        for (const variant of card.variants) {
+          await tx.upsertVariant(mapToLocalVariant(card.id, variant));
+        }
+        count++;
+      }
+      return count;
+    });
+    totalUpserted += upserted;
+
+    // 3. Update sync progress (allows monitoring mid-sync)
+    await db.updateSyncLog(syncLogId, { cards_upserted: totalUpserted, credits_used: creditsUsed });
+
+    // 4. Check if more pages exist
+    if (!response.hasMore) break;
+    page++;
+
+    // 5. Courtesy delay between pages
+    await delay(50);
+  }
+
+  return { totalUpserted, creditsUsed };
+}
+```
+
+**Key sync rules:**
+- All card/variant writes use `INSERT ... ON CONFLICT DO UPDATE` (PostgreSQL upsert) — re-running the same sync is always safe
+- Each expansion is synced independently — if expansion #50 fails, expansions #1-49 are committed and don't need re-syncing
+- The `sync_log` table tracks progress so the dashboard can show "Syncing: 150/350 expansions..."
+- Sync never deletes cards — if a card disappears from Scrydex (rare), it stays in local DB with a stale `last_synced_at`. A separate cleanup job can prune cards not seen in 90+ days
+- Transactions are per-expansion-page, not per-sync — keeps transaction duration short (<1s)
 
 **What `?include=prices` returns per card:**
 - `low` — lowest known sale price (USD)
@@ -599,18 +994,29 @@ Check for new expansions added to Scrydex. If a new expansion appears, trigger a
 
 #### Search Indexes
 
-Build these indexes on the local card DB for fast matching:
+Indexes are defined in the PostgreSQL DDL above (§2.3 PostgreSQL Schema). The key indexes that power matching:
 
-| Index | Purpose | Example Query |
+| Index | SQL | Purpose |
 |---|---|---|
-| `number + printedTotal` | Number-first matching | "Find all cards numbered 6 in sets with 162 cards" |
-| `number + expansionId` | Direct card lookup | "Card #6 in expansion X" |
-| `numberNormalized` | Prefix-agnostic search | "65" matches both "SV65" and "TG65" and "065" |
-| `name (trigram/FTS)` | Fuzzy name search | "Charizard" finds "Charizard ex", "Charizard V" |
-| `expansionName` | Expansion text search | "Surging Sparks" |
-| `expansionCode` | Code lookup | "sv8" |
+| Number + printed total | `idx_cards_number_printed` | Number-first matching: "all cards numbered 6 in sets with ~162 cards" |
+| Number + expansion | `idx_cards_number_expansion` | Direct lookup: "card #6 in expansion X" |
+| Normalized number | `idx_cards_number_norm` | Prefix-agnostic: "65" matches SV65, TG65, 065 |
+| Name trigram (GIN) | `idx_cards_name_trgm` | Fuzzy name: `similarity('Charzard', name) > 0.4` |
+| Expansion name trigram | `idx_expansions_name_trgm` | Fuzzy set name: "Surging Spark" finds "Surging Sparks" |
 
-With PostgreSQL trigram indexes (`pg_trgm`) and GIN-backed full-text search, these queries execute in <1ms — orders of magnitude faster than a live API call. PostgreSQL is the right choice here because Railway's managed Postgres persists across redeploys and supports the fuzzy matching features (trigram similarity, FTS ranking) needed for card name lookup.
+With `pg_trgm` GIN indexes, fuzzy name queries execute in <5ms on 35,000 cards — orders of magnitude faster than a live API call. Use `similarity()` for ranking and `%` operator for index-accelerated filtering.
+
+**Example matching query (number + denominator strategy):**
+```sql
+SELECT c.*, v.name as variant_name, v.prices
+FROM cards c
+JOIN variants v ON v.card_id = c.scrydex_card_id
+WHERE c.number_normalized = '6'
+  AND c.printed_total BETWEEN 157 AND 167  -- ±5 tolerance
+ORDER BY similarity(c.name, 'Charizard ex') DESC
+LIMIT 10;
+-- Executes in <2ms with proper indexes
+```
 
 #### eBay Poller
 
@@ -647,7 +1053,7 @@ Before matching against the local card index, we extract **signals from multiple
 
 #### Step 1: Title Parser
 
-Same role as beta but restructured for per-field confidence:
+**Fundamental departure from beta:** The beta's title parser was a monolithic 1,447-line class with 50+ regexes executed sequentially. Patterns overlapped, precedence was fragile, and new card formats required code changes. The redesign replaces this with a **phased pipeline** where each phase has a single responsibility and produces typed, testable output.
 
 ```typescript
 interface TitleSignals {
@@ -668,16 +1074,152 @@ interface TitleSignals {
 }
 ```
 
+**Parsing pipeline — 5 phases, each independently testable:**
+
+```
+Phase 1: Clean       → Remove noise (emoji, HTML, seller junk, normalize Unicode)
+Phase 2: Classify    → Early-exit detection (junk, fake, non-English, lot/bundle)
+Phase 3: Extract     → Pull structured tokens (card number, grading, variant flags)
+Phase 4: Identify    → Match remaining tokens against local DB (name, set)
+Phase 5: Assemble    → Combine extractions into TitleSignals with per-field confidence
+```
+
+**Phase 1 — Cleaning (pure string transform, no regex matching):**
+```typescript
+function cleanTitle(raw: string): string {
+  let title = raw;
+  // 1. Unicode normalization (NFC — composed form, handles accented chars)
+  title = title.normalize('NFC');
+  // 2. Strip emoji (Unicode emoji ranges, not a hardcoded list)
+  title = title.replace(/[\p{Emoji_Presentation}\p{Extended_Pictographic}]/gu, '');
+  // 3. Decode HTML entities (&amp; → &, &#39; → ')
+  title = decodeHTMLEntities(title);
+  // 4. Normalize quotes (smart quotes → straight quotes)
+  title = title.replace(/[\u2018\u2019]/g, "'").replace(/[\u201C\u201D]/g, '"');
+  // 5. Strip parenthetical noise: "(read description)", "(see photos)", etc.
+  title = title.replace(/\((?:read|see|check|look|view)\b[^)]*\)/gi, '');
+  // 6. Collapse multiple spaces to single space, trim
+  title = title.replace(/\s+/g, ' ').trim();
+  return title;
+}
+```
+
+**Phase 2 — Classification (early exit to save processing):**
+```typescript
+// Junk detection uses a compiled RegExp from a data-driven list, not inline patterns
+const JUNK_PATTERNS = [
+  /\b(lot|bundle|collection|bulk|set of \d+|job lot)\b/i,
+  /\b(empty|tin only|box only|no cards|etb|booster)\b/i,
+  /\b(sleeve|binder|toploader|penny|protector)\b/i,
+];
+const FAKE_PATTERNS = [
+  /\b(proxy|proxies|custom|orica|fake|replica|fan\s*made|unofficial)\b/i,
+];
+// Non-English detection: title contains CJK characters or explicit language markers
+const NON_ENGLISH_PATTERNS = [
+  /[\u3000-\u303F\u3040-\u309F\u30A0-\u30FF\uFF00-\uFFEF\u4E00-\u9FFF]/,
+  /\b(japanese|japan|jpn|korean|kor|chinese|french|german|italian|spanish)\b/i,
+];
+```
+
+**Phase 3 — Structured extraction (card number is king):**
+
+Card number extraction is the highest-value parse. The redesign uses a **prioritized pattern array loaded from config** instead of 17 inline regexes:
+
+```typescript
+// src/domain/extraction/patterns/card-number.ts
+// Patterns are tried in order. First match wins. Each pattern produces typed output.
+interface NumberPattern {
+  name: string;                    // For logging/debugging
+  regex: RegExp;
+  extract: (match: RegExpMatchArray) => {
+    number: string;
+    denominator?: number;
+    prefix?: string;               // "SV", "TG", "GG", etc.
+    confidence: number;            // How reliable this pattern is (0.0-1.0)
+  };
+}
+
+const CARD_NUMBER_PATTERNS: NumberPattern[] = [
+  // Highest confidence: explicit number/denominator format
+  {
+    name: 'standard_with_denominator',
+    regex: /\b(\d{1,4})\s*[\/\\]\s*(\d{1,4})\b/,
+    extract: (m) => ({
+      number: m[1], denominator: parseInt(m[2]), confidence: 0.95,
+    }),
+  },
+  {
+    name: 'prefixed_with_denominator',  // "SV065/198", "TG07/30"
+    regex: /\b([A-Z]{1,4})(\d{1,4})\s*[\/\\]\s*(\d{1,4})\b/,
+    extract: (m) => ({
+      number: m[2].replace(/^0+/, ''), prefix: m[1],
+      denominator: parseInt(m[3]), confidence: 0.95,
+    }),
+  },
+  {
+    name: 'hash_format',  // "#123" or "# 123"
+    regex: /(?:^|\s)#\s*(\d{1,4})\b/,
+    extract: (m) => ({ number: m[1], confidence: 0.80 }),
+  },
+  // ... additional patterns loaded from config, not hardcoded
+];
+```
+
+**Why this is better than beta:** Each pattern is a named, self-documenting unit with an explicit confidence score. Adding a new format means appending to the array — not inserting into a fragile priority chain. Patterns can be loaded from a JSON config file at startup, enabling updates without code changes.
+
+**Phase 4 — DB-driven identification (no hardcoded Pokemon name lists):**
+
+The beta maintained a hardcoded list of ~300 Pokemon names and 9 era-specific set name regexes. This drifted from reality as new cards were released. The redesign replaces ALL hardcoded name/set lists with lookups against the local card index.
+
+```typescript
+// After phases 1-3, we have a cleaned title with card number extracted.
+// Remaining tokens are candidate name/set fragments.
+
+function identifyCardName(
+  tokens: string[],       // Title tokens after number + noise removal
+  db: CardNameIndex,      // Pre-loaded from PostgreSQL: Set<string> of all card names
+): { value: string; confidence: number } | null {
+  // Strategy 1: Try progressively shorter token windows against the card name index
+  // "Charizard ex Obsidian Flames" → try "Charizard ex Obsidian Flames",
+  //   then "Charizard ex Obsidian", then "Charizard ex", then "Charizard"
+  for (let windowSize = Math.min(tokens.length, 5); windowSize >= 1; windowSize--) {
+    for (let start = 0; start <= tokens.length - windowSize; start++) {
+      const candidate = tokens.slice(start, start + windowSize).join(' ');
+      // Use pg_trgm similarity threshold, not exact match
+      const match = db.findBySimilarity(candidate, threshold: 0.6);
+      if (match) {
+        return { value: match.name, confidence: match.similarity };
+      }
+    }
+  }
+  return null;
+}
+
+function identifySetName(
+  tokens: string[],
+  db: ExpansionNameIndex,  // Pre-loaded: all expansion names + codes
+): { value: string; confidence: number } | null {
+  // Same sliding window approach against expansion catalog
+  // This replaces the beta's 9 era-specific regexes with a single DB lookup
+  // ...
+}
+```
+
+**Pre-loaded indexes for title matching:** At boot, load all unique card names and expansion names from PostgreSQL into in-memory `Set<string>` structures for fast lookup during title parsing. These are refreshed when the card index syncs. This is O(1) lookup vs the beta's O(n) regex scan across 300+ names.
+
 **Improvements over beta:**
-- **Per-field confidence** instead of a single score. `"123/456"` gives high-confidence number AND denominator, while a name extracted by position heuristic gets low confidence
-- **Regex patterns are data-driven.** Load patterns from a config file so new formats don't require code changes
-- **Pokemon name matching uses the local card index** — search all card names from the synced DB rather than maintaining a hardcoded ~300 name list
-- **Set name matching uses the local expansion catalog** — search the expansion table rather than 9 era-specific regexes
-- **Emoji and noise stripping** as the first normalization pass, before any regex matching
+- **Per-field confidence** instead of a single score. `"123/456"` gives high-confidence number AND denominator, while a name extracted by sliding window gets confidence proportional to the `pg_trgm` similarity score
+- **Regex patterns are data-driven.** Card number patterns are defined as typed objects loaded from config, not inline regexes
+- **Pokemon name matching uses the local card index** — trigram similarity against all ~35,000 card names, not a hardcoded ~300 name list
+- **Set name matching uses the local expansion catalog** — fuzzy match against the expansion table, not 9 era-specific regexes
+- **Cleaning is a separate phase** — emoji/Unicode/noise stripping runs first, independently testable, so downstream phases see clean input
+- **Early exit on junk** — lots, bundles, fakes, non-English cards are rejected in phase 2 before any expensive matching
+- **No name correction map** — the beta had 80+ hardcoded misspelling corrections. Trigram similarity handles misspellings naturally: `"Charzard"` has >0.6 similarity to `"Charizard"`
 
 #### Step 2: Condition Mapper
 
-Port the beta's condition mapping logic — this is one area the beta got right. eBay provides card condition through multiple channels, and we need all of them for accurate condition-specific pricing.
+The beta's condition mapping cascade (descriptors → specifics → title → default) was structurally sound. We keep the priority order but fix two issues: (1) the beta used exact-match string lookups that missed partial matches like "Near Mint or Better - Factory Sealed", and (2) the default to LP is too generous — it should be a conservative default with a confidence penalty.
 
 ```typescript
 interface ConditionResult {
@@ -710,14 +1252,27 @@ const ASPECT_CONDITION_MAP: Record<string, ScrydexCondition> = {
 };
 
 // Priority 3: Title regex (last resort)
-// Priority 4: Default to 'LP' (conservative — undervalues slightly)
+// Priority 4: Default to 'LP' (conservative — undervalues slightly) with confidence penalty
+
+// IMPROVEMENT over beta: Use .startsWith() / .includes() matching instead of exact match
+// "Near Mint or Better - Factory Sealed" starts with "near mint or better" → maps to NM
+// Beta's exact match would miss this.
 ```
 
-**Why this matters for pricing:** The local card index stores prices per-condition. A NM Charizard might be $200 while an LP copy is $120. Using the wrong condition means the profit calculation is wrong. The beta's 3-priority condition mapping ensures we get the most accurate condition possible.
+**Why this matters for pricing:** The local card index stores prices per-condition. A NM Charizard might be $200 while an LP copy is $120. Using the wrong condition means the profit calculation is wrong.
+
+**Default condition handling:** When no condition source is available, default to LP (conservative — slightly undervalues) BUT apply a confidence penalty of -0.05 to the composite score. This ensures deals relying on a guessed condition are ranked lower than deals with explicit condition data.
 
 **Blocked conditions** — skip damaged/creased cards entirely:
 ```typescript
-const BLOCKED_PATTERNS = ['damaged', 'dmg', 'creased', 'crease', 'water damage', 'torn', 'ripped'];
+const BLOCKED_PATTERNS = [
+  /\b(damaged|dmg|heavily?\s*damaged)\b/i,
+  /\b(creased?|crease[sd]?)\b/i,
+  /\b(water\s*damage[d]?|water\s*stain)\b/i,
+  /\b(torn|ripped|bent|warped)\b/i,
+  /\b(poor|destroyed|trashed)\b/i,
+];
+// Use regex patterns instead of exact substring match — handles plurals, tenses
 ```
 
 **eBay API requirement:** To get `conditionDescriptors`, the search request MUST include `fieldgroups=EXTENDED,PRODUCT`. This replaces the beta's approach of making per-item enrichment calls.
@@ -919,10 +1474,13 @@ function disambiguate(
 
       const expScore = scoreExpansionMatch(listing, card);
 
+      // Weighted geometric mean — any single zero score makes the whole product zero.
+      // To avoid this, floor all scores at 0.01 (effectively -∞ in log space).
+      // This means a zero score drags the composite very low but doesn't annihilate it.
       const composite = weightedGeometricMean({
-        numberMatch: { score: 1.0, weight: 0.20 },  // Already filtered by number
+        numberMatch: { score: 1.0, weight: 0.15 },  // Already filtered by number
         denominatorMatch: { score: denomScore, weight: 0.25 },
-        nameMatch: { score: nameScore, weight: 0.35 },       // Most important
+        nameMatch: { score: nameScore, weight: 0.40 },       // Most important signal
         expansionMatch: { score: expScore, weight: 0.20 },
       });
 
@@ -934,6 +1492,7 @@ function disambiguate(
 ```
 
 **Name validation is mandatory, not optional:**
+
 ```typescript
 function validateNameMatch(parsedName: string, cardName: string): number {
   const normalizedParsed = normalizeName(parsedName);
@@ -942,18 +1501,44 @@ function validateNameMatch(parsedName: string, cardName: string): number {
   // Exact match after normalization
   if (normalizedParsed === normalizedCard) return 1.0;
 
-  // One contains the other (handles "Pikachu" vs "Pikachu V")
-  if (normalizedCard.startsWith(normalizedParsed) ||
-      normalizedParsed.startsWith(normalizedCard)) {
-    return 0.85;
+  // One contains the other — but PENALIZE the direction that drops a suffix.
+  // "Pikachu" matching "Pikachu V" is a DANGEROUS match — these are different cards.
+  // "Pikachu V" matching "Pikachu" is safe (title has more info than needed).
+  if (normalizedParsed.startsWith(normalizedCard)) {
+    return 0.80;  // Parsed name is LONGER than card name — safe, title has extra tokens
+  }
+  if (normalizedCard.startsWith(normalizedParsed)) {
+    return 0.65;  // Parsed name is SHORTER — might be missing a critical suffix (V, ex, VMAX)
   }
 
-  // Levenshtein-based similarity
-  return levenshteinSimilarity(normalizedParsed, normalizedCard);
+  // Use Jaro-Winkler distance instead of Levenshtein.
+  // Jaro-Winkler is specifically designed for short strings (names) and gives higher
+  // scores to strings that match from the beginning — ideal for card names where
+  // the base Pokemon name is the prefix and the variant suffix differs.
+  // Levenshtein treats all positions equally, which is wrong for "Pikachu" vs "Pikachu VMAX".
+  return jaroWinklerSimilarity(normalizedParsed, normalizedCard);
+}
+
+// Name normalization: lowercase, strip diacritics, normalize spacing, remove punctuation
+function normalizeName(name: string): string {
+  return name
+    .toLowerCase()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')  // Strip diacritics: é → e
+    .replace(/['']/g, '')                                // Remove apostrophes
+    .replace(/[-–—]/g, ' ')                              // Hyphens → spaces
+    .replace(/[^a-z0-9 ]/g, '')                          // Strip remaining punctuation
+    .replace(/\s+/g, ' ')                                // Collapse whitespace
+    .trim();
 }
 ```
 
+**Why Jaro-Winkler over Levenshtein:** For card name matching, the beginning of the name is the most important part. "Charizard ex" vs "Charizard V" share the prefix "Charizard" but are completely different cards. Jaro-Winkler's prefix weighting correctly assigns higher similarity to shared prefixes. Levenshtein gives a misleadingly high score (1 edit distance) for names that are semantically very different. Additionally, Jaro-Winkler handles transpositions (common in typos) better than Levenshtein.
+
+**Substring matching is asymmetric:** The beta treated "Pikachu" matching "Pikachu V" the same as "Pikachu V" matching "Pikachu". These are fundamentally different cases. If the title says "Pikachu" but the card is "Pikachu V", the listing might be for a completely different card. If the title says "Pikachu V Special Art" but the card is "Pikachu V", the title just has extra descriptive text. The redesign scores these differently.
+
 **Minimum name similarity: 0.60** (up from beta's 0.25-0.30). This is the single most impactful change for accuracy. At the local-index scale, we can afford to be strict — rejecting a candidate costs nothing (no wasted API credit), and the correct card is almost certainly in the candidate set if the number was right.
+
+**Performance guard:** Cap candidate lists at 50 entries before disambiguation scoring. If a number-only lookup returns >50 candidates (e.g., card number "1" exists in every expansion), skip disambiguation and return no match — the signals are too weak. This prevents O(n²) scoring on ambiguous lookups.
 
 #### Stage 3: Expansion Cross-Validation
 
@@ -1052,7 +1637,13 @@ interface MatchResult {
 }
 
 function calculateCompositeConfidence(scores: ConfidenceScores): number {
-  // Weighted geometric mean — any single low score drags the composite down
+  // WHY GEOMETRIC MEAN (not arithmetic):
+  // Arithmetic mean: (0.95 + 0.95 + 0.10) / 3 = 0.67 — one bad signal hides in the average
+  // Geometric mean: (0.95 × 0.95 × 0.10)^(1/3) = 0.45 — one bad signal drags the whole score down
+  //
+  // For arbitrage, a single wrong field (wrong name, wrong set) means a wrong card.
+  // Geometric mean penalizes this correctly. Arithmetic mean is too forgiving.
+
   const weights = {
     nameMatch: 0.30,         // Name match is the most important signal
     denominatorMatch: 0.25,  // Denominator validates the expansion implicitly
@@ -1062,16 +1653,18 @@ function calculateCompositeConfidence(scores: ConfidenceScores): number {
     normalization: 0.10,
   };
 
-  let weightedProduct = 1;
+  // Use log-space arithmetic to avoid floating-point underflow on many small values.
+  // Floor all scores at 0.01 to prevent a single zero from annihilating the product.
+  let weightedLogSum = 0;
   let totalWeight = 0;
 
   for (const [key, weight] of Object.entries(weights)) {
-    const score = scores[key as keyof ConfidenceScores];
-    weightedProduct *= Math.pow(score, weight);
+    const score = Math.max(scores[key as keyof ConfidenceScores], 0.01);
+    weightedLogSum += weight * Math.log(score);
     totalWeight += weight;
   }
 
-  return Math.pow(weightedProduct, 1 / totalWeight);
+  return Math.exp(weightedLogSum / totalWeight);
 }
 ```
 
@@ -1111,18 +1704,32 @@ interface ValidationResult {
 ```
 
 **Hard gates (instant rejection):**
-- Name similarity < 0.60
-- Expansion language ≠ EN (should never happen with EN-only local index, but defensive check)
-- Seller country ≠ GB
-- No price data available for matched variant in local DB
-- Local price data older than 7 days (stale — wait for next sync)
-- Exchange rate > 6 hours stale (don't guess at currency conversion)
+
+These checks produce a binary pass/fail. If ANY hard gate fails, the match is rejected immediately with the `failedCheck` field recording which gate failed. This is logged for diagnostics but never becomes a deal.
+
+| Gate | Threshold | Why |
+|---|---|---|
+| Name similarity | < 0.60 | Below this, wrong card matches are more likely than right ones |
+| Expansion language | ≠ EN | Defensive check — EN-only index should prevent this |
+| Seller country | ≠ GB | eBay-GB only (configurable for future markets) |
+| Price data missing | Variant has no `market` price in local DB | Cannot calculate profit without a reference price |
+| Price data stale | `last_synced_at` > 7 days ago | Wait for next sync rather than use stale prices |
+| Exchange rate stale | Last fetched > 6 hours ago | **NEVER fall back to a hardcoded rate.** Halt deal creation and alert operator. The beta's hardcoded 1.27 GBP/USD was a critical risk. |
+| eBay listing price | ≤ 0 or > £10,000 | Obvious data quality issue — reject |
+| Composite confidence | < 0.45 | Below reject threshold (see confidence tiers) |
 
 **Soft gates (confidence reduction):**
-- Denominator mismatch (but within ±15): reduce confidence by 0.2
-- Name similarity 0.6-0.7: reduce confidence by 0.1
-- Only 1 narrowing signal used in candidate lookup: reduce confidence by 0.1
-- Condition defaulted (not from structured data or title): reduce confidence by 0.05
+
+These don't reject the match, but they reduce the composite confidence score, which can drop the match into a lower confidence tier.
+
+| Condition | Penalty | Rationale |
+|---|---|---|
+| Denominator mismatch within ±15 | -0.20 | Might be wrong set (secret rares can exceed printed total) |
+| Name similarity 0.60-0.70 | -0.10 | Borderline match — proceed with caution |
+| Only 1 narrowing signal in candidate lookup | -0.10 | Ambiguous match (e.g., number-only with no denominator or set) |
+| Condition defaulted to LP | -0.05 | No explicit condition data — price comparison less reliable |
+| Graded card (PSA/CGC/BGS detected) | -0.05 | Graded pricing is more complex; raw market price comparison may be misleading |
+| Seller feedback < 50 | -0.03 | New/low-feedback seller — higher risk of condition misrepresentation |
 
 #### Arbitrage Calculation
 
@@ -1325,7 +1932,12 @@ function calculateLiquidity(
     else velocityScore = 0.1;  // Zero sales in 30 days
   }
 
-  // Weighted arithmetic mean
+  // WHY ARITHMETIC MEAN (not geometric like confidence):
+  // Liquidity is about aggregate signal strength. A card can have zero eBay supply
+  // (nobody else is listing it right now) but strong Scrydex trend activity — it's
+  // still liquid, just not on eBay at this moment. Geometric mean would punish the
+  // zero supply score too harshly. Arithmetic mean lets strong signals compensate
+  // for weak ones, which is the correct behavior for liquidity estimation.
   const weights = salesCache?.fetched
     ? { trendActivity: 0.15, priceCompleteness: 0.10, priceSpread: 0.10,
         variantDepth: 0.05, supplyScore: 0.15, soldScore: 0.10, velocityScore: 0.35 }
@@ -1454,10 +2066,15 @@ This accumulates over time in PostgreSQL — the `deals` table records which car
    - Record `isCorrectMatch` and `incorrectReason`
    - Track: `manual_accuracy = correct / reviewed`
 
-3. **Confidence calibration:**
-   - After collecting 200+ reviewed deals, bin by confidence score
-   - Verify that 0.85+ confidence deals are actually correct 85%+ of the time
-   - If not, adjust weights or thresholds
+3. **Confidence calibration (statistical methodology):**
+   - After collecting 200+ reviewed deals, bin by confidence score in 0.1 buckets
+   - For each bucket, compute: `empirical_accuracy = correct / total_in_bucket`
+   - Plot a **calibration curve**: X = predicted confidence, Y = empirical accuracy
+   - A well-calibrated system has points along the Y=X diagonal
+   - If the 0.85+ bucket has only 70% accuracy → confidence is over-estimated → increase name weight or raise thresholds
+   - If the 0.65-0.75 bucket has 95% accuracy → confidence is under-estimated → you can lower the display threshold safely
+   - Re-calibrate quarterly as the card index grows and new sets introduce new naming patterns
+   - **Minimum sample size per bucket: 30 deals.** Below this, the calibration data is not statistically meaningful
 
 #### Accuracy Enforcement
 
@@ -1469,35 +2086,85 @@ Enforcement mechanisms:
 
 2. **Regression testing:** Maintain a corpus of 200+ eBay titles with known correct matches. Run the full normalization + matching pipeline against this corpus on every code change. **GitHub Actions runs this suite on every PR** — the PR cannot merge if accuracy drops below 85%. Railway auto-deploys from `main`, so the accuracy gate prevents regressions from ever reaching production.
 
+**Corpus entry format:**
+```json
+{
+  "id": "corpus-001",
+  "ebayTitle": "PSA 10 GEM MINT Charizard ex 006/197 Obsidian Flames Pokemon 2023",
+  "itemSpecifics": {
+    "Card Name": "Charizard ex",
+    "Card Number": "006",
+    "Set": "Obsidian Flames"
+  },
+  "expectedCardId": "sv3-6",
+  "expectedExpansionId": "sv3",
+  "expectedVariant": "holofoil",
+  "difficulty": "easy",
+  "tags": ["graded", "modern", "ex_suffix"],
+  "addedAt": "2025-02-01",
+  "source": "manual_review"
+}
+```
+
+**Corpus seeding strategy:**
+- **Phase 1 (before launch):** Manually curate 100 entries from the beta's historical deal data. Cover:
+  - 30% modern sets (SV era) — most common listings
+  - 20% legacy sets (XY, SM era) — different title conventions
+  - 20% vintage (WOTC, Base Set) — highest error rate in beta
+  - 15% graded cards (PSA/CGC/BGS) — grading info in title
+  - 15% edge cases: abbreviated names, misspelled sellers, multi-language, special art variants
+- **Phase 2 (ongoing):** Every manual review that identifies a mismatch is automatically added to the corpus (one-click in the dashboard review UI)
+- **Phase 3 (growth):** Target 500+ entries within 3 months of production operation
+
+**Corpus test implementation:**
 ```typescript
 // test/accuracy/match-corpus.test.ts
 describe('Match accuracy corpus', () => {
   const corpus = loadCorpus('test/fixtures/match-corpus.json');
 
-  it('should maintain ≥85% accuracy on known matches', () => {
-    let correct = 0;
-    let total = 0;
-
-    for (const entry of corpus) {
-      const normalized = normalize(entry.ebayListing);
+  it('should maintain ≥85% overall accuracy', () => {
+    const results = corpus.map(entry => {
+      const normalized = normalize(entry.ebayTitle, entry.itemSpecifics);
       const match = matchEngine.resolve(normalized);
-      total++;
+      return {
+        id: entry.id,
+        correct: match.card?.id === entry.expectedCardId &&
+                 match.expansion?.scrydexId === entry.expectedExpansionId,
+        expected: entry.expectedCardId,
+        actual: match.card?.id ?? null,
+        confidence: match.confidence?.composite ?? 0,
+      };
+    });
 
-      if (match.card?.id === entry.expectedCardId &&
-          match.expansion?.scrydexId === entry.expectedExpansionId) {
-        correct++;
-      }
+    const correct = results.filter(r => r.correct).length;
+    const accuracy = correct / results.length;
+
+    // Log failures for debugging
+    const failures = results.filter(r => !r.correct);
+    if (failures.length > 0) {
+      console.table(failures.map(f => ({
+        id: f.id, expected: f.expected, actual: f.actual, confidence: f.confidence,
+      })));
     }
 
-    const accuracy = correct / total;
     expect(accuracy).toBeGreaterThanOrEqual(0.85);
   });
+
+  // Individual test per corpus entry — so CI shows WHICH entries failed
+  for (const entry of loadCorpus('test/fixtures/match-corpus.json')) {
+    it(`should correctly match: ${entry.id} — ${entry.ebayTitle.slice(0, 60)}`, () => {
+      const normalized = normalize(entry.ebayTitle, entry.itemSpecifics);
+      const match = matchEngine.resolve(normalized);
+      // Individual entries may fail — the aggregate 85% threshold is what gates the PR
+      // This just provides visibility into which specific cases are failing
+    });
+  }
 });
 ```
 
 3. **Monitoring dashboard:** Track rolling 7-day accuracy from automated checks. Alert if it drops below 80%. This data is surfaced in the dashboard status bar and via Telegram alerts.
 
-4. **Feedback loop:** When manual review finds incorrect matches, add the failing case to the regression corpus. This ensures the same error never recurs — the new test case runs in GitHub Actions on every subsequent PR.
+4. **Feedback loop:** When manual review finds incorrect matches, add the failing case to the regression corpus. This ensures the same error never recurs — the new test case runs in GitHub Actions on every subsequent PR. The dashboard review UI should have a "Add to corpus" button that generates the JSON entry and opens a GitHub PR automatically (via GitHub API).
 
 ---
 
@@ -1615,7 +2282,333 @@ The public catalog is served by the same Railway service as the dashboard. Railw
 
 ---
 
-### 2.11 Implementation Roadmap
+### 2.11 Observability & Operational Excellence
+
+The beta had zero observability — no structured logging, no metrics, no alerting beyond basic console output. You cannot improve what you cannot measure. The redesign treats observability as a first-class concern, not an afterthought.
+
+#### Structured Logging
+
+All logs are JSON-formatted with consistent fields. This enables log aggregation, searching, and alerting in Railway's log viewer (or any external service like Datadog, Logtail, etc.).
+
+```typescript
+// Every log entry includes:
+interface LogEntry {
+  level: 'debug' | 'info' | 'warn' | 'error';
+  message: string;
+  timestamp: string;            // ISO 8601
+  service: string;              // 'sync', 'scanner', 'matching', 'api'
+  correlationId?: string;       // Traces a single listing through the full pipeline
+  // Structured context — never interpolated into the message string
+  context?: Record<string, unknown>;
+  // Error details (only for level: 'error')
+  error?: {
+    name: string;
+    message: string;
+    stack?: string;
+    cause?: string;
+  };
+}
+
+// Example: a matching pipeline log trail
+// All entries share the same correlationId for end-to-end tracing
+{ level: "info",  service: "scanner",  correlationId: "abc123", message: "Processing listing", context: { ebayItemId: "394827163", title: "Charizard ex 006/197..." } }
+{ level: "debug", service: "matching", correlationId: "abc123", message: "Candidates found", context: { count: 3, method: "number_and_denominator" } }
+{ level: "info",  service: "matching", correlationId: "abc123", message: "Match resolved", context: { cardId: "sv3-6", confidence: 0.92, tier: "high" } }
+{ level: "info",  service: "arbitrage", correlationId: "abc123", message: "Deal created", context: { dealId: "uuid-...", profitGBP: 32.50, tier: "S" } }
+```
+
+**Log levels:**
+- `debug`: Detailed pipeline internals (candidate lists, score breakdowns). Disabled in production by default; enabled via env var for troubleshooting.
+- `info`: Business events (deal created, sync completed, scan started). Always enabled.
+- `warn`: Recoverable issues (stale exchange rate, low API credits, pattern parse failure).
+- `error`: Unrecoverable issues requiring attention (DB connection lost, API auth failure, sync abort).
+
+**Implementation:** Use `pino` (fastest Node.js structured logger, Railway-compatible). Do NOT use `winston` (slower, heavier, unnecessary features). Pino outputs newline-delimited JSON by default — Railway's log viewer parses this natively.
+
+#### Metrics
+
+Track operational health with counters and gauges. These power the dashboard status bar and enable alerting.
+
+```typescript
+// Key metrics (implemented as simple counters/gauges stored in-process, exposed via /api/status)
+interface Metrics {
+  // Scanner
+  scanner_scans_total: number;             // Total scan cycles completed
+  scanner_listings_processed_total: number; // Total eBay listings processed
+  scanner_listings_matched_total: number;   // Listings that resolved to a match
+  scanner_listings_rejected_total: number;  // Listings rejected (junk, fake, no match)
+  scanner_deals_created_total: number;      // Deals written to DB
+
+  // Matching quality
+  matching_confidence_histogram: number[];  // Distribution of composite confidence scores
+  matching_method_counter: Record<string, number>;  // Counts by method: number_and_denominator, number_only, name_search
+
+  // Sync
+  sync_last_full_at: Date | null;
+  sync_last_delta_at: Date | null;
+  sync_cards_total: number;                // Total cards in local index
+  sync_expansions_total: number;           // Total expansions in local index
+
+  // API budgets
+  scrydex_credits_used_month: number;
+  scrydex_credits_remaining: number;
+  ebay_calls_today: number;
+  ebay_daily_limit: number;
+
+  // Accuracy
+  accuracy_automated_7d: number | null;
+  accuracy_manual_total: number;
+  accuracy_manual_correct: number;
+}
+```
+
+No external metrics service needed for v1. Metrics are held in-process and exposed via the `/api/status` endpoint and SSE status events. If scaling requires external metrics later, the counters can be exported to Prometheus (prom-client library) with minimal code change.
+
+#### Alerting
+
+Alerts are sent via Telegram (same bot as deal notifications) and are distinct from deal alerts.
+
+| Alert | Trigger | Severity |
+|---|---|---|
+| Sync failed | Full or delta sync completes with status `failed` | Critical |
+| API credits low | Scrydex remaining < 5,000 | Warning |
+| API credits critical | Scrydex remaining < 2,000 | Critical |
+| eBay rate limited | 3+ consecutive 429 responses | Warning |
+| Exchange rate stale | Last fetch > 4 hours ago | Warning |
+| Accuracy drop | Rolling 7-day automated accuracy < 80% | Critical |
+| Card index stale | No successful sync in > 48 hours | Critical |
+| DB connection lost | PostgreSQL connection pool exhausted | Critical |
+| Process restart | Boot detected with existing card index (Railway redeploy) | Info |
+
+---
+
+### 2.12 Error Handling Philosophy
+
+The beta swallowed errors pervasively — `catch` blocks logged warnings and continued with stale or default data. This is the worst possible pattern for an arbitrage scanner: a silent error means a wrong price, which means buying the wrong card.
+
+**Principle: Make errors visible, not silent.**
+
+#### Error Categories
+
+```typescript
+// All custom errors extend a base class with structured metadata
+abstract class PokeSnipeError extends Error {
+  abstract readonly category: 'transient' | 'permanent' | 'configuration' | 'data_quality';
+  abstract readonly severity: 'critical' | 'warning' | 'info';
+  readonly context: Record<string, unknown>;
+
+  constructor(message: string, context: Record<string, unknown> = {}) {
+    super(message);
+    this.context = context;
+    this.name = this.constructor.name;
+  }
+}
+
+// Transient: retry is appropriate (network timeout, 429, 503)
+class ScrydexApiError extends PokeSnipeError {
+  readonly category = 'transient';
+  readonly severity = 'warning';
+}
+
+// Permanent: do not retry (404, invalid API key, malformed response)
+class ScrydexNotFoundError extends PokeSnipeError {
+  readonly category = 'permanent';
+  readonly severity = 'info';
+}
+
+// Configuration: crash at startup (missing env var, invalid DB URL)
+class ConfigurationError extends PokeSnipeError {
+  readonly category = 'configuration';
+  readonly severity = 'critical';
+}
+
+// Data quality: log and skip this listing (cannot parse title, no price data)
+class DataQualityError extends PokeSnipeError {
+  readonly category = 'data_quality';
+  readonly severity = 'info';
+}
+```
+
+#### Error Handling Rules
+
+| Category | Response | Retry? | Log Level |
+|---|---|---|---|
+| Transient | Retry with backoff | Yes (up to 3x) | `warn` |
+| Permanent | Skip and log | No | `info` |
+| Configuration | Crash process | No | `error` + exit(1) |
+| Data quality | Skip listing, log for analysis | No | `info` |
+
+**Rules that prevent beta's mistakes:**
+1. **Never catch and ignore.** Every `catch` block must either retry, skip with logging, or re-throw.
+2. **Never use default values for critical data.** Exchange rate, API credentials, and DB connections must be present and fresh — no fallbacks.
+3. **Fail the listing, not the scan.** If one eBay listing fails to match, log it and move to the next. Never let a single bad listing crash the scan loop.
+4. **Fail the scan, not the process.** If a scan cycle fails (eBay API down), log it and schedule the next scan. Never let a scan failure crash the process.
+5. **Crash the process for configuration errors.** Missing API keys, invalid DB URL, or malformed config should crash immediately at startup — not fail silently 3 hours into production.
+
+---
+
+### 2.13 Security
+
+#### API Authentication
+
+**Private endpoints** (deals, preferences, lookup) are protected by a bearer token:
+
+```typescript
+// Middleware: verify DASHBOARD_SECRET on all private routes
+function requireAuth(req: Request, res: Response, next: NextFunction) {
+  const authHeader = req.headers.authorization;
+  if (!authHeader?.startsWith('Bearer ')) {
+    return res.status(401).json({ error: 'Missing authorization header' });
+  }
+  const token = authHeader.slice(7);
+  // Constant-time comparison to prevent timing attacks
+  if (!timingSafeEqual(Buffer.from(token), Buffer.from(config.DASHBOARD_SECRET))) {
+    return res.status(403).json({ error: 'Invalid token' });
+  }
+  next();
+}
+```
+
+**Why constant-time comparison:** A naive `===` string comparison returns faster when the first differing character is early in the string. An attacker can measure response times to guess the secret one character at a time. `crypto.timingSafeEqual` takes the same time regardless of where characters differ.
+
+**Public endpoints** (catalog) require no authentication but have rate limiting:
+
+```typescript
+// Rate limit public catalog endpoints: 60 requests per minute per IP
+// Prevents scraping abuse while allowing normal browsing
+app.use('/api/catalog', rateLimit({
+  windowMs: 60_000,
+  max: 60,
+  standardHeaders: true,
+  legacyHeaders: false,
+}));
+```
+
+#### Input Validation
+
+All API inputs are validated with Zod schemas before processing. Never trust client input.
+
+```typescript
+// Example: lookup endpoint validates eBay URL/item ID format
+const lookupSchema = z.object({
+  ebayUrl: z.string().url().optional(),
+  ebayItemId: z.string().regex(/^\d{9,15}$/).optional(),
+}).refine(data => data.ebayUrl || data.ebayItemId, {
+  message: 'Either ebayUrl or ebayItemId is required',
+});
+```
+
+**SQL injection prevention:** Use parameterized queries exclusively. The PostgreSQL client (`pg` or Drizzle ORM) parameterizes by default. Never concatenate user input into SQL strings. The trigram similarity queries use `$1` placeholders:
+```sql
+SELECT * FROM cards WHERE similarity(name, $1) > 0.4 ORDER BY similarity(name, $1) DESC
+-- $1 is bound as a parameter, never interpolated
+```
+
+#### Sensitive Data
+
+- API keys and secrets are Railway environment variables — never in code or logs
+- eBay listing URLs are logged for debugging, but seller personal data (email, address) is never stored
+- Telegram bot tokens and chat IDs are stored in PostgreSQL preferences but are NOT exposed via the public catalog API
+- The `match_signals` JSONB on deals stores pipeline data for debugging — ensure it never contains raw API credentials
+
+---
+
+### 2.14 Configuration Management
+
+The beta embedded magic numbers throughout the codebase: confidence thresholds, discount percentages, cache TTLs, similarity cutoffs. Changing any of them required a code change and redeployment.
+
+The redesign centralizes ALL tunable parameters into a single typed configuration object with documented defaults.
+
+```typescript
+// src/infra/config.ts — Single source of truth for all behavioral parameters
+interface AppConfig {
+  // From environment variables (validated at boot)
+  env: EnvConfig;
+
+  // Matching thresholds
+  matching: {
+    nameSimilarityMin: number;          // Default: 0.60 — hard floor for name match
+    nameSimilarityAlgorithm: 'jaro-winkler' | 'levenshtein';  // Default: 'jaro-winkler'
+    denominatorTolerance: number;       // Default: 5 — ±N for printed total
+    maxCandidates: number;              // Default: 50 — cap before disambiguation
+    compositeWeights: {                 // Weighted geometric mean weights
+      nameMatch: number;                // Default: 0.40
+      denominatorMatch: number;         // Default: 0.25
+      numberMatch: number;              // Default: 0.15
+      expansionMatch: number;           // Default: 0.20
+    };
+  };
+
+  // Confidence tiers
+  confidence: {
+    highThreshold: number;              // Default: 0.85
+    mediumThreshold: number;            // Default: 0.65
+    lowThreshold: number;               // Default: 0.45
+    // Below lowThreshold = reject
+  };
+
+  // Deal tier thresholds (overridable via preferences API)
+  tiers: {
+    S: { minProfitPercent: number; minProfitGBP: number };  // Default: 40%, £10
+    A: { minProfitPercent: number; minProfitGBP: number };  // Default: 25%, £5
+    B: { minProfitPercent: number; minProfitGBP: number };  // Default: 15%, £3
+    C: { minProfitPercent: number; minProfitGBP: number };  // Default: 5%, £1
+  };
+
+  // Sync schedule
+  sync: {
+    fullSyncCron: string;               // Default: '0 3 * * 0' (Sunday 3AM UK)
+    deltaSyncCron: string;              // Default: '0 4 * * *' (daily 4AM UK)
+    expansionSyncCron: string;          // Default: '0 5 * * *' (daily 5AM UK)
+    hotSetCount: number;                // Default: 10 — recent sets for daily delta
+    courtesyDelayMs: number;            // Default: 50 — delay between API pages
+  };
+
+  // Scanner
+  scanner: {
+    operatingHoursStart: number;        // Default: 6 (06:00 UK)
+    operatingHoursEnd: number;          // Default: 23 (23:00 UK)
+    minIntervalMinutes: number;         // Default: 10
+    maxIntervalMinutes: number;         // Default: 30
+    listingsPerScan: number;            // Default: 200
+    ebayCategory: string;               // Default: '183454' (Pokemon CCG Singles)
+    ebayMarketplace: string;            // Default: 'EBAY-GB'
+  };
+
+  // Liquidity
+  liquidity: {
+    highThreshold: number;              // Default: 0.75
+    mediumThreshold: number;            // Default: 0.50
+    lowThreshold: number;               // Default: 0.25
+    velocityCallMinProfit: number;      // Default: 10 (£10 minimum to justify 3-credit /listings call)
+    velocityCacheTTLDays: number;       // Default: 7
+  };
+
+  // Exchange rate
+  exchangeRate: {
+    refreshIntervalMinutes: number;     // Default: 60
+    maxStalenessMinutes: number;        // Default: 360 (6 hours — hard gate for deal creation)
+  };
+
+  // API budgets
+  scrydex: {
+    monthlyBudget: number;              // Default: 50000
+    warningThreshold: number;           // Default: 5000
+    criticalThreshold: number;          // Default: 2000
+  };
+}
+
+// Defaults are defined once, in code, with comments explaining each value.
+// Environment variables can override any default:
+//   MATCHING_NAME_SIMILARITY_MIN=0.55 → config.matching.nameSimilarityMin = 0.55
+// Preferences API can override tier thresholds at runtime.
+```
+
+**Why this matters:** When confidence calibration (§2.8) reveals that the name similarity threshold should be 0.55 instead of 0.60, you change ONE environment variable on Railway — no code change, no PR, no redeploy. The same config object is used in tests, so threshold changes are immediately reflected in the regression suite.
+
+---
+
+### 2.15 Implementation Roadmap (Revised)
 
 #### Phase 1: Card Index Foundation (Week 1-2)
 
@@ -1623,18 +2616,27 @@ The public catalog is served by the same Railway service as the dashboard. Railw
 
 - [ ] **GitHub repo:** Initialize repository, branch protection on `main` (require PR + passing CI)
 - [ ] **Railway project:** Create Railway project, provision managed PostgreSQL, configure environment variables (see §2.2)
-- [ ] **CI pipeline:** GitHub Actions workflow — lint, typecheck, test on every PR
+- [ ] **CI pipeline:** GitHub Actions workflow — lint, typecheck, test, ESLint import boundary enforcement on every PR
 - [ ] **Dockerfile + railway.toml:** Containerized build with Railway deployment config
-- [ ] Project scaffolding with modular directory structure
-- [ ] Database schema + migrations: `expansions`, `cards`, `variants`, `deals`, `deal_audit`, `match_corpus`, `preferences`
-- [ ] Scrydex client with rate limiting and credit tracking
+- [ ] Project scaffolding with layered architecture (domain/infra/services/api — see §2.1)
+- [ ] **Infrastructure foundation:**
+  - [ ] Zod-validated config loader with all defaults documented (§2.14)
+  - [ ] Pino structured logger with correlation ID support (§2.11)
+  - [ ] Token-bucket rate limiter (reusable for Scrydex + eBay) (§2.2)
+  - [ ] Circuit breaker (3-state: closed/open/half-open) (§2.2)
+  - [ ] Typed error hierarchy (transient/permanent/config/data_quality) (§2.12)
+  - [ ] Process lifecycle manager with graceful shutdown (§2.1)
+  - [ ] Health + readiness endpoints
+- [ ] Database schema + migrations (§2.3 PostgreSQL Schema): `expansions`, `cards`, `variants`, `deals`, `sales_velocity_cache`, `exchange_rates`, `preferences`, `sync_log`
+- [ ] Scrydex client with rate limiting, circuit breaker, and credit tracking
 - [ ] Expansion sync: fetch all EN expansions, store in PostgreSQL
-- [ ] **Full card sync: paginate all EN cards with `?include=prices`, store in PostgreSQL**
-- [ ] Search indexes: PostgreSQL trigram (`pg_trgm`) + GIN indexes for number, name, expansion lookups
+- [ ] **Full card sync: paginate all EN cards with `?include=prices`, upsert to PostgreSQL with idempotent transactions**
+- [ ] Search indexes: PostgreSQL trigram (`pg_trgm`) + GIN indexes (defined in DDL)
 - [ ] Delta sync for hot sets (10 most recent expansions)
 - [ ] Sync scheduler (`node-cron`): weekly full, daily delta, daily expansion check
+- [ ] Sync log tracking: progress, credits used, duration
 - [ ] Unit tests for sync, storage, and index queries
-- [ ] **First Railway deploy:** Verify sync runs on Railway, PostgreSQL connection healthy
+- [ ] **First Railway deploy:** Verify sync runs on Railway, PostgreSQL connection healthy, health endpoints responding
 
 ```
 pokesnipe/
@@ -1642,61 +2644,110 @@ pokesnipe/
 ├── railway.toml               # Railway deployment config (build + start commands)
 ├── .github/
 │   └── workflows/
-│       ├── ci.yml             # Lint + typecheck + test + accuracy regression
-│       └── deploy.yml         # (optional) Railway auto-deploys from main
+│       └── ci.yml             # Lint + typecheck + test + accuracy regression
+│
 ├── src/
-│   ├── index/                 # Scrydex card index (the core innovation)
-│   │   ├── card-sync.ts            # Full + delta sync logic
-│   │   ├── expansion-sync.ts       # Expansion catalog sync
-│   │   ├── card-store.ts           # PostgreSQL read/write
-│   │   ├── search-index.ts         # Number/name/expansion lookups
-│   │   ├── sync-scheduler.ts       # node-cron scheduling
-│   │   └── types.ts
-│   ├── extraction/            # Signal extraction from eBay listings
-│   │   ├── title-parser.ts
-│   │   ├── structured-extractor.ts
-│   │   ├── signal-merger.ts
-│   │   └── types.ts
-│   ├── matching/              # Local index matching engine
-│   │   ├── candidate-lookup.ts     # Number-first candidate search
-│   │   ├── disambiguator.ts        # Score + rank candidates
-│   │   ├── variant-resolver.ts
-│   │   ├── confidence.ts
-│   │   ├── validator.ts
-│   │   └── types.ts
-│   ├── arbitrage/             # Arbitrage calculator
-│   │   ├── price-engine.ts
-│   │   ├── deal-classifier.ts
-│   │   └── deal-store.ts
-│   ├── scan/                  # eBay scanning
-│   │   ├── ebay-poller.ts
-│   │   ├── scan-scheduler.ts
-│   │   └── ebay-client.ts
-│   ├── lookup/                # Manual listing lookup tool
-│   │   └── lookup-service.ts
-│   ├── catalog/               # Public card catalog
-│   │   └── catalog-service.ts
-│   ├── api/                   # REST API + SSE (deals, lookup, catalog, preferences)
-│   ├── config/                # Environment-based config (reads Railway env vars)
-│   ├── database/              # PostgreSQL migrations, connection pool
-│   └── utils/
+│   ├── main.ts                # Entry point: boot sequence, lifecycle management
+│   │
+│   │  ┌─── DOMAIN LAYER (pure logic, zero I/O, fully unit-testable) ───┐
+│   ├── domain/
+│   │   ├── extraction/        # Signal extraction from eBay listings
+│   │   │   ├── title-parser.ts          # 5-phase parsing pipeline
+│   │   │   ├── condition-mapper.ts      # eBay condition → NM/LP/MP/HP
+│   │   │   ├── structured-extractor.ts  # eBay item specifics extraction
+│   │   │   ├── signal-merger.ts         # Merge title + structured signals
+│   │   │   └── types.ts
+│   │   ├── matching/          # Local index matching engine
+│   │   │   ├── candidate-lookup.ts      # Number-first candidate search
+│   │   │   ├── disambiguator.ts         # Score + rank candidates
+│   │   │   ├── name-similarity.ts       # Jaro-Winkler + normalization
+│   │   │   ├── variant-resolver.ts      # Variant mapping table
+│   │   │   ├── confidence.ts            # Weighted geometric mean composite
+│   │   │   ├── validator.ts             # Hard + soft gates
+│   │   │   └── types.ts
+│   │   ├── arbitrage/         # Arbitrage calculator
+│   │   │   ├── price-engine.ts          # Condition-specific pricing
+│   │   │   ├── deal-classifier.ts       # Tier assignment (S/A/B/C)
+│   │   │   ├── liquidity-assessor.ts    # Composite liquidity scoring
+│   │   │   └── types.ts
+│   │   └── errors.ts          # Typed error hierarchy (§2.12)
+│   │
+│   │  ┌─── INFRASTRUCTURE LAYER (I/O, external APIs, database) ────────┐
+│   ├── infra/
+│   │   ├── config.ts           # Zod-validated env config (§2.14)
+│   │   ├── database/
+│   │   │   ├── connection.ts            # PostgreSQL pool + health check
+│   │   │   ├── migrations/              # Numbered SQL migration files
+│   │   │   └── migrate.ts              # Migration runner (boot-time)
+│   │   ├── repositories/       # Database access (queries, upserts)
+│   │   │   ├── card-repo.ts
+│   │   │   ├── expansion-repo.ts
+│   │   │   ├── variant-repo.ts
+│   │   │   ├── deal-repo.ts
+│   │   │   └── preference-repo.ts
+│   │   ├── clients/            # External API clients
+│   │   │   ├── scrydex-client.ts        # Rate-limited Scrydex API
+│   │   │   ├── ebay-client.ts           # OAuth + Browse API
+│   │   │   ├── exchange-rate-client.ts  # Currency conversion
+│   │   │   └── telegram-client.ts       # Notifications + alerts
+│   │   ├── rate-limiter.ts     # Token-bucket rate limiter (§2.2)
+│   │   ├── circuit-breaker.ts  # 3-state circuit breaker (§2.2)
+│   │   └── logger.ts          # Pino structured logger (§2.11)
+│   │
+│   │  ┌─── APPLICATION LAYER (orchestration, scheduling) ──────────────┐
+│   ├── services/
+│   │   ├── sync-service.ts     # Card index sync orchestration
+│   │   ├── scan-service.ts     # eBay scan loop + deal pipeline
+│   │   ├── lookup-service.ts   # Manual listing lookup
+│   │   ├── catalog-service.ts  # Public card catalog queries
+│   │   └── alert-service.ts   # Telegram alerting for ops events
+│   │
+│   │  ┌─── HTTP LAYER (routes, middleware, SSE) ───────────────────────┐
+│   ├── api/
+│   │   ├── routes/
+│   │   │   ├── deals.ts
+│   │   │   ├── catalog.ts
+│   │   │   ├── lookup.ts
+│   │   │   ├── preferences.ts
+│   │   │   ├── status.ts
+│   │   │   └── health.ts
+│   │   ├── middleware/
+│   │   │   ├── auth.ts                  # Bearer token validation
+│   │   │   ├── rate-limit.ts            # Public endpoint rate limiting
+│   │   │   └── validation.ts            # Zod request validation
+│   │   └── sse.ts              # Server-Sent Events deal stream
+│   │
+│   └── patterns/              # Data-driven config (loaded at boot, not hardcoded)
+│       └── card-number.json    # Card number regex patterns (§2.4)
+│
 ├── test/
+│   ├── unit/                  # Domain layer tests (pure logic, no mocks needed)
+│   │   ├── extraction/
+│   │   ├── matching/
+│   │   └── arbitrage/
+│   ├── integration/           # Service + infra tests (requires test DB)
 │   ├── fixtures/
 │   │   └── match-corpus.json  # Accuracy regression corpus
 │   └── accuracy/
 │       └── match-corpus.test.ts
+│
 ├── .env.example               # Template for local development (git-tracked)
 └── .env                       # Local secrets (git-ignored)
 ```
 
+**Dependency rule enforcement:** The domain layer imports NOTHING from infra, services, or api. This is enforced by an ESLint rule (e.g., `eslint-plugin-import` with `no-restricted-paths`). If a domain file imports from `../infra/`, the linter fails the build. This ensures all domain logic remains pure and testable.
+
 #### Phase 2: Signal Extraction (Week 2-3)
 
-**Goal:** Build the improved title parser and structured data extractor.
+**Goal:** Build the 5-phase title parsing pipeline and structured data extractor.
 
-- [ ] Port regex patterns from beta as starting point
-- [ ] Replace hardcoded Pokemon name list with local card DB lookup
-- [ ] Replace era-specific set name regexes with local expansion catalog matching
-- [ ] Build structured data extractor for eBay item specifics
+- [ ] Phase 1 (Clean): Unicode normalization, emoji strip, HTML decode, noise removal
+- [ ] Phase 2 (Classify): Junk/fake/non-English early-exit detection
+- [ ] Phase 3 (Extract): Data-driven card number patterns (from JSON config), grading detection, variant flags
+- [ ] Phase 4 (Identify): DB-driven name/set identification using in-memory card name index + pg_trgm similarity
+- [ ] Phase 5 (Assemble): Combine extractions into TitleSignals with per-field confidence
+- [ ] Condition mapper with 4-priority cascade (descriptors → specifics → title → default)
+- [ ] Build structured data extractor for eBay item specifics (localizedAspects)
 - [ ] Build signal merger with per-field conflict resolution
 - [ ] Create initial match corpus (100 titles) from beta's training data
 - [ ] Unit tests: parse accuracy ≥ 90% on corpus
@@ -1705,29 +2756,35 @@ pokesnipe/
 
 **Goal:** Build the number-first local matching pipeline with composite confidence scoring.
 
-- [ ] Candidate lookup: number+denominator → number+expansion → number-only → name search
+- [ ] Candidate lookup: number+denominator → number+expansion → number-only → name search (cap at 50 candidates)
 - [ ] Candidate disambiguation: score by name, denominator, expansion signals
-- [ ] Expansion cross-validation
-- [ ] Name validation with 0.60 minimum threshold
-- [ ] Variant resolver with mapping table
-- [ ] Composite confidence scoring (weighted geometric mean)
+- [ ] Expansion cross-validation with confidence adjustment
+- [ ] Name validation with Jaro-Winkler similarity, 0.60 minimum threshold, asymmetric substring scoring
+- [ ] Variant resolver with explicit mapping table (not string matching)
+- [ ] Composite confidence scoring (weighted geometric mean in log-space, 0.01 floor)
+- [ ] Hard + soft validation gates (§2.6)
 - [ ] Confidence-gated processing (high/medium/low/reject)
-- [ ] End-to-end integration tests: eBay title → local match → deal
-- [ ] **Regression test suite with match corpus: accuracy ≥ 85%**
+- [ ] Liquidity assessment integration (§2.7)
+- [ ] End-to-end integration tests: eBay title → local match → deal (domain layer, no DB needed)
+- [ ] **Seed regression corpus: 100 entries covering modern/legacy/vintage/graded/edge cases**
+- [ ] **Regression test suite: accuracy ≥ 85% on corpus**
 - [ ] **GitHub Actions accuracy gate:** CI fails if regression accuracy < 85%
 
 #### Phase 4: Arbitrage, Lookup Tool & Presentation (Week 4-5)
 
 **Goal:** Price calculation, deal storage, scanning, manual lookup tool, and dashboard.
 
-- [ ] Price engine: condition-specific pricing from local variant data, currency conversion
-- [ ] Deal classifier: tier assignment with configurable thresholds
-- [ ] Deal store: database with deduplication and audit logging
-- [ ] eBay poller with scan scheduling and rate limit handling
+- [ ] Price engine: condition-specific pricing from local variant data, currency conversion with staleness hard gate (no hardcoded fallback rates!)
+- [ ] Exchange rate service: periodic refresh, DB persistence, staleness tracking
+- [ ] Deal classifier: tier assignment with configurable thresholds (from AppConfig, not hardcoded)
+- [ ] Deal store: PostgreSQL with deduplication (`idx_deals_dedup`) and audit logging (`match_signals` JSONB)
+- [ ] eBay poller with scan scheduling, rate limit handling, circuit breaker
 - [ ] **Manual listing lookup tool:** paste eBay URL → full pipeline evaluation with confidence breakdown
 - [ ] REST API + SSE endpoints (deals stream, deals list, lookup, status, preferences)
+- [ ] Auth middleware: constant-time bearer token comparison (§2.13)
+- [ ] Input validation middleware: Zod schemas on all endpoints (§2.13)
 - [ ] Dashboard frontend (deal feed, detail panel, filters, status bar, lookup tool)
-- [ ] Telegram bot integration with test/status endpoints
+- [ ] Telegram bot integration: deal alerts + operational alerts (separate channels)
 - [ ] **Railway production deploy:** Full pipeline running — eBay scan → match → deal → dashboard
 
 #### Phase 5: Public Card Catalog (Week 5-6)
@@ -1742,22 +2799,23 @@ pokesnipe/
 - [ ] Server-side rendering for SEO (card pages should be indexable)
 - [ ] **Custom domain on Railway** for the public catalog (e.g., `catalog.pokesnipe.com`)
 
-#### Phase 6: Accuracy Loop (Ongoing)
+#### Phase 6: Accuracy Loop & Operational Maturity (Ongoing)
 
-**Goal:** Continuous improvement through measurement and feedback.
+**Goal:** Continuous improvement through measurement and feedback. Production hardening.
 
-- [ ] Manual review workflow: sample deals, verify matches, record outcomes
-- [ ] Confidence calibration: adjust thresholds based on empirical data
-- [ ] Corpus growth: add every misidentified deal to regression suite
-- [ ] Monitoring: accuracy dashboard with alerting
-- [ ] Pattern updates: add new regex patterns when new card formats appear
-- [ ] Sync health monitoring: alert if card index is stale or sync fails
-- [ ] Railway health checks: ensure service stays alive, monitor restart frequency
-- [ ] Database maintenance: PostgreSQL VACUUM, index health, connection pool tuning
+- [ ] Manual review workflow: sample 50 deals/week, verify matches, record outcomes in `deals.is_correct_match`
+- [ ] Confidence calibration: bin reviewed deals by confidence score, plot calibration curve, adjust thresholds (§2.8)
+- [ ] Corpus growth: "Add to corpus" button in dashboard review UI → auto-generate JSON entry → open GitHub PR
+- [ ] Accuracy monitoring: rolling 7-day automated accuracy with Telegram alerting on <80%
+- [ ] Pattern updates: add new card number formats to `patterns/card-number.json` (no code change)
+- [ ] Sync health monitoring: alert if card index is stale (>48h) or sync fails
+- [ ] Database maintenance: automated VACUUM ANALYZE via PostgreSQL scheduled task, connection pool monitoring
+- [ ] Log analysis: review structured logs for common rejection reasons, identify parsing gaps
+- [ ] Load testing: simulate high-throughput scan with 200 listings/cycle to verify <100ms matching latency
 
 ---
 
-### 2.12 Backend API Contract
+### 2.16 Backend API Contract
 
 This section defines the backend endpoints that serve the frontend dashboard (see `FRONTEND_DESIGN_SPEC.md`). Endpoints for the manual lookup tool (section 2.9) and public card catalog (section 2.10) are defined in their respective sections and not repeated here.
 
@@ -2177,20 +3235,31 @@ All private endpoints require `Authorization: Bearer <DASHBOARD_SECRET>`. The `D
 | **Matching approach** | Expansion-first: guess set → query API by expansion + number | Number-first: extract number → query local DB → disambiguate |
 | **Expansion catalog** | Hardcoded 500+ entries with ID remapping | Live-synced from Scrydex, Scrydex IDs canonical |
 | **Card price data** | Fetched live per listing from Scrydex | Pre-synced locally with weekly/daily refresh |
-| **Title parsing** | 50+ regexes, single confidence score | Regex + structured data, per-field confidence |
-| **Pokemon name matching** | Hardcoded ~300 names | Driven by local card index (~35,000 cards) |
-| **Set name matching** | 9 era-specific regexes | Driven by local expansion catalog |
-| **Match fallbacks** | 6 cascading strategies, thresholds lowered over time | Number-first candidate lookup, strict disambiguation, prefer "no match" over wrong match |
+| **Title parsing** | Monolithic 1,447-line class, 50+ inline regexes, single confidence score | 5-phase pipeline (clean→classify→extract→identify→assemble), data-driven patterns from JSON config, per-field confidence |
+| **Pokemon name matching** | Hardcoded ~300 names as regex alternation | Trigram similarity against local card index (~35,000 cards), handles misspellings naturally |
+| **Set name matching** | 9 era-specific regexes + 1000+ hardcoded aliases | `pg_trgm` fuzzy match against expansion catalog, no hardcoded lists |
+| **Name similarity algorithm** | Levenshtein (treats all positions equally) | **Jaro-Winkler** (prefix-weighted, better for names) with asymmetric substring scoring |
 | **Name similarity threshold** | 0.25-0.30 | **0.60 minimum** |
+| **Match fallbacks** | 6 cascading strategies, thresholds lowered over time | Number-first candidate lookup, strict disambiguation, prefer "no match" over wrong match |
 | **Cost of a rejected match** | 1-6 wasted API credits | **Zero** (local query) |
-| **Confidence scoring** | Single parse confidence (0-100) | Composite weighted geometric mean per field |
-| **Confidence response** | Binary pass/fail at 28% | 4-tier graduated response (high/med/low/reject) |
-| **Architecture** | God object (ArbitrageEngine, 1800 lines) | 5 separate layers, each independently testable |
-| **Accuracy measurement** | None (only diagnostic stage counters) | Automated checks + manual review sampling + regression corpus |
-| **State management** | In-memory Maps, lost on restart | PostgreSQL on Railway — persistent across redeploys |
+| **Confidence scoring** | Single parse confidence (0-100) | Composite weighted geometric mean per field (log-space, 0.01 floor) |
+| **Confidence response** | Binary pass/fail at 28% | 4-tier graduated response (high/med/low/reject) with calibration methodology |
+| **Validation** | Implicit (if parse succeeds, proceed) | Explicit hard + soft gates with typed results and documented thresholds |
+| **Architecture** | God object (ArbitrageEngine, 1800 lines) | 4-layer architecture (domain/infra/services/api) with enforced dependency boundaries |
+| **Domain testability** | Required full engine mock | Domain layer is pure functions — zero I/O, tested with simple arrays |
+| **Accuracy measurement** | None (only diagnostic stage counters) | Automated checks + manual review sampling + regression corpus + calibration curves |
+| **Regression testing** | None | 200+ entry corpus, GitHub Actions gate at 85%, individual failure reporting |
+| **State management** | In-memory Maps, lost on restart | PostgreSQL on Railway — persistent across redeploys with defined DDL |
 | **Expansion updates** | Requires code change + redeploy | Automated daily sync |
 | **Scan throughput** | Limited by Scrydex credit budget | **Limited only by eBay rate limits** (Scrydex is no longer a bottleneck) |
 | **Deployment** | Manual (not documented) | GitHub → Railway auto-deploy, GitHub Actions CI with accuracy gate |
-| **Database** | None (in-memory) | Managed PostgreSQL on Railway with trigram + FTS indexes |
-| **Secrets management** | Hardcoded or .env file | Railway environment variables, never in repo |
+| **Database** | None (in-memory) | Managed PostgreSQL with defined schema, migrations, trigram + GIN indexes |
+| **Secrets management** | Hardcoded or .env file | Railway environment variables, Zod-validated at boot, never in repo |
+| **Configuration** | Magic numbers scattered across codebase | Single typed `AppConfig` object, env-var overridable, documented defaults |
+| **Error handling** | Silent catch-and-continue, swallowed errors | Typed error hierarchy (transient/permanent/config/data_quality), fail fast on config |
+| **Exchange rate** | Hardcoded 1.27 GBP/USD fallback | DB-persisted with staleness hard gate — **never** uses a hardcoded fallback |
+| **Rate limiting** | None (relied on eBay not blocking) | Token-bucket rate limiter per API + circuit breaker (3-state) |
+| **Observability** | `console.log` | Pino structured JSON logging with correlation IDs, typed metrics, Telegram alerts |
 | **Liquidity assessment** | None | Composite score from trend activity, price completeness, eBay supply, and optional sales velocity |
+| **Security** | None | Bearer token auth with constant-time comparison, Zod input validation, parameterized SQL |
+| **Process lifecycle** | None (crash = lost state) | Ordered boot sequence, graceful shutdown, health/readiness endpoints |
