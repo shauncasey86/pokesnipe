@@ -1,4 +1,5 @@
 import { pool } from "../db/pool";
+import { getApiUsageToday } from "./apiUsageTracker";
 
 export const getStatus = async () => {
   const dealsToday = await pool.query(
@@ -14,13 +15,34 @@ export const getStatus = async () => {
   );
   const accRow = acc.rows[0];
   const rolling7d = accRow.total > 0 ? accRow.correct / accRow.total : null;
+
+  // Scanner lastRun — query scanner_runs table
+  const scannerRun = await pool.query(
+    "SELECT started_at, finished_at, status, deals_found FROM scanner_runs ORDER BY started_at DESC LIMIT 1"
+  );
+  const lastRun = scannerRun.rows[0] ?? null;
+  const scannerStatus = lastRun
+    ? lastRun.status === "running" ? "running"
+      : lastRun.finished_at && (Date.now() - new Date(lastRun.finished_at).getTime()) < 30 * 60 * 1000 ? "hunting"
+      : "stale"
+    : "hunting";
+
+  // API usage — query actual daily counts
+  const [ebayUsed, scrydexUsed] = await Promise.all([
+    getApiUsageToday("ebay"),
+    getApiUsageToday("scrydex")
+  ]);
+
   return {
-    scanner: { status: "hunting", lastRun: null },
+    scanner: {
+      status: scannerStatus,
+      lastRun: lastRun?.finished_at ?? lastRun?.started_at ?? null
+    },
     dealsToday: dealsToday.rows[0],
     accuracy: { rolling7d },
     apis: {
-      ebay: { used: 0, cap: 5000 },
-      scrydex: { used: 0, cap: 50000 },
+      ebay: { used: ebayUsed, cap: 5000 },
+      scrydex: { used: scrydexUsed, cap: 50000 },
       index: { count: cardCount.rows[0]?.count ?? 0, lastSync: sync.rows[0]?.finished_at ?? null }
     }
   };

@@ -13,6 +13,7 @@ router.get("/", requireAuth, async (req, res, next) => {
     const { rows } = await pool.query(
       `SELECT d.id, d.event_id, d.ebay_url, d.ebay_title, d.ebay_image, d.ebay_price_gbp, d.ebay_shipping_gbp,
               d.market_price_usd, d.fx_rate, d.profit_gbp, d.profit_pct, d.confidence, d.liquidity, d.condition, d.tier,
+              d.match_details, d.comps_by_condition, d.liquidity_breakdown,
               d.created_at, c.name as card_name, c.card_number, e.name as expansion_name, e.code
        FROM deals d
        JOIN cards c ON d.card_id = c.id
