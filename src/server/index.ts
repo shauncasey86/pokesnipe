@@ -68,7 +68,11 @@ app.get("/api/deals/stream", requireAuth, async (req, res) => {
   }
   sendEvent(res, "ping", { time: Date.now() });
   clients.add(res);
+  const pingTimer = setInterval(() => {
+    sendEvent(res, "ping", { time: Date.now() });
+  }, 15000);
   req.on("close", () => {
+    clearInterval(pingTimer);
     clients.delete(res);
   });
 });
