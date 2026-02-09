@@ -1,0 +1,56 @@
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=DM+Mono:wght@400;500&display=swap');
+*{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg0:#070a12;--bg1:#0c1019;--bg2:rgba(14,19,32,0.75);--bg3:rgba(20,26,42,0.65);
+  --glass:rgba(255,255,255,0.035);--glass2:rgba(255,255,255,0.055);--glass3:rgba(255,255,255,0.08);
+  --brd:rgba(255,255,255,0.055);--brd2:rgba(255,255,255,0.09);--brd3:rgba(255,255,255,0.14);
+  --tMax:#f4f6f9;--tPri:#dce1eb;--tSec:#8290a8;--tMut:#4d5a72;--tGho:#2d3650;
+  --green:#34d399;--greenB:#6ee7b7;--greenGlow:rgba(52,211,153,0.15);
+  --red:#f87171;--amber:#fbbf24;--blue:#60a5fa;--purple:#c084fc;
+  --fd:'Plus Jakarta Sans',system-ui,sans-serif;--fm:'DM Mono',monospace;
+  --r-sm:8px;--r-md:12px;--r-lg:16px;--r-xl:20px;--r-pill:999px;
+  --ease:cubic-bezier(0.16,1,0.3,1);--snap:cubic-bezier(0.3,0,0,1);
+}
+body{font-family:var(--fd);background:var(--bg0);color:var(--tPri);overflow:hidden}
+button{cursor:pointer;font-family:inherit;border:none;background:none;color:inherit}
+input{font-family:inherit;border:none;outline:none}
+:focus-visible{outline:2px solid var(--blue);outline-offset:2px}
+::selection{background:var(--blue);color:white}
+::-webkit-scrollbar{width:5px}::-webkit-scrollbar-track{background:transparent}::-webkit-scrollbar-thumb{background:rgba(255,255,255,0.07);border-radius:5px}
+
+.app-root{height:100vh;display:flex;flex-direction:column}
+.header{height:58px;display:flex;align-items:center;justify-content:space-between;padding:0 20px;border-bottom:1px solid var(--brd);background:var(--bg1);position:relative}
+.header::after{content:"";position:absolute;bottom:0;left:0;right:0;height:2px;background:linear-gradient(90deg, #34d399 0%, #60a5fa 40%, #c084fc 70%, #ff6b6b 100%);opacity:0.4}
+.header .brand{display:flex;align-items:center;gap:10px;font-weight:700;color:var(--tMax)}
+.header .brand span{color:var(--red)}
+.header .actions{display:flex;align-items:center;gap:10px}
+.live-pill{display:flex;align-items:center;gap:6px;padding:6px 10px;border-radius:var(--r-pill);background:var(--glass);border:1px solid var(--brd);font-family:var(--fm);font-size:10px;letter-spacing:1.5}
+
+.filter-bar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:10px 20px;border-bottom:1px solid var(--brd);background:var(--bg0)}
+.filter-group{display:flex;align-items:center;gap:6px;padding:4px 8px;border-radius:var(--r-pill);background:var(--glass);border:1px solid var(--brd);height:30px}
+.filter-group span{font-family:var(--fm);font-size:8px;letter-spacing:2px;color:var(--tGho)}
+.filter-chip{height:24px;padding:0 8px;border-radius:var(--r-pill);font-family:var(--fm);font-size:9px;letter-spacing:1.2;border:1px solid transparent}
+.filter-chip.active{background:var(--glass2);border-color:var(--brd3);color:var(--tMax)}
+
+.content{flex:1;display:grid;grid-template-columns:1fr 440px;min-height:0}
+.feed{overflow-y:auto;border-right:1px solid var(--brd)}
+.detail{overflow-y:auto;background:var(--bg1)}
+
+.footer{height:42px;display:flex;justify-content:space-between;align-items:center;padding:0 16px;border-top:1px solid var(--brd);background:rgba(7,10,18,0.9);backdrop-filter:blur(12px)}
+.footer .zone{display:flex;align-items:center}
+.footer .zone > div{display:flex;align-items:center;gap:6px;padding:0 12px;border-left:1px solid var(--brd)}
+.footer .zone > div:first-child{border-left:none}
+.footer span{font-size:10px}
+
+.login{height:100vh;display:flex;align-items:center;justify-content:center;background:radial-gradient(ellipse at 50% 30%, #0f1628 0%, var(--bg0) 70%)}
+.login-card{width:360px;max-width:90vw;background:var(--bg1);border:1px solid var(--brd2);border-radius:var(--r-xl);padding:26px;display:flex;flex-direction:column;gap:16px;align-items:center}
+.login-card input{width:100%;height:48px;padding:0 16px;border-radius:var(--r-md);background:var(--glass);border:1px solid var(--brd2);color:var(--tMax)}
+.login-card button{width:100%;height:48px;border-radius:var(--r-md);background:var(--glass2);border:1px solid var(--brd3);font-weight:700;letter-spacing:1.5}
+
+@keyframes fadeSlide{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
+@keyframes toastSlide{from{opacity:0;transform:translateY(-8px)}to{opacity:1;transform:translateY(0)}}
+
+@media (max-width: 1024px){
+  .content{grid-template-columns:1fr}
+  .detail{display:none}
+}
