@@ -25,6 +25,7 @@
   - [2.14 Configuration Management](#214-configuration-management) **NEW** *(typed AppConfig, env-var overrides)*
   - [2.15 Implementation Roadmap](#215-implementation-roadmap) *(revised with infrastructure tasks)*
   - [2.16 Backend API Contract](#216-backend-api-contract)
+  - [2.17 Testing Strategy](#217-testing-strategy) **NEW** *(4-layer test pyramid, external API fixtures, CI pipeline)*
 
 ---
 
@@ -2987,7 +2988,10 @@ interface AppConfig {
 - [ ] Delta sync for hot sets (10 most recent expansions)
 - [ ] Sync scheduler (`node-cron`): weekly full, daily delta, daily expansion check
 - [ ] Sync log tracking: progress, credits used, duration
-- [ ] Unit tests for sync, storage, and index queries
+- [ ] **Testing foundation:** Vitest setup, test database provisioning scripts, nock/msw fixture infrastructure
+- [ ] Unit tests for sync logic, storage, and index queries
+- [ ] Integration tests for Scrydex client (recorded HTTP fixtures, rate limiter, circuit breaker) (§2.17)
+- [ ] Integration tests for database repositories (card, expansion, variant upserts, trigram queries) (§2.17)
 - [ ] **First Railway deploy:** Verify sync runs on Railway, PostgreSQL connection healthy, health endpoints responding
 
 ```
@@ -3079,12 +3083,26 @@ pokesnipe/
 │   ├── unit/                  # Domain layer tests (pure logic, no mocks needed)
 │   │   ├── extraction/
 │   │   ├── matching/
-│   │   └── arbitrage/
+│   │   └── arbitrage/         # Includes buyer-protection-fee.test.ts
 │   ├── integration/           # Service + infra tests (requires test DB)
+│   │   ├── repositories/
+│   │   ├── clients/           # Scrydex/eBay client tests (nock fixtures)
+│   │   ├── credentials/       # API key encryption round-trip tests
+│   │   └── services/
+│   ├── api/                   # HTTP endpoint tests (supertest)
+│   │   ├── auth.test.ts       # GitHub OAuth flow
+│   │   ├── middleware/        # Auth gating, validation
+│   │   ├── routes/            # deals, settings, preferences, lookup
+│   │   └── sse.test.ts        # SSE stream behavior
 │   ├── fixtures/
-│   │   └── match-corpus.json  # Accuracy regression corpus
-│   └── accuracy/
-│       └── match-corpus.test.ts
+│   │   ├── match-corpus.json  # Accuracy regression corpus
+│   │   ├── scrydex/           # Recorded Scrydex API responses
+│   │   ├── ebay/              # Recorded eBay API responses
+│   │   └── github/            # Mock GitHub OAuth responses
+│   ├── accuracy/
+│   │   └── match-corpus.test.ts
+│   └── e2e/                   # Full pipeline smoke tests (nightly CI)
+│       └── full-pipeline.test.ts
 │
 ├── .env.example               # Template for local development (git-tracked)
 └── .env                       # Local secrets (git-ignored)
@@ -3142,6 +3160,12 @@ pokesnipe/
 - [ ] Input validation middleware: Zod schemas on all endpoints (§2.13)
 - [ ] Dashboard frontend (deal feed, detail panel, filters, status bar, lookup tool, login page)
 - [ ] Telegram bot integration: deal alerts + operational alerts (separate channels)
+- [ ] **Testing — API endpoints (supertest):** Auth flow, deal CRUD, settings, preferences, SSE stream, input validation (§2.17)
+- [ ] **Testing — Buyer Protection fee:** Unit tests for all tiered bands, edge cases, multi-quantity (§2.17)
+- [ ] **Testing — GitHub OAuth:** Callback, session expiry, allowlist rejection, logout (§2.17)
+- [ ] **Testing — API key management:** Encryption round-trip, test/validate endpoints, env var fallback (§2.17)
+- [ ] **Testing — eBay client:** Recorded fixtures for Browse API, OAuth token refresh, rate limiting (§2.17)
+- [ ] **Testing — Frontend components:** Deal feed, price breakdown, login page, API key setup (§2.17)
 - [ ] **Railway production deploy:** Full pipeline running — GitHub login → eBay scan → match → deal → dashboard
 
 #### Phase 5: Public Card Catalog (Week 5-6)
@@ -3169,6 +3193,8 @@ pokesnipe/
 - [ ] Database maintenance: automated VACUUM ANALYZE via PostgreSQL scheduled task, connection pool monitoring
 - [ ] Log analysis: review structured logs for common rejection reasons, identify parsing gaps
 - [ ] Load testing: simulate high-throughput scan with 200 listings/cycle to verify <100ms matching latency
+- [ ] **E2E smoke tests:** Full pipeline tests (sync → scan → match → deal → SSE), nightly CI run (§2.17)
+- [ ] **Fixture refresh:** Periodically re-record Scrydex/eBay HTTP fixtures to catch API changes early (§2.17)
 
 ---
 
@@ -3591,7 +3617,470 @@ All private endpoints require a valid GitHub OAuth session (httpOnly JWT cookie)
 
 ---
 
-### Summary of Key Differences from Beta
+### 2.17 Testing Strategy
+
+The beta had no automated tests. The redesign requires tests at every layer — from pure domain logic through API clients to HTTP endpoints. Tests are the safety net that enables confident refactoring and prevents regressions from reaching production.
+
+#### Testing Layers
+
+```
+┌───────────────────────────────────────────────────────────────┐
+│  Layer 4: E2E Smoke Tests                                      │
+│  Full pipeline: eBay listing → match → deal → SSE → dashboard │
+│  Run: manually / nightly CI                                    │
+│  Count: ~10 critical paths                                     │
+├───────────────────────────────────────────────────────────────┤
+│  Layer 3: API Endpoint Tests (supertest)                       │
+│  HTTP routes, auth, validation, SSE, error responses           │
+│  Run: every PR (GitHub Actions)                                │
+│  Count: ~50-80 tests                                           │
+├───────────────────────────────────────────────────────────────┤
+│  Layer 2: Integration Tests (test DB)                          │
+│  Repositories, API clients, sync service, scan pipeline        │
+│  Run: every PR (GitHub Actions, needs test PostgreSQL)         │
+│  Count: ~30-50 tests                                           │
+├───────────────────────────────────────────────────────────────┤
+│  Layer 1: Unit Tests (pure logic, no I/O)                      │
+│  Domain layer: parsing, matching, scoring, fee calc            │
+│  Run: every PR (GitHub Actions)                                │
+│  Count: ~150-200 tests                                         │
+│  + Accuracy regression corpus (200+ entries)                   │
+└───────────────────────────────────────────────────────────────┘
+```
+
+**Test runner:** Vitest (fast, native TypeScript, compatible with Node.js). Test database provisioned in CI via GitHub Actions service containers (PostgreSQL).
+
+#### Layer 1: Unit Tests (Domain Layer)
+
+The domain layer is pure logic with zero I/O — every function takes typed inputs and returns typed outputs. No mocks needed.
+
+```typescript
+// test/unit/arbitrage/buyer-protection-fee.test.ts
+describe('calculateBuyerProtectionFee', () => {
+  it('charges flat fee + 7% on items under £20', () => {
+    const result = calculateBuyerProtectionFee(10);
+    expect(result.flatFee).toBe(0.10);
+    expect(result.percentageFee).toBeCloseTo(0.70);  // £10 × 7%
+    expect(result.totalFee).toBeCloseTo(0.80);
+  });
+
+  it('applies tiered bands for items crossing thresholds', () => {
+    const result = calculateBuyerProtectionFee(50);
+    // £0.10 + (£20 × 7%) + (£30 × 4%) = £0.10 + £1.40 + £1.20 = £2.70
+    expect(result.totalFee).toBeCloseTo(2.70);
+  });
+
+  it('caps fee at £4,000 — no charge above that', () => {
+    const result = calculateBuyerProtectionFee(5000);
+    const resultCapped = calculateBuyerProtectionFee(10000);
+    expect(result.totalFee).toBe(resultCapped.totalFee);
+  });
+
+  it('charges flat fee once for multi-quantity listings', () => {
+    const single = calculateBuyerProtectionFee(10, 1);
+    const multi = calculateBuyerProtectionFee(30, 3);  // 3 × £10
+    expect(multi.flatFee).toBe(single.flatFee);  // £0.10 once
+    expect(multi.percentageFee).toBeCloseTo(single.percentageFee * 3);
+  });
+});
+
+// test/unit/extraction/title-parser.test.ts
+describe('TitleParser', () => {
+  it('extracts card number from standard format', () => { ... });
+  it('handles missing card number gracefully', () => { ... });
+  it('strips emoji and unicode noise', () => { ... });
+  it('detects and rejects junk/fake listings', () => { ... });
+});
+
+// test/unit/matching/name-similarity.test.ts
+describe('Jaro-Winkler similarity', () => {
+  it('scores exact matches at 1.0', () => { ... });
+  it('scores prefix matches higher (Winkler bonus)', () => { ... });
+  it('handles common misspellings above 0.60 threshold', () => { ... });
+  it('rejects completely different names below 0.60', () => { ... });
+});
+
+// test/unit/matching/confidence.test.ts
+describe('Composite confidence scoring', () => {
+  it('calculates weighted geometric mean in log-space', () => { ... });
+  it('applies 0.01 floor to prevent zero-multiplication', () => { ... });
+  it('classifies into correct tier (high/medium/low/reject)', () => { ... });
+});
+```
+
+**Accuracy regression corpus** (see §2.8): A JSON file of 200+ eBay titles with known correct matches. The full parsing + matching pipeline runs against this corpus in CI. The PR fails if accuracy drops below 85%. This is the most important test suite — it catches real-world regressions that unit tests miss.
+
+#### Layer 2: Integration Tests (Infrastructure + Services)
+
+These tests require a running PostgreSQL instance (GitHub Actions service container). They test the boundaries between the application and external systems.
+
+**Database repositories:**
+```typescript
+// test/integration/repositories/card-repo.test.ts
+describe('CardRepository', () => {
+  let db: Pool;
+
+  beforeAll(async () => {
+    db = await createTestDatabase();       // Fresh test DB with migrations applied
+    await seedTestCards(db);               // Insert known card fixtures
+  });
+
+  afterAll(async () => {
+    await db.end();
+  });
+
+  it('upserts cards idempotently (same card twice = one row)', () => { ... });
+  it('finds candidates by card number', () => { ... });
+  it('returns trigram matches above 0.4 similarity', () => { ... });
+  it('handles concurrent upserts without deadlocks', () => { ... });
+});
+```
+
+**External API clients (Scrydex, eBay) — tested with recorded HTTP fixtures:**
+
+The Scrydex and eBay clients are tested against **recorded HTTP responses**, not live APIs. This avoids burning API credits in CI, eliminates flaky tests from network issues, and makes tests deterministic.
+
+```typescript
+// test/integration/clients/scrydex-client.test.ts
+// Uses nock or msw to intercept HTTP and replay recorded fixtures
+describe('ScrydexClient', () => {
+  it('paginates card sync correctly (follows hasMore)', () => {
+    // Fixture: 3 pages of cards, last page has hasMore=false
+    nock('https://api.scrydex.com')
+      .get('/pokemon/v1/cards').query({ page: 1 }).reply(200, fixtures.page1)
+      .get('/pokemon/v1/cards').query({ page: 2 }).reply(200, fixtures.page2)
+      .get('/pokemon/v1/cards').query({ page: 3 }).reply(200, fixtures.page3LastPage);
+
+    const cards = await client.syncAllCards();
+    expect(cards).toHaveLength(300);  // 100 per page × 3
+  });
+
+  it('respects rate limiter (delays between requests)', () => { ... });
+  it('retries transient errors (429, 503) with exponential backoff', () => { ... });
+  it('opens circuit breaker after 5 consecutive failures', () => { ... });
+  it('sends correct auth headers (X-Api-Key, X-Team-ID)', () => { ... });
+  it('tracks credit usage from response headers', () => { ... });
+});
+
+// test/integration/clients/ebay-client.test.ts
+describe('EbayClient', () => {
+  it('refreshes OAuth token before expiry', () => { ... });
+  it('parses Browse API item response into EbayListing type', () => { ... });
+  it('handles eBay rate limit (429) with circuit breaker', () => { ... });
+  it('extracts conditionDescriptors from item response', () => { ... });
+  it('handles missing optional fields without crashing', () => { ... });
+});
+```
+
+**API key encryption round-trip:**
+```typescript
+// test/integration/credentials/api-credentials.test.ts
+describe('API credential storage', () => {
+  it('encrypts credentials with AES-256-GCM and decrypts correctly', () => {
+    const original = { apiKey: 'test-key-123', teamId: 'team-456' };
+    const encrypted = encryptCredentials(original, sessionSecret);
+    const decrypted = decryptCredentials(encrypted, sessionSecret);
+    expect(decrypted).toEqual(original);
+  });
+
+  it('produces different ciphertext for same input (unique IV)', () => { ... });
+  it('fails gracefully with wrong decryption key', () => { ... });
+  it('stores and retrieves from PostgreSQL correctly', () => { ... });
+});
+```
+
+**Sync service:**
+```typescript
+// test/integration/services/sync-service.test.ts
+describe('SyncService', () => {
+  it('full sync writes all cards to database', () => { ... });
+  it('delta sync only fetches hot-set expansions', () => { ... });
+  it('sync is idempotent (re-running produces same state)', () => { ... });
+  it('logs sync progress to sync_log table', () => { ... });
+  it('handles mid-sync failure and records error in sync_log', () => { ... });
+});
+```
+
+#### Layer 3: API Endpoint Tests (HTTP Layer)
+
+Test the Express/Fastify routes using `supertest` — real HTTP requests against the app, with a test database, but no external API calls (Scrydex/eBay clients are stubbed).
+
+**Authentication & session:**
+```typescript
+// test/api/auth.test.ts
+describe('GitHub OAuth endpoints', () => {
+  it('GET /auth/github redirects to GitHub with correct client_id and scope', () => {
+    const res = await request(app).get('/auth/github');
+    expect(res.status).toBe(302);
+    expect(res.headers.location).toContain('github.com/login/oauth/authorize');
+    expect(res.headers.location).toContain(config.GITHUB_CLIENT_ID);
+  });
+
+  it('GET /auth/github/callback exchanges code and sets session cookie', async () => {
+    // Mock GitHub token + user API responses
+    nock('https://github.com').post('/login/oauth/access_token').reply(200, { access_token: 'test' });
+    nock('https://api.github.com').get('/user').reply(200, { id: 12345, login: 'testuser' });
+
+    const res = await request(app).get('/auth/github/callback?code=test-code');
+    expect(res.status).toBe(302);
+    expect(res.headers['set-cookie']).toBeDefined();
+    expect(res.headers['set-cookie'][0]).toContain('session=');
+    expect(res.headers['set-cookie'][0]).toContain('HttpOnly');
+  });
+
+  it('rejects callback for GitHub user not on allowlist', async () => {
+    nock('https://github.com').post('/login/oauth/access_token').reply(200, { access_token: 'test' });
+    nock('https://api.github.com').get('/user').reply(200, { id: 99999, login: 'stranger' });
+
+    const res = await request(app).get('/auth/github/callback?code=test-code');
+    expect(res.status).toBe(403);
+  });
+
+  it('POST /auth/logout clears session cookie', () => { ... });
+});
+```
+
+**Private endpoint auth gating:**
+```typescript
+// test/api/middleware/auth.test.ts
+describe('requireAuth middleware', () => {
+  it('returns 401 with loginUrl when no session cookie present', async () => {
+    const res = await request(app).get('/api/deals');
+    expect(res.status).toBe(401);
+    expect(res.body.loginUrl).toBe('/auth/github');
+  });
+
+  it('returns 401 for expired session token', () => { ... });
+  it('returns 403 for valid session but user not on allowlist', () => { ... });
+  it('passes through for valid session with authorized user', () => { ... });
+});
+```
+
+**Deal endpoints:**
+```typescript
+// test/api/routes/deals.test.ts
+describe('Deal API', () => {
+  let session: string;  // Valid session cookie for test user
+
+  beforeAll(async () => {
+    session = await createTestSession(testGithubUserId);
+    await seedTestDeals(db);
+  });
+
+  it('GET /api/deals returns paginated deals', async () => {
+    const res = await request(app).get('/api/deals').set('Cookie', session);
+    expect(res.status).toBe(200);
+    expect(res.body.deals).toHaveLength(50);
+    expect(res.body.pagination.hasMore).toBe(true);
+  });
+
+  it('GET /api/deals filters by tier', async () => {
+    const res = await request(app).get('/api/deals?tier=S,A').set('Cookie', session);
+    expect(res.body.deals.every((d: any) => ['S', 'A'].includes(d.tier))).toBe(true);
+  });
+
+  it('GET /api/deals/:id returns full deal detail with pricing breakdown', async () => {
+    const res = await request(app).get(`/api/deals/${testDealId}`).set('Cookie', session);
+    expect(res.status).toBe(200);
+    expect(res.body.pricing.buyerProtectionFee).toBeDefined();
+    expect(res.body.pricing.buyerProtectionFee.flatFee).toBe(0.10);
+  });
+
+  it('POST /api/deals/:id/review validates request body with Zod', async () => {
+    const res = await request(app)
+      .post(`/api/deals/${testDealId}/review`)
+      .set('Cookie', session)
+      .send({ isCorrectMatch: 'not-a-boolean' });  // Invalid
+    expect(res.status).toBe(400);
+  });
+
+  it('GET /api/deals returns 401 without session', () => { ... });
+});
+```
+
+**SSE stream:**
+```typescript
+// test/api/sse.test.ts
+describe('SSE deal stream', () => {
+  it('GET /api/deals/stream returns text/event-stream content type', async () => {
+    const res = await request(app)
+      .get('/api/deals/stream')
+      .set('Cookie', session)
+      .set('Accept', 'text/event-stream');
+    expect(res.headers['content-type']).toContain('text/event-stream');
+  });
+
+  it('sends ping events as keepalive', () => { ... });
+  it('replays missed deals using Last-Event-Id header', () => { ... });
+  it('returns 401 without valid session cookie', () => { ... });
+});
+```
+
+**API key management:**
+```typescript
+// test/api/routes/settings.test.ts
+describe('API key management', () => {
+  it('GET /api/settings/api-keys returns status without exposing raw keys', async () => {
+    const res = await request(app).get('/api/settings/api-keys').set('Cookie', session);
+    expect(res.status).toBe(200);
+    expect(res.body.scrydex.configured).toBeDefined();
+    expect(res.body).not.toHaveProperty('scrydex.apiKey');  // Never expose raw keys
+  });
+
+  it('PUT /api/settings/api-keys/scrydex stores encrypted credentials', () => { ... });
+  it('POST /api/settings/api-keys/scrydex/test validates with live API call', () => { ... });
+  it('POST /api/settings/api-keys/ebay/test validates OAuth token exchange', () => { ... });
+  it('rejects invalid key format with 400', () => { ... });
+});
+```
+
+**Input validation:**
+```typescript
+// test/api/middleware/validation.test.ts
+describe('Zod request validation', () => {
+  it('rejects lookup request without ebayUrl or ebayItemId', () => { ... });
+  it('rejects ebayItemId with non-numeric characters', () => { ... });
+  it('rejects malformed preference update with clear error', () => { ... });
+  it('passes valid requests through unchanged', () => { ... });
+});
+```
+
+#### Layer 4: E2E Smoke Tests
+
+A small set of tests that exercise the full pipeline end-to-end. These are **not run on every PR** (they're slow and may need external services) but are run nightly or before major releases.
+
+```typescript
+// test/e2e/full-pipeline.test.ts
+describe('Full pipeline smoke test', () => {
+  // Uses a real test database, recorded HTTP fixtures for Scrydex/eBay
+  it('sync → scan → match → deal → SSE delivery', async () => {
+    // 1. Run a mini sync with 10 test cards (from fixtures)
+    // 2. Feed a mock eBay listing through the scan pipeline
+    // 3. Verify a deal is created with correct profit calculation
+    // 4. Verify the deal appears on the SSE stream
+    // 5. Verify buyer protection fee is included in profit calc
+  });
+
+  it('login → dashboard load → deal detail → review', async () => {
+    // Browser-level test (Playwright) if added later
+    // For now, HTTP-level walkthrough via supertest
+  });
+});
+```
+
+#### External API Testing Strategy
+
+External APIs (Scrydex, eBay, GitHub) are **never called in CI**. All external interactions are tested using recorded HTTP fixtures.
+
+| External API | Test Approach | Why |
+|---|---|---|
+| **Scrydex** | `nock`/`msw` recorded fixtures | Avoids burning API credits; tests are deterministic |
+| **eBay Browse API** | `nock`/`msw` recorded fixtures | OAuth flow requires real credentials; rate limits apply |
+| **eBay OAuth** | `nock`/`msw` mock token exchange | Refresh tokens are environment-specific |
+| **GitHub OAuth** | `nock`/`msw` mock token + user API | Can't do real OAuth flow in headless CI |
+| **Exchange rate API** | `nock`/`msw` recorded fixture | Free tier has daily limits |
+| **Telegram** | `nock`/`msw` mock send message | Don't send real messages in tests |
+
+**Recording fixtures:** When developing locally with real API keys, use `nock`'s recording mode to capture real API responses. Sanitize the recordings (strip API keys from headers, redact personal data) and commit them as test fixtures. This gives realistic test data without live API calls in CI.
+
+```
+test/fixtures/
+├── match-corpus.json                  # Accuracy regression corpus
+├── scrydex/
+│   ├── cards-page-1.json              # Recorded Scrydex card sync page
+│   ├── cards-page-2.json
+│   ├── expansions.json                # All EN expansions
+│   └── listings-charizard.json        # Sales velocity response
+├── ebay/
+│   ├── browse-item-single.json        # Single listing response
+│   ├── browse-search-results.json     # Search results page
+│   ├── oauth-token-response.json      # Token exchange response
+│   └── item-with-descriptors.json     # Listing with conditionDescriptors
+└── github/
+    ├── oauth-token-response.json      # Token exchange response
+    └── user-response.json             # GET /user response
+```
+
+#### CI Pipeline
+
+```yaml
+# .github/workflows/ci.yml
+name: CI
+on: [pull_request]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: pokesnipe_test
+          POSTGRES_USER: test
+          POSTGRES_PASSWORD: test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '20' }
+      - run: npm ci
+
+      - name: Lint + typecheck
+        run: npm run lint && npm run typecheck
+
+      - name: Unit tests (domain layer)
+        run: npm run test:unit
+
+      - name: Integration tests (requires test DB)
+        run: npm run test:integration
+        env:
+          DATABASE_URL: postgres://test:test@localhost:5432/pokesnipe_test
+
+      - name: API endpoint tests
+        run: npm run test:api
+        env:
+          DATABASE_URL: postgres://test:test@localhost:5432/pokesnipe_test
+          SESSION_SECRET: test-secret-at-least-32-characters-long
+          GITHUB_CLIENT_ID: test-client-id
+          GITHUB_CLIENT_SECRET: test-client-secret
+          ALLOWED_GITHUB_IDS: '12345'
+
+      - name: Accuracy regression suite
+        run: npm run test:accuracy
+        env:
+          DATABASE_URL: postgres://test:test@localhost:5432/pokesnipe_test
+
+      - name: Accuracy gate
+        run: |
+          ACCURACY=$(npm run test:accuracy:report --silent | tail -1)
+          if (( $(echo "$ACCURACY < 85" | bc -l) )); then
+            echo "❌ Accuracy $ACCURACY% is below 85% threshold"
+            exit 1
+          fi
+          echo "✅ Accuracy: $ACCURACY%"
+```
+
+**npm scripts:**
+```json
+{
+  "test": "vitest run",
+  "test:unit": "vitest run test/unit/",
+  "test:integration": "vitest run test/integration/",
+  "test:api": "vitest run test/api/",
+  "test:accuracy": "vitest run test/accuracy/",
+  "test:accuracy:report": "vitest run test/accuracy/ --reporter=json | node scripts/extract-accuracy.js",
+  "test:watch": "vitest watch",
+  "test:coverage": "vitest run --coverage"
+}
+```
+
+---
 
 | Aspect | Beta | Redesign |
 |---|---|---|
@@ -3615,6 +4104,8 @@ All private endpoints require a valid GitHub OAuth session (httpOnly JWT cookie)
 | **Domain testability** | Required full engine mock | Domain layer is pure functions — zero I/O, tested with simple arrays |
 | **Accuracy measurement** | None (only diagnostic stage counters) | Automated checks + manual review sampling + regression corpus + calibration curves |
 | **Regression testing** | None | 200+ entry corpus, GitHub Actions gate at 85%, individual failure reporting |
+| **API testing** | None | 4-layer test pyramid: unit (domain), integration (DB + recorded fixtures), API endpoints (supertest), E2E smoke tests |
+| **External API testing** | Manual (live calls only) | Recorded HTTP fixtures (nock/msw) — zero live API calls in CI, deterministic, no credit burn |
 | **State management** | In-memory Maps, lost on restart | PostgreSQL on Railway — persistent across redeploys with defined DDL |
 | **Expansion updates** | Requires code change + redeploy | Automated daily sync |
 | **Scan throughput** | Limited by Scrydex credit budget | **Limited only by eBay rate limits** (Scrydex is no longer a bottleneck) |

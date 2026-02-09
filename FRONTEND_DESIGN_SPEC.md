@@ -626,3 +626,74 @@ pokesnipe (Railway service)
 **Environment-specific behavior:**
 - **Production (Railway):** `NODE_ENV=production`, static files served with cache headers, SSE keepalive enabled
 - **Development (local):** Frontend dev server (Vite/Next) proxies API requests to `localhost:3000`. `.env` file for secrets. Hot reload for UI changes
+
+### Frontend Testing
+
+Frontend testing is lightweight for v1 — the dashboard is a single-user tool, not a complex multi-page app with form wizards. The backend API is the primary contract, tested thoroughly in the architecture doc (§2.17). Frontend tests focus on the areas where bugs would silently break the user experience.
+
+#### Component Tests (Vitest + Testing Library)
+
+Test critical UI components in isolation. These run in CI alongside backend tests.
+
+```typescript
+// test/frontend/components/deal-feed.test.tsx
+describe('DealFeed', () => {
+  it('renders deal rows sorted by tier then profit', () => { ... });
+  it('applies client-side filters without API call', () => { ... });
+  it('shows "New deals" pill when scrolled down and new deals arrive', () => { ... });
+  it('highlights S-tier deals with gold accent', () => { ... });
+});
+
+// test/frontend/components/price-breakdown.test.tsx
+describe('PriceBreakdown', () => {
+  it('renders buyer protection fee with tiered breakdown', () => {
+    render(<PriceBreakdown pricing={mockPricing} />);
+    expect(screen.getByText('Buyer Prot.')).toBeInTheDocument();
+    expect(screen.getByText('£0.98')).toBeInTheDocument();
+    expect(screen.getByText('Flat fee')).toBeInTheDocument();
+  });
+
+  it('collapses fee breakdown when showBuyerProtectionFee is false', () => {
+    render(<PriceBreakdown pricing={mockPricing} showBreakdown={false} />);
+    expect(screen.getByText('£0.98')).toBeInTheDocument();
+    expect(screen.queryByText('Flat fee')).not.toBeInTheDocument();
+  });
+
+  it('shows correct profit after fee deduction', () => { ... });
+});
+
+// test/frontend/components/login.test.tsx
+describe('LoginPage', () => {
+  it('shows "Sign in with GitHub" button', () => { ... });
+  it('redirects to /auth/github on button click', () => { ... });
+});
+
+// test/frontend/components/api-key-setup.test.tsx
+describe('ApiKeySetup', () => {
+  it('shows connection status for Scrydex and eBay', () => { ... });
+  it('masks API key values by default', () => { ... });
+  it('shows success indicator after test passes', () => { ... });
+  it('shows error message when test fails', () => { ... });
+});
+```
+
+#### SSE Integration Tests
+
+The SSE connection is the most fragile part of the frontend — test its lifecycle:
+
+```typescript
+// test/frontend/hooks/use-deal-stream.test.ts
+describe('useDealStream hook', () => {
+  it('appends new deals to feed on SSE deal event', () => { ... });
+  it('updates status bar on SSE status event', () => { ... });
+  it('shows reconnecting banner after 30s disconnect', () => { ... });
+  it('resumes normally after reconnection', () => { ... });
+});
+```
+
+#### What NOT to Test in Frontend
+
+- **API response shapes** — the backend tests cover this with supertest
+- **CSS styling / visual regression** — too fragile for v1, manual review is sufficient
+- **Full E2E browser tests (Playwright/Cypress)** — deferred to v2; the backend API tests + component tests provide enough coverage for a single-user tool
+- **Filter permutations** — filters are simple array/comparison operations; one test per filter type is enough
