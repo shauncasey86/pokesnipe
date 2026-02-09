@@ -1,4 +1,5 @@
-import { execSync } from "child_process";
+import pg from "pg";
+import { default as runner } from "node-pg-migrate";
 
 const url = process.env.DATABASE_URL;
 if (!url) {
@@ -6,21 +7,36 @@ if (!url) {
   process.exit(0);
 }
 
-// Railway sets PGHOST/PGPORT/etc. env vars that override the connection string
-// in the pg library. Strip them so node-pg-migrate uses our DATABASE_URL.
-const env = { ...process.env };
-delete env.PGHOST;
-delete env.PGPORT;
-delete env.PGDATABASE;
-delete env.PGUSER;
-delete env.PGPASSWORD;
+// Parse URL explicitly — Railway sets PGHOST/PGPORT env vars that
+// override pg's connectionString, so we must pass individual params.
+const dbUrl = new URL(url);
+const host = dbUrl.hostname;
+const port = parseInt(dbUrl.port, 10) || 5432;
 
-console.log(`migrate: running against ${url.replace(/\/\/.*@/, "//***@")}`);
+console.log(`migrate: connecting to ${host}:${port}/${dbUrl.pathname.slice(1)}`);
+
+const client = new pg.Client({
+  host,
+  port,
+  database: dbUrl.pathname.slice(1),
+  user: decodeURIComponent(dbUrl.username),
+  password: decodeURIComponent(dbUrl.password),
+});
+
 try {
-  execSync(`node-pg-migrate -m migrations -d "${url}" up`, {
-    stdio: "inherit",
-    env
+  await client.connect();
+  console.log("migrate: connected, running migrations...");
+  await runner({
+    dbClient: client,
+    migrationsTable: "pgmigrations",
+    dir: "migrations",
+    direction: "up",
+    count: Infinity,
+    log: console.log,
   });
+  console.log("migrate: done");
 } catch (err) {
-  console.error("migrate: migration failed, continuing startup anyway", err);
+  console.error("migrate: migration failed, continuing startup anyway", err.message || err);
+} finally {
+  await client.end().catch(() => {});
 }
