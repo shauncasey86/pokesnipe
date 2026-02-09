@@ -31,7 +31,7 @@ The production server will serve the built `dist/` bundle and bind to `process.e
 ```bash
 git init
 git add .
-git commit -m "Initial PokéSnipe Arbitrage Scanner prototype"
+git commit -m "Initial PokéSnipe Arbitrage Scanner frontend"
 ```
 
 Create a GitHub repo (empty) and then:

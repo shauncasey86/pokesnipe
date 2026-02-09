@@ -556,6 +556,7 @@ export default function App() {
     const res = await fetch(url, options);
     const contentType = res.headers.get("content-type") || "";
     const isJson = contentType.includes("application/json");
+    if (res.status === 204) return null;
     if (!res.ok) {
       const body = isJson ? await res.json().catch(() => ({})) : {};
       const err = new Error(body?.error || res.statusText);
