@@ -16,7 +16,9 @@
   - [2.5 Local Index Matching](#25-local-index-matching)
   - [2.6 Confidence Scoring & Validation](#26-confidence-scoring--validation)
   - [2.7 Accuracy Measurement & Enforcement](#27-accuracy-measurement--enforcement)
-  - [2.8 Implementation Roadmap](#28-implementation-roadmap)
+  - [2.8 Manual Listing Lookup Tool](#28-manual-listing-lookup-tool)
+  - [2.9 Public Card Catalog](#29-public-card-catalog)
+  - [2.10 Implementation Roadmap](#210-implementation-roadmap)
 
 ---
 
@@ -317,8 +319,8 @@ Every design decision must account for two hard API constraints. Overage charges
 |---|---|---|
 | **Monthly credit cap** | **50,000 credits** | Hard budget — no overage charges permitted |
 | **Per-second rate limit** | **100 requests/second** | Applied across all endpoints globally |
-| **Standard request cost** | 1 credit | Cards, expansions, sealed products |
-| **`?include=prices`** | Still 1 credit | Price data bundled free with card queries |
+| **Standard request cost** | 1 credit **per request (not per card)** | A page of 100 cards = 1 credit |
+| **`?include=prices`** | Still 1 credit | Price data + trend data bundled free with card queries |
 | **Price history request cost** | 3 credits | `/cards/{id}/listings` endpoint |
 | **Usage refresh lag** | 20-30 minutes | `GET /account/v1/usage` updates are delayed |
 
@@ -425,18 +427,48 @@ interface LocalCard {
   expansionCode: string;       // e.g., "sv8"
   printedTotal: number;        // Denominator: /162
   rarity: string | null;
-  imageUrl: string | null;
+  supertype: string | null;    // "Pokémon", "Trainer", "Energy"
+  subtypes: string[];          // ["Stage 2", "ex"], ["Item"], etc.
+  artist: string | null;
+  images: {                    // Included in sync response — no extra credit
+    small: string | null;      // e.g., "https://images.scrydex.com/pokemon/sv8-6/small"
+    medium: string | null;
+    large: string | null;
+  };
   variants: LocalVariant[];
   lastSyncedAt: Date;
 }
 
 interface LocalVariant {
   name: string;                // e.g., "holofoil", "reverseHolofoil", "normal"
-  priceRaw: number | null;     // USD — raw/ungraded market price
-  priceLow: number | null;     // USD — lowest recent sale
-  priceMarket: number | null;  // USD — market average
-  priceGraded: Record<string, number> | null;  // grade → price
+  images: {                    // Variant-specific images (may differ from card images)
+    small: string | null;
+    medium: string | null;
+    large: string | null;
+  };
+  prices: LocalVariantPrices;
   lastPriceUpdate: Date;
+}
+
+interface LocalVariantPrices {
+  // Per-condition pricing (NM, LP, MP, HP)
+  conditions: Record<string, {
+    low: number | null;        // USD — lowest known sale
+    market: number | null;     // USD — market average
+    trends: {                  // Price movement data
+      days_1: { priceChange: number; percentChange: number } | null;
+      days_7: { priceChange: number; percentChange: number } | null;
+      days_30: { priceChange: number; percentChange: number } | null;
+      days_90: { priceChange: number; percentChange: number } | null;
+    };
+  }>;
+  // Graded pricing (PSA 10, PSA 9, CGC 9.5, etc.)
+  graded: Record<string, {     // key: "PSA 10", "CGC 9.5", etc.
+    low: number | null;
+    mid: number | null;
+    high: number | null;
+    market: number | null;
+  }> | null;
 }
 
 interface LocalExpansion {
@@ -448,36 +480,52 @@ interface LocalExpansion {
   total: number;               // Including secret rares
   releaseDate: Date;
   languageCode: string;
-  logo: string | null;
-  symbol: string | null;
+  logo: string | null;          // Expansion logo URL from Scrydex CDN
+  symbol: string | null;        // Expansion symbol URL from Scrydex CDN
   lastSyncedAt: Date;
 }
 ```
+
+**Images are free.** Card images (small/medium/large), variant images, expansion logos, and expansion symbols are all returned as CDN URLs in the standard API response. No extra credits, no extra requests. We store the URLs in the local DB and reference them directly from the Scrydex CDN — no need to download or cache the actual image files.
 
 #### Sync Strategies
 
 **Initial full sync (one-time, ~400 credits):**
 
+**Important: Scrydex charges 1 credit per API request (per page), NOT per card.** A single request returning 100 cards costs the same 1 credit as a request returning 1 card. This is what makes the full sync economically viable.
+
 ```
 1. Fetch all EN expansions:
    GET /pokemon/v1/expansions?q=language_code:EN&page_size=100
-   → ~4 pages = ~4 credits
+   → ~350 expansions / 100 per page = ~4 requests = 4 credits
 
 2. For each expansion, fetch all cards with prices:
    GET /pokemon/v1/cards?q=expansion.id:{id}&include=prices&page_size=100
-   → ~350 expansions × ~1 page avg = ~350 credits
-   (Large sets like Scarlet & Violet 151 need 2-3 pages)
+   → ~350 expansions × ~1 page avg = ~350 requests = ~350 credits
+   (Large sets like SV 151 with 200+ cards need 2-3 pages)
 
-Total: ~350-400 credits for the entire English card catalog with prices.
+Total: ~400 requests = ~400 credits for the ENTIRE English card catalog
+       including current prices, trend data, and image URLs.
+
+NOT 40,000 credits — each page of up to 100 cards costs just 1 credit.
 ```
 
 **Weekly full resync (~400 credits):**
 
 Re-fetch everything to catch price movements, new printings, and corrections. Run during off-peak hours (e.g., 03:00 UK time Sunday). Upsert into the local DB — don't delete/recreate.
 
+**What `?include=prices` returns per card:**
+- `low` — lowest known sale price (USD)
+- `market` — average market price (USD)
+- `trends` — price change data for 1, 7, 14, 30, 90, and 180-day windows (both absolute and percentage)
+- Per condition (NM, LP, MP, HP) and per variant (holofoil, reverseHolofoil, etc.)
+- All included in the same 1-credit request — no extra cost
+
+This means the local DB always has current market prices AND historical trend data for every card, refreshed weekly.
+
 **Daily hot-set refresh (~50 credits):**
 
-Only re-fetch the 10 most recently released expansions (where prices are most volatile). These are the sets most likely to have arbitrage opportunities.
+Only re-fetch the 10 most recently released expansions (where prices are most volatile). These are the sets most likely to have arbitrage opportunities. This keeps prices on new sets no more than ~24 hours stale.
 
 ```typescript
 async function dailyHotRefresh(db: Database, scrydex: ScrydexClient) {
@@ -574,9 +622,56 @@ interface TitleSignals {
 - **Set name matching uses the local expansion catalog** — search the expansion table rather than 9 era-specific regexes
 - **Emoji and noise stripping** as the first normalization pass, before any regex matching
 
-#### Step 2: Structured Data Extractor
+#### Step 2: Condition Mapper
 
-New component that doesn't exist in the beta. Extracts signals from eBay's structured fields:
+Port the beta's condition mapping logic — this is one area the beta got right. eBay provides card condition through multiple channels, and we need all of them for accurate condition-specific pricing.
+
+```typescript
+interface ConditionResult {
+  condition: ScrydexCondition;  // 'NM' | 'LP' | 'MP' | 'HP'
+  source: 'condition_descriptor' | 'item_specifics' | 'title' | 'default';
+  rawValue: string | null;
+  blocked: boolean;             // true = damaged/creased, skip entirely
+}
+
+// Priority 1: conditionDescriptors (most reliable — numeric eBay IDs)
+// eBay's PRODUCT fieldgroup returns structured condition for trading cards
+const DESCRIPTOR_MAP: Record<string, ScrydexCondition> = {
+  '400010': 'NM',   // Near Mint or Better
+  '400015': 'LP',   // Lightly Played (Excellent)
+  '400016': 'MP',   // Moderately Played (Very Good)
+  '400017': 'HP',   // Heavily Played (Poor)
+};
+
+// Priority 2: localizedAspects (seller-provided structured data)
+const ASPECT_CONDITION_MAP: Record<string, ScrydexCondition> = {
+  'near mint or better': 'NM',
+  'near mint': 'NM',
+  'lightly played (excellent)': 'LP',
+  'lightly played': 'LP',
+  'moderately played (very good)': 'MP',
+  'moderately played': 'MP',
+  'heavily played (poor)': 'HP',
+  'heavily played': 'HP',
+  // ...
+};
+
+// Priority 3: Title regex (last resort)
+// Priority 4: Default to 'LP' (conservative — undervalues slightly)
+```
+
+**Why this matters for pricing:** The local card index stores prices per-condition. A NM Charizard might be $200 while an LP copy is $120. Using the wrong condition means the profit calculation is wrong. The beta's 3-priority condition mapping ensures we get the most accurate condition possible.
+
+**Blocked conditions** — skip damaged/creased cards entirely:
+```typescript
+const BLOCKED_PATTERNS = ['damaged', 'dmg', 'creased', 'crease', 'water damage', 'torn', 'ripped'];
+```
+
+**eBay API requirement:** To get `conditionDescriptors`, the search request MUST include `fieldgroups=EXTENDED,PRODUCT`. This replaces the beta's approach of making per-item enrichment calls.
+
+#### Step 3: Structured Data Extractor
+
+New component that extracts signals from eBay's structured fields (via `localizedAspects` from the `EXTENDED` fieldgroup):
 
 ```typescript
 function extractStructuredSignals(listing: EbayListing): StructuredSignals {
@@ -596,9 +691,9 @@ function extractStructuredSignals(listing: EbayListing): StructuredSignals {
 
 When eBay sellers fill in item specifics, this data is often more reliable than title parsing because eBay provides dropdown menus for many fields.
 
-#### Step 3: Signal Merger
+#### Step 4: Signal Merger
 
-Combines title-parsed signals and structured signals into a single `NormalizedListing`:
+Combines title-parsed signals, condition mapping, and structured signals into a single `NormalizedListing`:
 
 ```typescript
 function mergeSignals(
@@ -983,15 +1078,23 @@ Once a match passes validation, compute profitability using local price data:
 ```typescript
 interface ArbitrageResult {
   ebayPriceGBP: number;           // Listing price + shipping
-  scrydexPriceUSD: number;        // From local variant prices (market or low)
+  condition: ScrydexCondition;    // NM | LP | MP | HP (from condition mapper)
+  conditionSource: string;        // How condition was determined
+  scrydexPriceUSD: number;        // From local variant prices FOR THIS CONDITION
   scrydexPriceGBP: number;        // Converted at current exchange rate
   profitGBP: number;              // scrydexPriceGBP - ebayPriceGBP - fees
   profitPercent: number;
   tier: 'S' | 'A' | 'B' | 'C';   // Configurable thresholds
   exchangeRate: number;
   exchangeRateAge: number;        // Minutes since last refresh
+  priceTrend: {                   // From synced trend data
+    days_7: number;               // % change over 7 days
+    days_30: number;              // % change over 30 days
+  };
 }
 ```
+
+**Condition-specific pricing is critical.** The local card index stores separate prices for NM, LP, MP, and HP conditions. The arbitrage calculator must use the price matching the listing's mapped condition — not a generic "market" price. A NM Charizard at $200 vs LP at $120 is a completely different deal evaluation. The price trend data (synced free with `?include=prices`) is also surfaced to help gauge whether a card's value is rising or falling.
 
 Price data comes from the local card index — no live Scrydex call needed. The exchange rate service is the only external dependency at deal-evaluation time.
 
@@ -1098,7 +1201,115 @@ describe('Match accuracy corpus', () => {
 
 ---
 
-### 2.8 Implementation Roadmap
+### 2.8 Manual Listing Lookup Tool
+
+A standalone tool where you can paste an eBay listing URL (or item ID) and get a full pipeline evaluation — without waiting for the scanner to pick it up.
+
+#### Workflow
+
+```
+1. User pastes eBay URL or item ID into the dashboard
+2. System fetches the listing via eBay Browse API (1 call)
+3. Runs full pipeline: signal extraction → condition mapping → local index matching
+4. Displays detailed result:
+   - Parsed signals (what we extracted from title + structured data)
+   - Match result (which card, which variant, confidence breakdown)
+   - Arbitrage calculation (eBay price vs Scrydex value, profit/loss)
+   - Card image side-by-side with eBay listing image
+   - Confidence breakdown per field (name, number, denominator, expansion, variant)
+   - Condition mapping detail (source, raw value, mapped condition)
+```
+
+#### Interface
+
+```typescript
+// POST /api/lookup
+interface LookupRequest {
+  ebayUrl?: string;        // Full eBay listing URL
+  ebayItemId?: string;     // Or just the item ID
+}
+
+interface LookupResponse {
+  listing: EbayListing;                // Raw eBay data
+  signals: {
+    title: TitleSignals;
+    structured: StructuredSignals;
+    condition: ConditionResult;
+  };
+  normalized: NormalizedListing;       // Merged signals
+  match: MatchResult | null;          // Best match from local index
+  candidates: ScoredCandidate[];      // All candidates considered (top 10)
+  arbitrage: ArbitrageResult | null;  // Profit calc if matched
+  warnings: string[];                 // Any issues encountered
+  processingTime: number;             // ms — should be <100ms for local matching
+}
+```
+
+#### Use Cases
+
+- **Deal verification:** Before buying, paste the listing to confirm the match is correct and the profit calculation is accurate
+- **Debugging mismatches:** See exactly why a listing was matched (or not matched) — which signals fired, what confidence each field got
+- **Training data collection:** Mark lookup results as correct/incorrect to grow the regression corpus
+- **Manual arbitrage hunting:** Paste interesting listings you find browsing eBay to check if they're underpriced
+- **Quick card search:** Also support searching the local card index directly by card name, number, or set — useful for price checking without an eBay listing
+
+---
+
+### 2.9 Public Card Catalog
+
+Since the local card index contains a complete, regularly-updated database of every English Pokemon card with images and pricing, we should expose this as a browsable public catalog. This adds value beyond arbitrage and builds the foundation for a broader product.
+
+#### Features
+
+- **Set browser:** Browse all ~350 English expansions, view every card in a set with images
+- **Card search:** Full-text search by card name, number, set name, or artist
+- **Price display:** Current market prices per condition (NM/LP/MP/HP) with trend indicators
+- **Card detail page:** Large card image, all variants with prices, price history trends (1/7/14/30/90/180 days), expansion info with logo
+- **Filtering:** By set, by type (Pokemon/Trainer/Energy), by rarity, by price range
+- **Sorting:** By price, by price trend (biggest movers), by release date, by number
+
+#### API Endpoints
+
+```typescript
+// Public card catalog endpoints — no authentication required
+
+GET /api/catalog/expansions
+  // List all expansions with logos, card counts, release dates
+  // Params: ?series=Scarlet+%26+Violet&sort=releaseDate
+
+GET /api/catalog/expansions/:id
+  // Expansion detail with full card list
+  // Params: ?sort=number&include=prices
+
+GET /api/catalog/cards/search
+  // Full-text card search
+  // Params: ?q=charizard&set=base1&sort=priceMarket
+
+GET /api/catalog/cards/:id
+  // Card detail with all variants, prices, trends, images
+
+GET /api/catalog/trending
+  // Cards with biggest price movements (up or down)
+  // Params: ?period=7d&direction=up&limit=50
+```
+
+#### Data Freshness
+
+The catalog is always backed by the same local card index used for arbitrage matching. Price data is as fresh as the last sync:
+- **Recent sets (top 10):** Updated daily
+- **All other sets:** Updated weekly
+- **New expansions:** Detected and synced within 24 hours of appearing on Scrydex
+
+#### Value Proposition
+
+- **For the arbitrage scanner:** The catalog doubles as a verification tool — users can browse to the matched card and visually confirm it's correct
+- **For the community:** A fast, free, well-indexed Pokemon card price database with images
+- **For SEO/traffic:** Card pages are statically renderable, indexable, and attract organic search traffic
+- **For future monetization:** A catalog with pricing data is a natural platform for alerts, wishlists, and collection tracking
+
+---
+
+### 2.10 Implementation Roadmap
 
 #### Phase 1: Card Index Foundation (Week 1-2)
 
@@ -1143,7 +1354,11 @@ src/
 │   ├── ebay-poller.ts
 │   ├── scan-scheduler.ts
 │   └── ebay-client.ts
-├── api/                 # REST API
+├── lookup/              # Manual listing lookup tool
+│   └── lookup-service.ts
+├── catalog/             # Public card catalog
+│   └── catalog-service.ts
+├── api/                 # REST API (deals, lookup, catalog, admin)
 ├── config/
 ├── database/
 └── utils/
@@ -1175,19 +1390,31 @@ src/
 - [ ] End-to-end integration tests: eBay title → local match → deal
 - [ ] **Regression test suite with match corpus: accuracy ≥ 85%**
 
-#### Phase 4: Arbitrage & Presentation (Week 4-5)
+#### Phase 4: Arbitrage, Lookup Tool & Presentation (Week 4-5)
 
-**Goal:** Price calculation, deal storage, scanning, and dashboard.
+**Goal:** Price calculation, deal storage, scanning, manual lookup tool, and dashboard.
 
-- [ ] Price engine: extract correct price from local variant data, convert currency
+- [ ] Price engine: condition-specific pricing from local variant data, currency conversion
 - [ ] Deal classifier: tier assignment with configurable thresholds
 - [ ] Deal store: database with deduplication and audit logging
 - [ ] eBay poller with scan scheduling and rate limit handling
-- [ ] REST API endpoints
-- [ ] Dashboard frontend (card index stats, deal grid, confidence breakdown)
+- [ ] **Manual listing lookup tool:** paste eBay URL → full pipeline evaluation with confidence breakdown
+- [ ] REST API endpoints (deals, lookup, card index stats)
+- [ ] Dashboard frontend (card index stats, deal grid, confidence breakdown, lookup tool)
 - [ ] Telegram notifications for high-confidence deals only
 
-#### Phase 5: Accuracy Loop (Ongoing)
+#### Phase 5: Public Card Catalog (Week 5-6)
+
+**Goal:** Expose the local card index as a browsable public catalog.
+
+- [ ] Public API endpoints: expansion list, card search, card detail, trending
+- [ ] Set browser UI: expansion grid with logos, card counts, release dates
+- [ ] Card search: full-text search by name, number, set, artist
+- [ ] Card detail page: large image, variant prices, trend data, expansion info
+- [ ] Trending page: biggest price movers (7d/30d up/down)
+- [ ] Server-side rendering for SEO (card pages should be indexable)
+
+#### Phase 6: Accuracy Loop (Ongoing)
 
 **Goal:** Continuous improvement through measurement and feedback.
 
