@@ -10,7 +10,7 @@ The user has exactly three modes of operation, in order of frequency:
 2. **Investigate** — Paste an eBay listing URL to manually evaluate it. Used when browsing eBay independently and wanting a quick price check.
 3. **Monitor** — Glance at system health: is the scanner running, are syncs current, is the card index healthy? This should take <2 seconds.
 
-A distant fourth is **Browse** — exploring the card catalog for price research, but this is a separate product surface (see section 2.9 of the architecture doc).
+A distant fourth is **Browse** — exploring the card catalog for price research, but this is a separate product surface (see section 2.10 of the architecture doc).
 
 ### Core Dashboard Components
 
@@ -27,6 +27,7 @@ The deal feed is a **live-updating vertical list** of arbitrage opportunities, n
 | **Market price (GBP)** | What it's worth (converted from USD) | Right of the profit indicator |
 | **Profit (GBP + %)** | The reason to act | Color-coded: green gradient by magnitude. This is the visual anchor |
 | **Confidence score** | Trust level | Compact horizontal bar or ring, color-coded by tier |
+| **Liquidity** | Can you flip this card quickly? | Small pill: "High" (green) / "Med" (amber) / "Low" (red-orange) / "Illiquid" (red, dimmed). See §2.7 of architecture doc |
 | **Condition** | NM / LP / MP / HP | Small pill badge, color-coded |
 | **Time listed** | Urgency signal | Relative time ("3m ago"), turns red after threshold |
 | **Price trend** | Is the card rising or falling? | Tiny sparkline or arrow with 7d % |
@@ -37,10 +38,12 @@ The deal feed is a **live-updating vertical list** of arbitrage opportunities, n
 
 | Tier | Criteria (configurable) | Visual Treatment |
 |---|---|---|
-| **S-tier** | >40% profit, high confidence | Highlighted row, subtle pulse on arrival, optional sound |
+| **S-tier** | >40% profit, high confidence, high liquidity | Highlighted row, subtle pulse on arrival, optional sound |
 | **A-tier** | 25-40% profit, high confidence | Standard highlighted row |
 | **B-tier** | 15-25% profit, medium+ confidence | Standard row |
 | **C-tier** | 5-15% profit, any confidence | Dimmed row, collapsed by default |
+
+**Liquidity affects tier assignment.** The backend adjusts tiers based on liquidity grade (see architecture doc §2.7): illiquid cards are capped at C-tier regardless of profit, low liquidity caps at B-tier, and medium liquidity downgrades S to A. This means S-tier always implies both high profit AND high liquidity — the user can trust that S-tier deals are quick flips.
 
 **Real-time behavior:** New deals slide in at the top with a brief highlight animation. The feed does NOT auto-scroll — the user controls their scroll position. A "New deals" pill appears at the top if they've scrolled down and new items arrive.
 
@@ -61,9 +64,16 @@ Clicking a deal opens a **right-side panel** (not a modal, not a new page — th
 - Profit calculation breakdown: `eBay price + shipping - fees = cost` vs `market value = profit`
 - Confidence score with per-field breakdown (expandable)
 
-**Middle section — Match Details:**
+**Middle section — Match & Liquidity Details:**
 - How the match was made: which signals fired, which candidate was chosen
 - Confidence breakdown: horizontal stacked bar showing contribution of each field (name, number, denominator, expansion, variant, normalization)
+- **Liquidity breakdown:** Composite score with per-signal detail (expandable):
+  - Trend activity: how many price movement windows are active
+  - Price completeness: how many conditions have market data
+  - Price spread: low-to-market ratio (tight = liquid)
+  - eBay supply: concurrent listings for this card
+  - Sales velocity: recent sold count (if fetched from Scrydex `/listings`)
+  - If sales velocity data hasn't been fetched, show "Sales data not fetched — [Fetch now]" button. Clicking calls `/cards/{id}/listings` (3 credits) and updates the liquidity assessment inline
 - Condition mapping: what source provided the condition, raw value, mapped value
 - Variant: which variant matched, how
 
@@ -89,6 +99,7 @@ A persistent **top bar** with:
 - **Condition filter:** NM / LP / MP / HP toggles. Default: all.
 - **Profit minimum:** Slider or input — minimum profit % to show. Default: 10%.
 - **Time range:** Last hour / Last 6h / Last 24h / All. Default: Last 6h.
+- **Liquidity filter:** High / Medium / Low / All. Default: High+Medium (hides illiquid and low-liquidity deals by default — the scanner is built for quick flips).
 - **Graded toggle:** Show/hide graded card deals (separate pricing model).
 
 Filters are **additive** (AND logic). Active filters show as removable pills below the search bar.
@@ -121,7 +132,7 @@ Clicking any section expands to a detailed status panel (overlay, not navigation
 Accessible via a **prominent button** in the top bar ("Lookup" or a search icon with a paste indicator). Opens as an overlay panel:
 
 1. **Input:** Large text field accepting an eBay URL or item ID. Paste and press Enter
-2. **API call:** `POST /api/lookup` with `{ ebayUrl }` or `{ ebayItemId }`. The backend fetches the listing, runs the full pipeline, and returns the `LookupResponse` (see architecture doc §2.8)
+2. **API call:** `POST /api/lookup` with `{ ebayUrl }` or `{ ebayItemId }`. The backend fetches the listing, runs the full pipeline, and returns the `LookupResponse` (see architecture doc §2.9)
 3. **Processing indicator:** Brief spinner with stage labels ("Fetching listing..." → "Extracting signals..." → "Matching..." → "Done"). Target response time: <2s (eBay API fetch dominates; local matching is <100ms)
 4. **Result:** Same layout as the Deal Detail Panel, but with additional debug information:
    - Raw eBay API response fields (collapsible)
@@ -148,7 +159,7 @@ The lookup tool is also useful as a **diagnostic tool** — when a deal looks wr
 
 #### 7. Preferences
 
-Accessible from a gear icon. All preferences are persisted server-side via `GET/PUT /api/preferences` (stored in PostgreSQL on Railway) so they survive across browsers and devices. The full `UserPreferences` schema is defined in the architecture doc §2.11.
+Accessible from a gear icon. All preferences are persisted server-side via `GET/PUT /api/preferences` (stored in PostgreSQL on Railway) so they survive across browsers and devices. The full `UserPreferences` schema is defined in the architecture doc §2.12.
 
 Key settings:
 
@@ -194,7 +205,7 @@ Browsing eBay independently → See an interesting listing
 
 ### How Users Identify High-Confidence Opportunities Quickly
 
-The interface uses **three simultaneous channels** to communicate deal quality:
+The interface uses **four simultaneous channels** to communicate deal quality:
 
 1. **Position:** S-tier deals are sorted to the top. Within tiers, sorted by profit descending. The best deals are always in the first 3-5 rows.
 
@@ -202,18 +213,21 @@ The interface uses **three simultaneous channels** to communicate deal quality:
 
 3. **Confidence visualization:** A small segmented bar next to each deal shows confidence as a filled proportion. High confidence = fully filled, green. Medium = partially filled, amber. Low = barely filled, faded. This is peripheral information — the user absorbs it without actively reading a number.
 
+4. **Liquidity indicator:** A small pill badge on each deal row shows whether the card can be flipped quickly. "High" (green, blends in — no friction), "Med" (amber — proceed with awareness), "Low" (red-orange — visible warning), "Illiquid" (red, dimmed — only shown if the user has enabled the low-liquidity filter). This answers the critical question: "even if the price is right, will anyone buy it?"
+
 **What the user does NOT need to do:**
 - Read numerical confidence scores to make a decision (the color does it)
 - Expand details to evaluate most deals (the summary row has enough)
 - Mentally calculate profit (it's pre-computed and displayed)
+- Wonder if a card will actually sell (the liquidity badge tells them)
 - Check system health manually (the footer tells them if something's wrong)
 
 ### Progressive Disclosure of Complexity
 
 | Layer | What's Shown | When |
 |---|---|---|
-| **L1: Feed row** | Card image, name, profit, confidence bar, condition, time | Always visible |
-| **L2: Detail panel** | Full images, profit breakdown, confidence per-field, CTA | On click |
+| **L1: Feed row** | Card image, name, profit, confidence bar, liquidity pill, condition, time | Always visible |
+| **L2: Detail panel** | Full images, profit breakdown, confidence per-field, liquidity breakdown, CTA | On click |
 | **L3: Match internals** | Candidate list, signal extraction, regex matches, raw eBay data | Expandable sections within detail panel |
 | **L4: System diagnostics** | API credit usage, sync logs, error traces | Status bar expansion or separate admin view |
 
@@ -239,23 +253,28 @@ The interface uses **three simultaneous channels** to communicate deal quality:
 │  │    Obsidian Flames ◈       │  │  │                           │   │
 │  │    £12.50 → £45.00         │  │  │  Charizard ex #006/197    │   │
 │  │    +£32.50 (+260%) ██████  │  │  │  Obsidian Flames (sv3)    │   │
-│  │    NM  ·  3m ago  ↑7d     │  │  │                           │   │
+│  │    NM · High · 3m ago ↑7d │  │  │                           │   │
 │  ├─────────────────────────────┤  │  │  eBay: £12.50 + £1.99    │   │
 │  │ A  [img] Pikachu VMAX #44  │  │  │  Market: £45.00 (NM)     │   │
 │  │    Vivid Voltage ◈         │  │  │  Profit: +£30.51 (210%)  │   │
 │  │    £8.99 → £28.00          │  │  │                           │   │
 │  │    +£19.01 (+211%) █████   │  │  │  Confidence: 0.92        │   │
-│  │    NM  ·  7m ago  →7d     │  │  │  ████████████░░ 92%       │   │
+│  │    NM · High · 7m ago →7d │  │  │  ████████████░░ 92%       │   │
 │  ├─────────────────────────────┤  │  │  Name:   0.95 ████████░  │   │
-│  │ A  [img] Mewtwo ex #58     │  │  │  Number: 1.00 █████████  │   │
+│  │ B  [img] Mewtwo ex #58     │  │  │  Number: 1.00 █████████  │   │
 │  │    Scarlet & Violet 151 ◈  │  │  │  Denom:  0.92 ████████░  │   │
 │  │    £6.50 → £18.00          │  │  │  Expan:  0.88 ███████░░  │   │
 │  │    +£11.50 (+176%) ████    │  │  │  Variant: 0.85 ██████░░  │   │
-│  │    LP  ·  12m ago  ↓7d    │  │  │                           │   │
-│  ├─────────────────────────────┤  │  │  [Open on eBay ▸]        │   │
-│  │ B  [img] ...               │  │  │                           │   │
-│  │    ...                     │  │  │  ── Match Details ──      │   │
-│  └─────────────────────────────┘  │  │  ── Price Table ──       │   │
+│  │    LP · Med · 12m ago ↓7d │  │  │                           │   │
+│  ├─────────────────────────────┤  │  │  Liquidity: 0.78 High    │   │
+│  │ C  [img] ...               │  │  │  Trend:  0.75 ███████░░  │   │
+│  │    ...                     │  │  │  Supply: 0.90 ████████░  │   │
+│  └─────────────────────────────┘  │  │  Sold:   0.67 ██████░░░  │   │
+│                                   │  │                           │   │
+│                                   │  │  [Open on eBay ▸]        │   │
+│                                   │  │                           │   │
+│                                   │  │  ── Match Details ──      │   │
+│                                   │  │  ── Price Table ──       │   │
 │                                   │  │  ── Trend Chart ──       │   │
 │                                   │  │                           │   │
 │                                   │  │  [✓ Correct] [✗ Wrong ▾] │   │
@@ -289,7 +308,8 @@ Ordered by visual weight, heaviest first:
 3. **Card image** — The thumbnail. Humans process images faster than text. It confirms "yes, this is the card I think it is" instantly.
 4. **Card name** — Bold, but secondary to profit. The user often recognizes the card from the image before reading the name.
 5. **Confidence bar** — Peripheral. Small, horizontal, color-coded. You absorb it without focusing on it.
-6. **Everything else** — Condition, time, trend, expansion. Small, muted, scannable.
+6. **Liquidity pill** — Same visual weight as confidence. A green "High" pill blends in (no friction). Amber or red draws the eye only when liquidity is a concern — you notice it when it matters.
+7. **Everything else** — Condition, time, trend, expansion. Small, muted, scannable.
 
 **The anti-pattern to avoid:** dashboards that give equal visual weight to every data point. If confidence, condition, expansion, profit, and card name are all the same size and color, the user has to actively read every field. Instead, profit screams, confidence whispers, and metadata is quiet.
 
@@ -311,6 +331,10 @@ Ordered by visual weight, heaviest first:
 | High confidence | Green (#22c55e) | Trust |
 | Medium confidence | Amber (#f59e0b) | Caution |
 | Low confidence | Red-orange (#ef4444) | Warning |
+| High liquidity | Green (#22c55e) | Flips fast — same green as "trust" |
+| Medium liquidity | Amber (#f59e0b) | Moderate flip time — same amber as "caution" |
+| Low liquidity | Red-orange (#ef4444 at 80% opacity) | Slow flip — visible warning |
+| Illiquid | Muted red (#ef4444 at 50% opacity) | May not sell — dimmed, de-emphasized |
 | Interactive elements | Blue (#3b82f6) | Buttons, links, active states |
 | Borders | Barely visible (#1f2937) | Structure without noise |
 
@@ -349,7 +373,7 @@ Profit Block:
   Line 2: Percentage "+260%" (12px, same green but lighter)
   Line 3: Confidence bar (4px tall, 80px wide, segmented fill)
 Meta Block:
-  Line 1: Condition pill "NM" (10px, pill background)
+  Line 1: Condition pill "NM" + Liquidity pill "High" (10px, pill backgrounds, side by side)
   Line 2: Time "3m ago" (12px, muted, red if >1h)
   Line 3: 7d trend arrow + % (12px, green up / red down / grey flat)
 ```
@@ -369,6 +393,28 @@ Per-field bars (stacked vertically):
 
 Each bar: 200px wide, 8px tall, background #1f2937, fill color based on value
 Label left-aligned (80px), bar center, value right-aligned
+```
+
+#### Detail Panel — Liquidity Breakdown
+```
+Section: "Liquidity"
+Overall: Pill badge showing grade ("High" / "Med" / "Low" / "Illiquid") + score (e.g., 0.78)
+
+Per-signal bars (stacked vertically, same layout as confidence):
+  Trend:     ████████████░░░  0.75    (price movement activity)
+  Prices:    ██████████░░░░░  0.50    (condition coverage)
+  Spread:    ████████████░░░  0.80    (low/market ratio)
+  Supply:    ██████████████░  0.90    (concurrent eBay listings)
+  Sold:      █████████░░░░░░  0.67    (quantitySold from eBay)
+  Velocity:  ░░░░░░░░░░░░░░░  —       (not fetched)
+                                       [Fetch sales data ▸] (3 credits)
+
+If velocity has been fetched:
+  Velocity:  ███████████░░░░  0.85    (5 sales in 7d)
+
+Bar styling: same as confidence bars (200px wide, 8px tall)
+"Fetch sales data" button: small, inline, blue (#3b82f6), right-aligned
+After fetch: bar fills in with animation, grade may update
 ```
 
 #### Detail Panel — Price Comparison Table
@@ -436,11 +482,11 @@ Below input (after submission):
 
 ## Part 4: Backend Integration
 
-This section maps the frontend to the backend API contract defined in `ARBITRAGE_SCANNER_REVIEW.md` §2.11. It covers authentication, data flow, SSE lifecycle, and deployment.
+This section maps the frontend to the backend API contract defined in `ARBITRAGE_SCANNER_REVIEW.md` §2.12. It covers authentication, data flow, SSE lifecycle, and deployment.
 
 ### Authentication
 
-The dashboard is a private interface — it requires a bearer token (`DASHBOARD_SECRET`, a Railway environment variable) to access all non-public endpoints. The public card catalog (§2.9) does not require authentication.
+The dashboard is a private interface — it requires a bearer token (`DASHBOARD_SECRET`, a Railway environment variable) to access all non-public endpoints. The public card catalog (§2.10) does not require authentication.
 
 **First-visit flow:**
 ```
@@ -522,6 +568,7 @@ Page load
 | Mark deal correct | `POST /api/deals/:dealId/review` `{ isCorrectMatch: true }` | |
 | Mark deal wrong | `POST /api/deals/:dealId/review` `{ isCorrectMatch: false, incorrectReason: "..." }` | |
 | Paste eBay URL for lookup | `POST /api/lookup` `{ ebayUrl: "..." }` | |
+| Fetch sales velocity (detail panel) | `GET /api/deals/:dealId/liquidity` | Triggers Scrydex `/listings` call (3 credits). Updates liquidity breakdown inline |
 | Change filter | None — client-side | Applied to in-memory deal list |
 | Save filter as default | `PUT /api/preferences` `{ defaultFilters: {...} }` | Debounced 500ms |
 | Change any preference | `PUT /api/preferences` `{ ... }` | Partial update, debounced |

@@ -15,11 +15,12 @@
   - [2.4 Signal Extraction](#24-signal-extraction)
   - [2.5 Local Index Matching](#25-local-index-matching)
   - [2.6 Confidence Scoring & Validation](#26-confidence-scoring--validation)
-  - [2.7 Accuracy Measurement & Enforcement](#27-accuracy-measurement--enforcement)
-  - [2.8 Manual Listing Lookup Tool](#28-manual-listing-lookup-tool)
-  - [2.9 Public Card Catalog](#29-public-card-catalog)
-  - [2.10 Implementation Roadmap](#210-implementation-roadmap)
-  - [2.11 Backend API Contract](#211-backend-api-contract)
+  - [2.7 Liquidity Assessment](#27-liquidity-assessment)
+  - [2.8 Accuracy Measurement & Enforcement](#28-accuracy-measurement--enforcement)
+  - [2.9 Manual Listing Lookup Tool](#29-manual-listing-lookup-tool)
+  - [2.10 Public Card Catalog](#210-public-card-catalog)
+  - [2.11 Implementation Roadmap](#211-implementation-roadmap)
+  - [2.12 Backend API Contract](#212-backend-api-contract)
 
 ---
 
@@ -1136,13 +1137,15 @@ interface ArbitrageResult {
   scrydexPriceGBP: number;        // Converted at current exchange rate
   profitGBP: number;              // scrydexPriceGBP - ebayPriceGBP - fees
   profitPercent: number;
-  tier: 'S' | 'A' | 'B' | 'C';   // Configurable thresholds
+  baseTier: 'S' | 'A' | 'B' | 'C';   // Tier from profit thresholds alone
+  tier: 'S' | 'A' | 'B' | 'C';       // Final tier after liquidity adjustment (§2.7)
   exchangeRate: number;
   exchangeRateAge: number;        // Minutes since last refresh
   priceTrend: {                   // From synced trend data
     days_7: number;               // % change over 7 days
     days_30: number;              // % change over 30 days
   };
+  liquidity: LiquidityAssessment; // See §2.7 — independent axis from confidence
 }
 ```
 
@@ -1182,7 +1185,252 @@ This audit table is the foundation for measuring and improving accuracy over tim
 
 ---
 
-### 2.7 Accuracy Measurement & Enforcement
+### 2.7 Liquidity Assessment
+
+Profit on paper means nothing if the card won't sell. This scanner is built for **quick flips** — buy underpriced on eBay, sell at market within days. A card showing 40% profit but no active market is a trap: you're stuck holding inventory with no buyers. Liquidity must be assessed independently from confidence and surfaced as a first-class signal in every deal.
+
+#### Available Signals
+
+Liquidity signals come from three sources at different cost levels:
+
+**Tier 1 — Free (already in the local card index from `?include=prices`):**
+
+These are computed once during card sync and stored on every card in PostgreSQL. Zero additional API cost.
+
+| Signal | Source | What It Tells You |
+|---|---|---|
+| **Trend activity** | `trends.days_1` through `days_90` | Non-zero `percentChange` across recent windows means active trading. All-null/all-zero = stale market |
+| **Price completeness** | `conditions` keys in `LocalVariantPrices` | Cards with NM, LP, MP, HP all priced = deep market. Single condition priced = thin data |
+| **Price spread** | `low` vs `market` per condition | Tight ratio (low/market > 0.7) = stable, liquid market. Wide spread = volatile/illiquid |
+| **Variant price depth** | Number of variants with non-null `market` | Multiple variants priced (normal, holo, reverse) = widely traded card |
+| **1-day trend presence** | `trends.days_1` non-null | Most granular signal. If Scrydex has 1-day price movement data, the card traded yesterday |
+
+**Tier 2 — Low-cost (from eBay during normal scanning, no extra API calls):**
+
+These are extracted per-listing from data the eBay Browse API already returns.
+
+| Signal | Source | What It Tells You |
+|---|---|---|
+| **Concurrent supply** | Count of eBay listings matching the same card in the scan batch | High supply = cards circulate actively. Zero other listings = niche |
+| **`quantitySold`** | `EbayListing.quantitySold` (eBay Browse API field) | Copies the seller has already sold from this listing. Multiple = proven demand |
+| **Seller feedback score** | `EbayListing.seller.feedbackScore` | High-volume sellers tend to list liquid cards — they know what moves |
+
+**Tier 3 — On-demand (Scrydex `/cards/{id}/listings`, 3 credits per call):**
+
+Only fetched selectively for high-profit deals where the free signals are ambiguous.
+
+| Signal | Source | What It Tells You |
+|---|---|---|
+| **Sales velocity** | Count of listings returned with `sold_at` in last 7/30 days | Direct measure of how often the card changes hands. The gold standard |
+| **Recent sale prices** | `price` field on returned listings | Confirm the `market` price reflects actual recent transactions, not stale aggregates |
+
+#### When to Call `/listings` (Credit Budget)
+
+The `/listings` endpoint costs 3 credits per call — too expensive for every card, but worthwhile for high-value deals where free signals are inconclusive.
+
+```
+Call /listings when ALL of the following are true:
+  1. Deal profit > configurable threshold (default: £10 absolute)
+  2. Deal confidence tier = high or medium
+  3. Tier-1 liquidity score = medium or ambiguous (high liquidity = don't need it, low = don't waste credits)
+  4. Card hasn't had /listings fetched in the last 7 days (cache locally)
+
+Budget impact:
+  Estimated 50-100 calls/month × 3 credits = 150-300 credits
+  < 1% of monthly budget — negligible
+```
+
+Results from `/listings` calls are cached in PostgreSQL per card with a 7-day TTL. If the same card appears in multiple deals within a week, the cached velocity data is reused.
+
+#### Composite Liquidity Score
+
+Combine the available signals into a single 0-1 score using a weighted average. Unlike confidence scoring (geometric mean where any low score drags the composite down), liquidity uses an **arithmetic mean** — a card can have some weak signals and still be liquid if other signals are strong.
+
+```typescript
+interface LiquidityAssessment {
+  composite: number;              // 0.0 - 1.0
+  grade: 'high' | 'medium' | 'low' | 'illiquid';
+
+  // Tier 1: from local card index (always available)
+  trendActivity: number;          // 0-1: proportion of trend windows with non-zero movement
+  priceCompleteness: number;      // 0-1: conditions priced / 4
+  priceSpread: number;            // 0-1: low/market ratio (1.0 = tight, 0 = huge gap)
+  variantDepth: number;           // 0-1: variants with prices / total variants
+
+  // Tier 2: from eBay listing (available at deal time)
+  concurrentSupply: number;       // Raw count of matching eBay listings in current scan
+  quantitySold: number;           // From eBay listing (0 if not available)
+
+  // Tier 3: from Scrydex /listings (optional, cached)
+  salesVelocity: {
+    sales7d: number;              // Sold listings in last 7 days
+    sales30d: number;             // Sold listings in last 30 days
+    fetched: boolean;             // Whether /listings was actually called
+    fetchedAt: Date | null;       // Cache timestamp
+  } | null;
+}
+
+function calculateLiquidity(
+  card: LocalCard,
+  variant: LocalVariant,
+  condition: string,
+  ebaySignals: { concurrentSupply: number; quantitySold: number },
+  salesCache: SalesVelocityCache | null,
+): LiquidityAssessment {
+  // Tier 1: Trend activity
+  // Count how many of the 4 trend windows (1d, 7d, 30d, 90d) have non-zero percentChange
+  const conditionPrices = variant.prices.conditions[condition];
+  const trendWindows = conditionPrices?.trends
+    ? [conditionPrices.trends.days_1, conditionPrices.trends.days_7,
+       conditionPrices.trends.days_30, conditionPrices.trends.days_90]
+    : [];
+  const activeWindows = trendWindows.filter(t => t !== null && t.percentChange !== 0).length;
+  const trendActivity = activeWindows / 4;
+
+  // Tier 1: Price completeness
+  const conditionsPriced = Object.values(variant.prices.conditions)
+    .filter(c => c.market !== null).length;
+  const priceCompleteness = conditionsPriced / 4;
+
+  // Tier 1: Price spread (tight = liquid)
+  const low = conditionPrices?.low;
+  const market = conditionPrices?.market;
+  const priceSpread = (low && market && market > 0)
+    ? Math.min(low / market, 1.0)   // Capped at 1.0
+    : 0.3;                           // Unknown = assume moderate spread
+
+  // Tier 1: Variant depth
+  const variantsWithPrices = card.variants.filter(v =>
+    Object.values(v.prices.conditions).some(c => c.market !== null)
+  ).length;
+  const variantDepth = card.variants.length > 0
+    ? variantsWithPrices / card.variants.length
+    : 0;
+
+  // Tier 2: eBay supply signal (diminishing returns — 5+ listings = max signal)
+  const supplyScore = Math.min(ebaySignals.concurrentSupply / 5, 1.0);
+
+  // Tier 2: Quantity sold (diminishing returns — 3+ = max signal)
+  const soldScore = Math.min(ebaySignals.quantitySold / 3, 1.0);
+
+  // Tier 3: Sales velocity (if available from cache)
+  let velocityScore = 0.5;  // Neutral default if not fetched
+  if (salesCache?.fetched) {
+    // 5+ sales in 7 days = very liquid. 0 sales in 30 days = illiquid
+    if (salesCache.sales7d >= 5) velocityScore = 1.0;
+    else if (salesCache.sales7d >= 2) velocityScore = 0.85;
+    else if (salesCache.sales30d >= 5) velocityScore = 0.7;
+    else if (salesCache.sales30d >= 2) velocityScore = 0.5;
+    else if (salesCache.sales30d >= 1) velocityScore = 0.3;
+    else velocityScore = 0.1;  // Zero sales in 30 days
+  }
+
+  // Weighted arithmetic mean
+  const weights = salesCache?.fetched
+    ? { trendActivity: 0.15, priceCompleteness: 0.10, priceSpread: 0.10,
+        variantDepth: 0.05, supplyScore: 0.15, soldScore: 0.10, velocityScore: 0.35 }
+    : { trendActivity: 0.25, priceCompleteness: 0.15, priceSpread: 0.15,
+        variantDepth: 0.10, supplyScore: 0.20, soldScore: 0.15, velocityScore: 0.00 };
+
+  const composite =
+    weights.trendActivity * trendActivity +
+    weights.priceCompleteness * priceCompleteness +
+    weights.priceSpread * priceSpread +
+    weights.variantDepth * variantDepth +
+    weights.supplyScore * supplyScore +
+    weights.soldScore * soldScore +
+    weights.velocityScore * velocityScore;
+
+  const grade =
+    composite >= 0.75 ? 'high' :
+    composite >= 0.50 ? 'medium' :
+    composite >= 0.25 ? 'low' :
+    'illiquid';
+
+  return {
+    composite, grade,
+    trendActivity, priceCompleteness, priceSpread, variantDepth,
+    concurrentSupply: ebaySignals.concurrentSupply,
+    quantitySold: ebaySignals.quantitySold,
+    salesVelocity: salesCache ? {
+      sales7d: salesCache.sales7d,
+      sales30d: salesCache.sales30d,
+      fetched: salesCache.fetched,
+      fetchedAt: salesCache.fetchedAt,
+    } : null,
+  };
+}
+```
+
+#### Liquidity Grades
+
+| Grade | Composite | Flip Expectation | Dashboard Treatment |
+|---|---|---|---|
+| **High** | >= 0.75 | Sells within days | Full confidence in deal. No warning |
+| **Medium** | 0.50 - 0.74 | 1-2 weeks | Show deal. Subtle amber liquidity indicator |
+| **Low** | 0.25 - 0.49 | Weeks to months | Show with strong warning. "Low liquidity" label |
+| **Illiquid** | < 0.25 | May never sell at target | **Hidden by default** (filterable). Red "Illiquid" badge if shown |
+
+#### Integration with Deal Evaluation
+
+Liquidity is assessed **after** matching and **before** tier assignment. It does not affect confidence (those are independent axes), but it **does affect deal tier**:
+
+```typescript
+function adjustTierForLiquidity(
+  baseTier: 'S' | 'A' | 'B' | 'C',
+  liquidity: LiquidityAssessment,
+): 'S' | 'A' | 'B' | 'C' {
+  // Illiquid cards are capped at C-tier regardless of profit
+  if (liquidity.grade === 'illiquid') return 'C';
+
+  // Low liquidity cards are capped at B-tier
+  if (liquidity.grade === 'low' && (baseTier === 'S' || baseTier === 'A')) return 'B';
+
+  // Medium liquidity: downgrade S to A (still a deal, but temper expectations)
+  if (liquidity.grade === 'medium' && baseTier === 'S') return 'A';
+
+  // High liquidity: no adjustment
+  return baseTier;
+}
+```
+
+**Why not just filter illiquid deals out entirely?** Because the user should still be able to see them. A card might be illiquid at market price but the eBay listing is so far below market that you could sell it for less than market and still profit. The liquidity signal informs the decision — it doesn't make it.
+
+#### EbayListing Updates
+
+The eBay poller must now extract `quantitySold` from the Browse API response:
+
+```typescript
+interface EbayListing {
+  // ... existing fields ...
+  quantitySold: number;            // NEW: copies sold from this listing (0 if unavailable)
+}
+```
+
+#### Concurrent Supply Tracking
+
+During each scan cycle, the arbitrage engine tracks how many eBay listings matched the same local card. This is a free signal computed as a side effect of normal matching:
+
+```typescript
+// After matching all listings in a scan batch:
+const supplyMap = new Map<string, number>();  // scrydexCardId → count of listings
+
+for (const deal of scanResults) {
+  const cardId = deal.matchResult.card.scrydexCardId;
+  supplyMap.set(cardId, (supplyMap.get(cardId) || 0) + 1);
+}
+
+// Attach concurrent supply count to each deal
+for (const deal of scanResults) {
+  deal.liquidity.concurrentSupply = supplyMap.get(deal.matchResult.card.scrydexCardId) || 0;
+}
+```
+
+This accumulates over time in PostgreSQL — the `deals` table records which cards appear repeatedly across scan cycles, building a rolling picture of supply depth.
+
+---
+
+### 2.8 Accuracy Measurement & Enforcement
 
 #### How to Measure Accuracy
 
@@ -1253,7 +1501,7 @@ describe('Match accuracy corpus', () => {
 
 ---
 
-### 2.8 Manual Listing Lookup Tool
+### 2.9 Manual Listing Lookup Tool
 
 A standalone tool where you can paste an eBay listing URL (or item ID) and get a full pipeline evaluation — without waiting for the scanner to pick it up.
 
@@ -1307,7 +1555,7 @@ interface LookupResponse {
 
 ---
 
-### 2.9 Public Card Catalog
+### 2.10 Public Card Catalog
 
 Since the local card index contains a complete, regularly-updated database of every English Pokemon card with images and pricing, we should expose this as a browsable public catalog. This adds value beyond arbitrage and builds the foundation for a broader product.
 
@@ -1367,7 +1615,7 @@ The public catalog is served by the same Railway service as the dashboard. Railw
 
 ---
 
-### 2.10 Implementation Roadmap
+### 2.11 Implementation Roadmap
 
 #### Phase 1: Card Index Foundation (Week 1-2)
 
@@ -1509,9 +1757,9 @@ pokesnipe/
 
 ---
 
-### 2.11 Backend API Contract
+### 2.12 Backend API Contract
 
-This section defines the backend endpoints that serve the frontend dashboard (see `FRONTEND_DESIGN_SPEC.md`). Endpoints for the manual lookup tool (section 2.8) and public card catalog (section 2.9) are defined in their respective sections and not repeated here.
+This section defines the backend endpoints that serve the frontend dashboard (see `FRONTEND_DESIGN_SPEC.md`). Endpoints for the manual lookup tool (section 2.9) and public card catalog (section 2.10) are defined in their respective sections and not repeated here.
 
 #### Real-Time Deal Stream
 
@@ -1544,6 +1792,8 @@ data: {
   confidenceTier: 'high' | 'medium' | 'low';
   condition: string;              // NM | LP | MP | HP
   priceTrend7d: number;           // % change
+  liquidityGrade: 'high' | 'medium' | 'low' | 'illiquid';
+  liquidityScore: number;         // 0-1 composite
   ebayUrl: string;
   listedAt: string;               // ISO 8601
   createdAt: string;              // ISO 8601
@@ -1640,6 +1890,8 @@ interface DealSummary {
   confidenceTier: 'high' | 'medium' | 'low';
   condition: string;
   priceTrend7d: number;
+  liquidityGrade: 'high' | 'medium' | 'low' | 'illiquid';
+  liquidityScore: number;
   ebayUrl: string;
   listedAt: string;
   createdAt: string;
@@ -1716,6 +1968,25 @@ interface DealDetailResponse {
     };
   };
 
+  // Liquidity breakdown (see §2.7)
+  liquidity: {
+    composite: number;
+    grade: 'high' | 'medium' | 'low' | 'illiquid';
+    signals: {
+      trendActivity: number;        // 0-1
+      priceCompleteness: number;    // 0-1
+      priceSpread: number;          // 0-1
+      variantDepth: number;         // 0-1
+      concurrentSupply: number;     // Raw count
+      quantitySold: number;         // From eBay listing
+    };
+    salesVelocity: {
+      sales7d: number;
+      sales30d: number;
+      fetchedAt: string;            // ISO 8601
+    } | null;                        // null if /listings wasn't called
+  };
+
   // Accuracy review state
   review: {
     reviewedAt: string | null;
@@ -1731,6 +2002,35 @@ interface DealDetailResponse {
 interface DealReviewRequest {
   isCorrectMatch: boolean;
   incorrectReason?: 'wrong_card' | 'wrong_expansion' | 'wrong_variant' | 'wrong_price';
+}
+
+// GET /api/deals/:dealId/liquidity
+// On-demand sales velocity fetch from Scrydex /listings (3 credits).
+// Returns cached data if available and <7 days old. Otherwise calls
+// Scrydex and caches the result.
+//
+// Response:
+interface DealLiquidityResponse {
+  dealId: string;
+  liquidity: {
+    composite: number;            // Updated composite with velocity data
+    grade: 'high' | 'medium' | 'low' | 'illiquid';
+    signals: {
+      trendActivity: number;
+      priceCompleteness: number;
+      priceSpread: number;
+      variantDepth: number;
+      concurrentSupply: number;
+      quantitySold: number;
+    };
+    salesVelocity: {
+      sales7d: number;
+      sales30d: number;
+      fetchedAt: string;          // ISO 8601
+    };
+  };
+  cached: boolean;                // true if from cache (no credits spent)
+  creditsUsed: number;            // 0 if cached, 3 if freshly fetched
 }
 ```
 
@@ -1851,16 +2151,17 @@ Confidence: 92% (high)
 | `/api/deals` | GET | Bearer token | Paginated deal list |
 | `/api/deals/:id` | GET | Bearer token | Deal detail with audit |
 | `/api/deals/:id/review` | POST | Bearer token | Accuracy feedback |
+| `/api/deals/:id/liquidity` | GET | Bearer token | On-demand sales velocity (§2.7) |
 | `/api/status` | GET | Bearer token | System health |
 | `/api/preferences` | GET/PUT | Bearer token | User preferences |
 | `/api/notifications/telegram/test` | POST | Bearer token | Test Telegram config |
 | `/api/notifications/telegram/status` | GET | Bearer token | Telegram health |
-| `/api/lookup` | POST | Bearer token | Manual listing lookup (§2.8) |
-| `/api/catalog/expansions` | GET | None (public) | Expansion list (§2.9) |
-| `/api/catalog/expansions/:id` | GET | None (public) | Expansion detail (§2.9) |
-| `/api/catalog/cards/search` | GET | None (public) | Card search (§2.9) |
-| `/api/catalog/cards/:id` | GET | None (public) | Card detail (§2.9) |
-| `/api/catalog/trending` | GET | None (public) | Price movers (§2.9) |
+| `/api/lookup` | POST | Bearer token | Manual listing lookup (§2.9) |
+| `/api/catalog/expansions` | GET | None (public) | Expansion list (§2.10) |
+| `/api/catalog/expansions/:id` | GET | None (public) | Expansion detail (§2.10) |
+| `/api/catalog/cards/search` | GET | None (public) | Card search (§2.10) |
+| `/api/catalog/cards/:id` | GET | None (public) | Card detail (§2.10) |
+| `/api/catalog/trending` | GET | None (public) | Price movers (§2.10) |
 
 All private endpoints require `Authorization: Bearer <DASHBOARD_SECRET>`. The `DASHBOARD_SECRET` is a Railway environment variable. Public catalog endpoints are open — they serve the public-facing card database.
 
@@ -1892,3 +2193,4 @@ All private endpoints require `Authorization: Bearer <DASHBOARD_SECRET>`. The `D
 | **Deployment** | Manual (not documented) | GitHub → Railway auto-deploy, GitHub Actions CI with accuracy gate |
 | **Database** | None (in-memory) | Managed PostgreSQL on Railway with trigram + FTS indexes |
 | **Secrets management** | Hardcoded or .env file | Railway environment variables, never in repo |
+| **Liquidity assessment** | None | Composite score from trend activity, price completeness, eBay supply, and optional sales velocity |
