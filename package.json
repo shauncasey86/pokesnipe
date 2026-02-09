@@ -13,7 +13,7 @@
     "build": "npm run build:client && npm run build:server",
     "build:client": "vite build",
     "build:server": "tsc -p tsconfig.server.json",
-    "start": "node dist/server/index.js",
+    "start": "node-pg-migrate -m migrations -d $DATABASE_URL up && node dist/server/index.js",
     "start:worker": "node dist/server/worker.js",
     "lint": "eslint . --ext .ts,.tsx",
     "typecheck": "tsc -p tsconfig.server.json --noEmit && tsc -p tsconfig.client.json --noEmit",
@@ -34,6 +34,7 @@
     "react": "18.3.1",
     "react-dom": "18.3.1",
     "uuid": "10.0.0",
+    "node-pg-migrate": "7.6.1",
     "zod": "3.23.8"
   },
   "devDependencies": {
@@ -49,7 +50,6 @@
     "eslint": "9.9.1",
     "eslint-plugin-react": "7.35.2",
     "eslint-plugin-react-hooks": "5.1.0",
-    "node-pg-migrate": "7.6.1",
     "tsx": "4.19.0",
     "typescript": "5.5.4",
     "vite": "5.4.3"

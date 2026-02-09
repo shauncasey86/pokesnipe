@@ -116,12 +116,10 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const clientDir = path.join(__dirname, "../client");
 
-if (config.NODE_ENV === "production") {
-  app.use(express.static(clientDir));
-  app.get("*", (_req, res) => {
-    res.sendFile(path.join(clientDir, "index.html"));
-  });
-}
+app.use(express.static(clientDir));
+app.get("*", (_req, res) => {
+  res.sendFile(path.join(clientDir, "index.html"));
+});
 
 app.use((err: Error, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
   logger.error({ err }, "request failed");
