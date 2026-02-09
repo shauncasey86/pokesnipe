@@ -5,7 +5,7 @@ import { trackApiCall } from "./apiUsageTracker.js";
 
 const client = axios.create({
   baseURL: "https://api.scrydex.com/pokemon/v1",
-  timeout: 15000,
+  timeout: 30000,
   headers: {
     "X-Api-Key": config.SCRYDEX_API_KEY,
     "X-Team-ID": config.SCRYDEX_TEAM_ID
@@ -53,12 +53,27 @@ export const fetchExpansions = async (): Promise<ScrydexExpansion[]> => {
   }));
 };
 
+const withRetry = async <T>(fn: () => Promise<T>, retries = 3): Promise<T> => {
+  for (let attempt = 1; attempt <= retries; attempt++) {
+    try {
+      return await fn();
+    } catch (err: any) {
+      if (attempt === retries) throw err;
+      const delay = 2000 * attempt;
+      await new Promise((r) => setTimeout(r, delay));
+    }
+  }
+  throw new Error("unreachable");
+};
+
 export const fetchCardsPage = async (page: number) => {
   await limiter.take();
   trackApiCall("scrydex").catch(() => {});
-  const { data } = await client.get("/cards", {
-    params: { page, page_size: 100, language: "en", include: "prices" }
-  });
+  const { data } = await withRetry(() =>
+    client.get("/cards", {
+      params: { page, page_size: 100, language: "en", include: "prices" }
+    })
+  );
   const items = data.data ?? data.cards ?? [];
   const totalCount = data.total_count ?? 0;
   const pageSize = data.page_size ?? 100;

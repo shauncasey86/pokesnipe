@@ -1,5 +1,5 @@
 import { pool } from "../db/pool.js";
-import { fetchAllCards, fetchExpansions } from "./scrydexClient.js";
+import { fetchCardsPage, fetchExpansions } from "./scrydexClient.js";
 import { pino } from "pino";
 
 const logger = pino({ name: "sync" });
@@ -27,44 +27,56 @@ export const runFullSync = async () => {
     const { rows: expRows } = await pool.query("SELECT id, scrydex_id FROM expansions");
     for (const row of expRows) expLookup.set(row.scrydex_id, row.id);
 
-    const cards = await fetchAllCards((page, count) => {
-      logger.info({ page, count }, "scrydex page synced");
-    });
+    // Process cards page-by-page to avoid memory issues
     let inserted = 0;
-    for (const card of cards) {
-      const expansionId = expLookup.get(card.expansionId);
-      if (!expansionId) continue;
-      // Market price: try various field names the API might use
-      const p = card.prices as Record<string, any>;
-      const marketUsd = p?.market ?? p?.tcgplayer_market ?? p?.normal?.market ?? null;
-      await pool.query(
-        `INSERT INTO cards (scrydex_id, name, card_number, printed_total, rarity, supertype, subtypes, image_url, expansion_id, market_price_usd, prices)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
-         ON CONFLICT (scrydex_id) DO UPDATE
-         SET name=EXCLUDED.name, card_number=EXCLUDED.card_number, printed_total=EXCLUDED.printed_total,
-             rarity=EXCLUDED.rarity, supertype=EXCLUDED.supertype, subtypes=EXCLUDED.subtypes,
-             image_url=EXCLUDED.image_url, expansion_id=EXCLUDED.expansion_id, market_price_usd=EXCLUDED.market_price_usd,
-             prices=EXCLUDED.prices`,
-        [
-          card.id,
-          card.name,
-          card.number,
-          card.printedTotal,
-          card.rarity,
-          card.supertype,
-          card.subtypes,
-          card.images?.large ?? card.images?.small ?? null,
-          expansionId,
-          marketUsd,
-          card.prices
-        ]
-      );
-      inserted++;
+    let page = 1;
+    while (true) {
+      const data = await fetchCardsPage(page);
+      const cards = data.cards ?? [];
+
+      for (const card of cards) {
+        const expansionId = card.expansion?.id ?? card.id?.split("-").slice(0, -1).join("-") ?? "";
+        const dbExpansionId = expLookup.get(expansionId);
+        if (!dbExpansionId) continue;
+
+        const p = card.prices as Record<string, any> | undefined;
+        const marketUsd = p?.market ?? p?.tcgplayer_market ?? p?.normal?.market ?? null;
+
+        await pool.query(
+          `INSERT INTO cards (scrydex_id, name, card_number, printed_total, rarity, supertype, subtypes, image_url, expansion_id, market_price_usd, prices)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+           ON CONFLICT (scrydex_id) DO UPDATE
+           SET name=EXCLUDED.name, card_number=EXCLUDED.card_number, printed_total=EXCLUDED.printed_total,
+               rarity=EXCLUDED.rarity, supertype=EXCLUDED.supertype, subtypes=EXCLUDED.subtypes,
+               image_url=EXCLUDED.image_url, expansion_id=EXCLUDED.expansion_id, market_price_usd=EXCLUDED.market_price_usd,
+               prices=EXCLUDED.prices`,
+          [
+            card.id,
+            card.name,
+            card.number ?? card.printed_number ?? null,
+            card.printed_total ?? card.printedTotal ?? null,
+            card.rarity ?? null,
+            card.supertype ?? null,
+            card.subtypes ?? [],
+            card.images?.large ?? card.images?.small ?? null,
+            dbExpansionId,
+            marketUsd,
+            card.prices ?? {}
+          ]
+        );
+        inserted++;
+      }
+
+      logger.info({ page, pageCards: cards.length, totalInserted: inserted }, "scrydex page synced");
+
+      if (!data.hasMore) break;
+      page += 1;
     }
+
     logger.info({ expansions: expansions.length, cards: inserted }, "sync totals");
     await pool.query("UPDATE sync_log SET status='completed', finished_at=now() WHERE id=$1", [logId]);
   } catch (error) {
-    logger.error({ error }, "sync failed");
+    logger.error({ error: error instanceof Error ? error.message : error }, "sync failed");
     await pool.query(
       "UPDATE sync_log SET status='failed', finished_at=now(), error=$2 WHERE id=$1",
       [logId, error instanceof Error ? error.message : "unknown error"]
