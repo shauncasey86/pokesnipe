@@ -11,9 +11,9 @@
 - [Part 2: Ground-Up Redesign](#part-2-ground-up-redesign)
   - [2.1 High-Level Architecture](#21-high-level-architecture)
   - [2.2 API Budget & Rate Limit Constraints](#22-api-budget--rate-limit-constraints)
-  - [2.3 Data Collection Layer](#23-data-collection-layer)
-  - [2.4 Normalization Pipeline](#24-normalization-pipeline)
-  - [2.5 Matching Engine](#25-matching-engine)
+  - [2.3 Scrydex Card Index](#23-scrydex-card-index)
+  - [2.4 Signal Extraction](#24-signal-extraction)
+  - [2.5 Local Index Matching](#25-local-index-matching)
   - [2.6 Confidence Scoring & Validation](#26-confidence-scoring--validation)
   - [2.7 Accuracy Measurement & Enforcement](#27-accuracy-measurement--enforcement)
   - [2.8 Implementation Roadmap](#28-implementation-roadmap)
@@ -216,74 +216,100 @@ Each relaxation increases match volume but also increases false positive rate. W
 
 ## Part 2: Ground-Up Redesign
 
+### Why the Beta's Fundamental Approach is Wrong
+
+The beta — and my initial redesign proposal — both follow the same pipeline:
+
+```
+eBay listing → parse title → guess expansion → query Scrydex live → hope it matches
+```
+
+This is **eBay-first, Scrydex-reactive.** Every listing triggers 1-6 live Scrydex API calls. At 40 listings per scan, that's 40-240 credits per scan cycle. With a 50,000 credit/month budget, you're constantly rationing, throttling, and burning credits on failed queries.
+
+The better approach inverts the pipeline entirely:
+
+```
+Scrydex → local card index (background) → eBay listing → match locally → zero API credits
+```
+
+**Scrydex-first, eBay-reactive.** Build a local database of every English card with prices. When an eBay listing arrives, match it against the local index. The matching is a database query, not an API call. Scrydex credits are spent on bulk syncing (cheap, predictable) rather than per-listing lookups (expensive, unpredictable).
+
+**The numbers make this obvious:**
+- ~350 English expansions, ~25,000-40,000 English cards total
+- At 100 cards per page, a full sync = 250-400 API calls = **250-400 credits** (one-time)
+- With `?include=prices`, each call returns price data at no extra cost (still 1 credit)
+- Weekly full resync = 1,600 credits/month
+- Leaves **48,000+ credits** for targeted refreshes, manual queries, and safety buffer
+- Beta approach: 1,500 credits/day × 30 = **45,000 credits/month** on reactive per-listing queries
+
+This isn't a marginal improvement. It's a **97% reduction in matching-related API costs.**
+
 ### 2.1 High-Level Architecture
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
-│                        DATA COLLECTION LAYER                        │
-│  ┌──────────────┐  ┌──────────────────┐  ┌───────────────────────┐ │
-│  │ eBay Poller   │  │ Scrydex Catalog  │  │ Exchange Rate Svc    │ │
-│  │ (Browse API)  │  │ Sync Service     │  │ (periodic refresh)   │ │
-│  └──────┬───────┘  └────────┬─────────┘  └──────────┬────────────┘ │
-│         │                   │                        │              │
-└─────────┼───────────────────┼────────────────────────┼──────────────┘
-          │                   │                        │
-          ▼                   ▼                        ▼
+│              BACKGROUND: SCRYDEX CARD INDEX (runs independently)     │
+│                                                                     │
+│  ┌───────────────┐     ┌──────────────────┐     ┌───────────────┐  │
+│  │ Catalog Sync   │────▶│ Local Card DB    │────▶│ Search Index  │  │
+│  │ (daily/weekly) │     │ (all EN cards +  │     │ (number, name,│  │
+│  │                │     │  prices, images) │     │  expansion)   │  │
+│  └───────────────┘     └──────────────────┘     └───────────────┘  │
+│         ▲                                              │            │
+│    Scrydex API                                         │            │
+│    (~400 credits                                       │            │
+│     per full sync)                                     │            │
+└────────────────────────────────────────────────────────┼────────────┘
+                                                         │
+                    ┌────────────────────────────────────┘
+                    │ LOCAL LOOKUPS (zero API credits)
+                    ▼
 ┌─────────────────────────────────────────────────────────────────────┐
-│                      NORMALIZATION PIPELINE                          │
-│  ┌──────────────┐  ┌──────────────────┐  ┌───────────────────────┐ │
-│  │ Title Parser  │  │ Structured Data  │  │ Signal Merger         │ │
-│  │ (regex+rules) │  │ Extractor        │  │ (combine all signals) │ │
-│  │               │  │ (item specifics) │  │                       │ │
-│  └──────┬───────┘  └────────┬─────────┘  └──────────┬────────────┘ │
-│         │                   │                        │              │
-│         └───────────────────┴────────────────────────┘              │
-│                             │                                       │
-│                    NormalizedListing                                 │
-└─────────────────────────────┼───────────────────────────────────────┘
-                              │
-                              ▼
-┌─────────────────────────────────────────────────────────────────────┐
-│                         MATCHING ENGINE                              │
-│  ┌──────────────────┐  ┌─────────────────┐  ┌────────────────────┐ │
-│  │ Expansion Resolver│  │ Card Resolver   │  │ Variant Resolver   │ │
-│  │ (catalog lookup)  │  │ (Scrydex query) │  │ (price selection)  │ │
-│  └────────┬─────────┘  └────────┬────────┘  └────────┬───────────┘ │
-│           │                     │                     │             │
-│           └─────────────────────┴─────────────────────┘             │
-│                                 │                                   │
-│                          MatchResult                                │
-│                    (card + confidence score)                         │
-└─────────────────────────────┼───────────────────────────────────────┘
-                              │
-                              ▼
-┌─────────────────────────────────────────────────────────────────────┐
-│                       ARBITRAGE CALCULATOR                           │
-│  ┌──────────────┐  ┌──────────────────┐  ┌───────────────────────┐ │
-│  │ Price Engine  │  │ Deal Classifier  │  │ Deal Store            │ │
-│  │ (profit calc) │  │ (tier + filter)  │  │ (persist + dedup)     │ │
-│  └──────────────┘  └──────────────────┘  └───────────────────────┘ │
-└─────────────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-┌─────────────────────────────────────────────────────────────────────┐
-│                        PRESENTATION LAYER                            │
-│  ┌──────────────┐  ┌──────────────────┐  ┌───────────────────────┐ │
-│  │ REST API      │  │ Dashboard        │  │ Telegram Notifier     │ │
-│  └──────────────┘  └──────────────────┘  └───────────────────────┘ │
+│                    SCAN-TIME PIPELINE (per eBay listing)             │
+│                                                                     │
+│  eBay Listing                                                       │
+│       │                                                             │
+│       ▼                                                             │
+│  ┌──────────────────────────────────────────┐                       │
+│  │ Signal Extraction                         │                      │
+│  │ • Title parser (regex → card number, name)│                      │
+│  │ • Item specifics (structured fields)      │                      │
+│  │ • Merge + per-field confidence            │                      │
+│  └──────────────────┬───────────────────────┘                       │
+│                     │ NormalizedListing                              │
+│                     ▼                                               │
+│  ┌──────────────────────────────────────────┐                       │
+│  │ Local Index Matching                      │                      │
+│  │ • Number-first: query local DB by number  │                      │
+│  │ • Disambiguate by denominator + name      │                      │
+│  │ • Score candidates → composite confidence │                      │
+│  └──────────────────┬───────────────────────┘                       │
+│                     │ MatchResult (card + prices + confidence)       │
+│                     ▼                                               │
+│  ┌──────────────────────────────────────────┐                       │
+│  │ Arbitrage Calculator                      │                      │
+│  │ • Price comparison (GBP conversion)       │                      │
+│  │ • Profit calc + tier classification       │                      │
+│  │ • Confidence gating (high/med/low/reject) │                      │
+│  └──────────────────┬───────────────────────┘                       │
+│                     │                                               │
+│                     ▼                                               │
+│              Deal (stored) → Dashboard / Telegram                   │
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
 **Key design principles:**
-1. **Each layer is independently testable** — you can unit test the Title Parser without Scrydex, test the Matching Engine with mock listings, and test the Arbitrage Calculator with mock match results.
-2. **Data flows in one direction** — no component reaches back up the pipeline.
-3. **Confidence is accumulated** — each layer adds confidence signals, and the final score reflects the full match quality.
+1. **Scrydex-first, not eBay-first.** The card database exists locally before any eBay scanning begins. Matching is a local database query, not an API call.
+2. **API credits are spent on bulk syncing, not per-listing lookups.** A full card index sync costs ~400 credits. The beta spent that much in a single scan cycle.
+3. **Number-first matching.** Card numbers are the most reliable signal in eBay titles. Match on number first, disambiguate on name/expansion second. This inverts the beta's approach of guessing expansion first.
+4. **Each component is independently testable.** The matching engine works entirely offline against the local index.
+5. **Confidence is accumulated per field** and a composite score gates whether a match becomes a deal.
 
 ---
 
 ### 2.2 API Budget & Rate Limit Constraints
 
-Every design decision must account for two hard API constraints. Overage charges on Scrydex and rate-limit suspensions on eBay are both unacceptable.
+Every design decision must account for two hard API constraints. Overage charges on Scrydex and rate-limit suspensions on eBay are both unacceptable. The Scrydex-first architecture fundamentally changes how credits are spent — bulk syncing replaces per-listing queries.
 
 #### Scrydex API Limits
 
@@ -292,53 +318,49 @@ Every design decision must account for two hard API constraints. Overage charges
 | **Monthly credit cap** | **50,000 credits** | Hard budget — no overage charges permitted |
 | **Per-second rate limit** | **100 requests/second** | Applied across all endpoints globally |
 | **Standard request cost** | 1 credit | Cards, expansions, sealed products |
+| **`?include=prices`** | Still 1 credit | Price data bundled free with card queries |
 | **Price history request cost** | 3 credits | `/cards/{id}/listings` endpoint |
 | **Usage refresh lag** | 20-30 minutes | `GET /account/v1/usage` updates are delayed |
 
-**Budget allocation (monthly):**
+**Budget allocation (monthly) — Scrydex-first model:**
 
 | Purpose | Credits | % of Budget | Frequency |
 |---|---|---|---|
-| Catalog sync | ~500 | 1% | Daily (3-5 paginated calls × 30 days) |
-| Card matching (primary) | ~35,000 | 70% | Per-listing Scrydex queries |
-| Card matching (fallbacks) | ~8,000 | 16% | Padded/wildcard/scoped retries |
+| **Full card index sync** | **~1,600** | **3.2%** | Weekly full resync (4 × ~400 credits) |
+| Hot-set delta refresh | ~900 | 1.8% | Daily refresh of 10 most recent sets |
+| Expansion catalog sync | ~120 | 0.2% | Daily (4 paginated calls × 30 days) |
+| High-value price verification | ~1,500 | 3% | 500 targeted price_history calls for top deals |
 | Usage monitoring | ~720 | 1.4% | Hourly usage checks (24/day × 30) |
-| Manual searches | ~2,000 | 4% | Dashboard search, ad-hoc queries |
-| **Safety buffer** | **~3,780** | **7.6%** | **Unallocated — prevents overage** |
+| Manual / dashboard queries | ~2,000 | 4% | Ad-hoc searches from the UI |
+| **Unallocated safety buffer** | **~43,160** | **86.3%** | **Prevents overage — massive headroom** |
 
-**Daily budget derivation:**
+Compare with the beta: **70% of budget went to per-listing Scrydex queries.** The Scrydex-first model spends **<5% on automated sync** and leaves 86% unallocated.
 
+**Why the numbers work:**
 ```
-Base daily budget = 50,000 ÷ 30 = 1,666 credits/day
-Safety margin (10%) = 1,666 × 0.9 = 1,500 credits/day (usable)
-
-Dynamic adjustment:
-  remaining_credits = 50,000 - month_to_date_usage
-  days_remaining = days_left_in_billing_cycle
-  effective_daily = floor(remaining_credits × 0.9 / days_remaining)
-  clamped_daily = clamp(effective_daily, 100, 3,000)
+~350 EN expansions × ~100 cards avg = ~35,000 cards
+At page_size=100: ~350 paginated requests per full sync
+With ?include=prices: 350 requests × 1 credit = ~350 credits per full sync
+Weekly full resync: 350 × 4 weeks = ~1,400 credits/month
+Daily delta (10 recent sets × ~5 pages): 50 × 30 = ~1,500 credits/month
+Total automated sync: ~2,900 credits/month = 5.8% of budget
 ```
 
-The system must check `GET /account/v1/usage` every hour to track actual consumption and dynamically adjust the daily budget. If `remaining_credits < 2,000`, halt all automated scanning and alert the operator.
+**Credit monitoring:**
 
-**Credit-aware query strategy:**
+The system must check `GET /account/v1/usage` every hour. However, because automated consumption is so low (~100 credits/day for syncing), the kill-switch thresholds are much more relaxed:
+- If `remaining_credits < 5,000`: reduce sync frequency to weekly-only, alert operator
+- If `remaining_credits < 2,000`: halt all automated syncing, alert via Telegram
+- Dashboard and cached local data continue to work regardless — matching is local
 
-The matching engine must minimize Scrydex API calls per listing:
-
-1. **Cache-first:** Check the local query cache before any API call. The beta's `queriedCards` map (expansion:number → card data) should be persisted to Redis/database so it survives restarts.
-2. **One-shot matching preferred:** The primary `expansion.id:{id} number:{number}` query costs 1 credit. If it hits, no further credits are spent on that listing.
-3. **Fallback budget:** Each fallback strategy costs 1 additional credit. Cap total fallback attempts at **2 per listing** (down from the beta's 5). At 40 listings/scan × 2 fallbacks worst-case = 120 credits/scan max.
-4. **Batch where possible:** The daily catalog sync should use `page_size=100` to minimize pagination calls (e.g., ~350 EN expansions = 4 calls = 4 credits).
-5. **Never call price_history:** At 3 credits per call, the `/listings` endpoint is too expensive for automated use. Use `?include=prices` on card queries instead (included in the 1-credit card request).
-6. **Kill switch:** If `daily_credits_used >= effective_daily_budget`, stop scanning immediately. Do not queue — halt.
+**Key rule: Never call price_history for automated matching.** At 3 credits per call, `/cards/{id}/listings` is reserved for manual verification of high-value deals only. The `?include=prices` parameter on standard card queries returns current market/low prices at no extra cost.
 
 **Rate limit handling (100 req/s):**
 
-At 100 requests/second, this is unlikely to be a bottleneck for a single-instance scanner. However:
+At 100 requests/second, this is unlikely to be a bottleneck. The heaviest load is the weekly full sync (~350 requests), which at 100 req/s completes in under 4 seconds. However:
 - Implement a token-bucket rate limiter (100 tokens, refills at 100/second)
 - On HTTP 429 response, back off exponentially: 1s → 2s → 4s → max 30s
-- Log all 429 responses as warnings for monitoring
-- The catalog sync (which fetches multiple pages rapidly) should insert a 50ms delay between paginated requests to stay well under the limit
+- The card index sync should insert a 50ms delay between paginated requests to stay well under the limit and be a good API citizen
 
 #### eBay Browse API Limits
 
@@ -364,34 +386,136 @@ Since eBay's exact limits are opaque and account-dependent:
    Scan interval: dynamically calculated = operating_minutes_remaining / scans_remaining
    Clamped to: [10 minutes, 30 minutes]
    ```
-3. **Listings per scan:** 40 items (1 API call). The beta used `limit=40` which balances coverage vs. credit consumption. Increasing to 200 would give broader coverage per scan but fewer total scans per day.
+3. **Listings per scan:** 40-200 items (1 API call). Since matching is now local (zero Scrydex cost per listing), we can increase to `limit=200` for broader coverage without any credit penalty. The only constraint is eBay's daily call allowance.
 4. **Exponential backoff on 429:** 1 min → 2 min → 4 min → max 5 min. Reset consecutive counter on successful request.
-5. **Avoid item-level enrichment calls:** The beta made additional per-item API calls for condition enrichment. In v2, extract everything needed from the initial search response (which includes `itemSpecifics` and `conditionDescriptors`).
+5. **Avoid item-level enrichment calls:** Extract everything needed from the initial search response (which includes `itemSpecifics` and `conditionDescriptors`). No per-item follow-up calls.
 
-#### Combined Credit Budget Tracking
+#### Combined Budget Tracking
 
 The footer status bar must display:
 
 ```
-Scrydex: 1,240 / 50,000 (monthly) | 312 / 1,500 (today) | Buffer: 3,780
+Scrydex: 2,340 / 50,000 (monthly) | Card Index: 34,892 cards | Last sync: 2h ago
 eBay: 1,847 / ~5,000 (daily) | Status: OK
 ```
 
 Both APIs must have independent circuit breakers:
-- **Scrydex exhausted:** Stop all automated scanning + card resolution. Dashboard still works (cached data). Alert via Telegram.
+- **Scrydex budget low:** Reduce sync frequency. Dashboard and matching continue to work from local card index.
 - **eBay rate-limited:** Pause scanning, show countdown to retry. Resume automatically when backoff expires.
 - **Both healthy:** Normal operation.
 
+The critical insight: **eBay rate limits are now the only bottleneck.** Scrydex budget is no longer a constraining factor for scan throughput.
+
 ---
 
-### 2.3 Data Collection Layer
+### 2.3 Scrydex Card Index
+
+This is the heart of the Scrydex-first architecture. A background service builds and maintains a **complete local database of every English Pokemon card with current prices.** Matching happens against this local index — not via live API calls.
+
+#### Card Index Schema
+
+```typescript
+interface LocalCard {
+  scrydexCardId: string;       // Canonical Scrydex card ID
+  name: string;                // e.g., "Charizard ex"
+  number: string;              // e.g., "6", "TG07", "SV65"
+  numberNormalized: string;    // Stripped prefixes, no leading zeros: "6", "7", "65"
+  expansionId: string;         // FK → LocalExpansion
+  expansionName: string;       // Denormalized for fast access
+  expansionCode: string;       // e.g., "sv8"
+  printedTotal: number;        // Denominator: /162
+  rarity: string | null;
+  imageUrl: string | null;
+  variants: LocalVariant[];
+  lastSyncedAt: Date;
+}
+
+interface LocalVariant {
+  name: string;                // e.g., "holofoil", "reverseHolofoil", "normal"
+  priceRaw: number | null;     // USD — raw/ungraded market price
+  priceLow: number | null;     // USD — lowest recent sale
+  priceMarket: number | null;  // USD — market average
+  priceGraded: Record<string, number> | null;  // grade → price
+  lastPriceUpdate: Date;
+}
+
+interface LocalExpansion {
+  scrydexId: string;           // Canonical Scrydex ID — single source of truth
+  name: string;
+  code: string;
+  series: string;
+  printedTotal: number;
+  total: number;               // Including secret rares
+  releaseDate: Date;
+  languageCode: string;
+  logo: string | null;
+  symbol: string | null;
+  lastSyncedAt: Date;
+}
+```
+
+#### Sync Strategies
+
+**Initial full sync (one-time, ~400 credits):**
+
+```
+1. Fetch all EN expansions:
+   GET /pokemon/v1/expansions?q=language_code:EN&page_size=100
+   → ~4 pages = ~4 credits
+
+2. For each expansion, fetch all cards with prices:
+   GET /pokemon/v1/cards?q=expansion.id:{id}&include=prices&page_size=100
+   → ~350 expansions × ~1 page avg = ~350 credits
+   (Large sets like Scarlet & Violet 151 need 2-3 pages)
+
+Total: ~350-400 credits for the entire English card catalog with prices.
+```
+
+**Weekly full resync (~400 credits):**
+
+Re-fetch everything to catch price movements, new printings, and corrections. Run during off-peak hours (e.g., 03:00 UK time Sunday). Upsert into the local DB — don't delete/recreate.
+
+**Daily hot-set refresh (~50 credits):**
+
+Only re-fetch the 10 most recently released expansions (where prices are most volatile). These are the sets most likely to have arbitrage opportunities.
+
+```typescript
+async function dailyHotRefresh(db: Database, scrydex: ScrydexClient) {
+  const recentSets = await db.getExpansions({
+    orderBy: 'releaseDate DESC',
+    limit: 10,
+  });
+  for (const set of recentSets) {
+    await syncCardsForExpansion(db, scrydex, set.scrydexId);
+    await delay(50); // Rate limit courtesy
+  }
+}
+```
+
+**Expansion catalog sync (daily, ~4 credits):**
+
+Check for new expansions added to Scrydex. If a new expansion appears, trigger a full card sync for that expansion only.
+
+#### Search Indexes
+
+Build these indexes on the local card DB for fast matching:
+
+| Index | Purpose | Example Query |
+|---|---|---|
+| `number + printedTotal` | Number-first matching | "Find all cards numbered 6 in sets with 162 cards" |
+| `number + expansionId` | Direct card lookup | "Card #6 in expansion X" |
+| `numberNormalized` | Prefix-agnostic search | "65" matches both "SV65" and "TG65" and "065" |
+| `name (trigram/FTS)` | Fuzzy name search | "Charizard" finds "Charizard ex", "Charizard V" |
+| `expansionName` | Expansion text search | "Surging Sparks" |
+| `expansionCode` | Code lookup | "sv8" |
+
+With SQLite FTS5 or PostgreSQL trigram indexes, these queries execute in <1ms — orders of magnitude faster than a live API call.
 
 #### eBay Poller
 
-Responsibility: Fetch new listings from eBay Browse API and emit raw `EbayListing` objects.
+Responsibility: Fetch new listings from eBay Browse API and emit raw `EbayListing` objects. Unchanged from the beta's role, but simplified because it no longer triggers Scrydex calls.
 
 ```typescript
-// Poller is ONLY responsible for fetching. No parsing, no filtering.
 interface EbayListing {
   itemId: string;
   title: string;
@@ -408,52 +532,27 @@ interface EbayListing {
 }
 ```
 
-**Changes from beta:**
-- Extract and preserve `itemSpecifics` / `localizedAspects` from eBay API — fields like "Card Name", "Set", "Card Number" are often available as structured seller-provided data
+**Key changes from beta:**
+- Extract and preserve `itemSpecifics` / `localizedAspects` — fields like "Card Name", "Set", "Card Number" are often available as structured seller-provided data
 - Poller emits events (or pushes to a queue) rather than calling the engine directly
-- Credit budget management lives here, not in the engine
-
-#### Scrydex Catalog Sync
-
-Responsibility: Maintain a **local mirror** of the Scrydex expansion catalog. Runs on a schedule (daily), not on-demand.
-
-```typescript
-interface LocalExpansion {
-  scrydexId: string;       // The canonical Scrydex ID - single source of truth
-  name: string;
-  code: string;
-  series: string;
-  printedTotal: number;
-  total: number;           // Including secret rares
-  releaseDate: Date;
-  languageCode: string;
-  logo: string | null;
-  symbol: string | null;
-  lastSyncedAt: Date;
-}
-```
-
-**Changes from beta:**
-- **No hardcoded expansion list.** The catalog is fetched from `GET /pokemon/v1/expansions?q=language_code:EN` and stored in the database
-- **No local-to-Scrydex ID remapping.** Use Scrydex IDs as the canonical identifier from the start. The beta's `scrydexIdMap` remapping layer was an artifact of having a separate hardcoded list
-- **Incremental sync:** Only fetch expansions newer than `lastSyncedAt`
-- Build and persist **derived lookup tables**: name→id, code→id, alias→id, printedTotal→[ids]
+- Can now use `limit=200` per search since matching is free (local DB lookups)
+- No Scrydex credit budget management needed — matching costs zero credits
 
 ---
 
-### 2.4 Normalization Pipeline
+### 2.4 Signal Extraction
 
-This is the core improvement. Instead of parsing a title into a guess, we extract **signals from multiple sources** and merge them.
+Before matching against the local card index, we extract **signals from multiple sources** on each eBay listing and merge them into a normalized form. This is the same multi-signal approach but now feeds into local DB queries, not live API calls.
 
-#### Step 1: Title Parser (improved)
+#### Step 1: Title Parser
 
-Same role as beta but restructured:
+Same role as beta but restructured for per-field confidence:
 
 ```typescript
 interface TitleSignals {
-  // Each field has a value AND a confidence
   cardName: { value: string; confidence: number } | null;
   cardNumber: { value: string; raw: string; confidence: number } | null;
+  denominator: { value: number; confidence: number } | null;
   setName: { value: string; confidence: number } | null;
   setCode: { value: string; confidence: number } | null;
   isGraded: boolean;
@@ -463,17 +562,17 @@ interface TitleSignals {
   language: string;
   isFirstEdition: boolean;
   isShadowless: boolean;
-  isJunk: boolean;
-  isFake: boolean;
+  isJunk: boolean;    // Lot, bundle, empty tin, etc.
+  isFake: boolean;    // Proxy, custom, orica, etc.
 }
 ```
 
 **Improvements over beta:**
-- **Per-field confidence** instead of a single score. A title might have high-confidence card number (`"123/456"` is unambiguous) but low-confidence card name (extracted by position heuristic)
-- **Regex patterns are data-driven, not code.** Load patterns from a config file or database so new patterns don't require code changes
-- **Pokemon name matching uses the Scrydex catalog** — query all card names from synced expansions rather than maintaining a hardcoded list
-- **Set name matching uses the expansion catalog** — search the local expansion mirror rather than era-specific regexes
-- **Emoji and noise stripping** as the first normalization pass
+- **Per-field confidence** instead of a single score. `"123/456"` gives high-confidence number AND denominator, while a name extracted by position heuristic gets low confidence
+- **Regex patterns are data-driven.** Load patterns from a config file so new formats don't require code changes
+- **Pokemon name matching uses the local card index** — search all card names from the synced DB rather than maintaining a hardcoded ~300 name list
+- **Set name matching uses the local expansion catalog** — search the expansion table rather than 9 era-specific regexes
+- **Emoji and noise stripping** as the first normalization pass, before any regex matching
 
 #### Step 2: Structured Data Extractor
 
@@ -570,84 +669,192 @@ interface NormalizedListing {
 
 ---
 
-### 2.5 Matching Engine
+### 2.5 Local Index Matching
 
-The matching engine takes a `NormalizedListing` and returns a `MatchResult`. It is a **pure function** (given the same inputs and catalog state, it produces the same output). It does not store deals, track diagnostics, or manage caches.
+The matching engine takes a `NormalizedListing` and returns a `MatchResult` by querying the **local card index** — not Scrydex. It is a pure function: given the same inputs and local DB state, it produces the same output. It costs **zero API credits** per listing.
 
-#### Stage 1: Expansion Resolution
+This inverts the beta's approach:
+- **Beta:** Guess expansion first → query Scrydex by expansion + number → cascade through 6 fallbacks
+- **Redesign:** Extract number first → query local DB for all cards with that number → disambiguate by denominator + name + expansion signals
+
+#### Stage 1: Number-First Candidate Lookup
+
+Card numbers are the most reliable signal in eBay titles. A listing saying `"123/456"` gives us two strong signals: number=123 and denominator=456. We use these to query the local card index directly.
 
 ```typescript
-interface ExpansionResolveResult {
-  expansion: LocalExpansion | null;
-  method: 'exact_id' | 'exact_name' | 'code' | 'alias' | 'fuzzy' | 'denominator' | 'none';
-  confidence: number;            // 0.0 - 1.0
-  alternatives: LocalExpansion[];
-  denominatorValidated: boolean; // true if printed total matches
+interface CandidateLookupResult {
+  candidates: LocalCard[];
+  method: 'number_and_denominator' | 'number_only' | 'name_search' | 'none';
+  narrowingApplied: string[];
+}
+
+function findCandidates(listing: NormalizedListing, db: CardIndex): CandidateLookupResult {
+  const { cardNumber, denominator, setName, setCode, cardName } = listing;
+
+  // Strategy 1: Number + denominator (most specific, typical case)
+  if (cardNumber && denominator) {
+    // Query: all cards where number="123" AND expansion.printedTotal ≈ 456
+    const candidates = db.findByNumberAndDenominator(
+      cardNumber,
+      denominator,
+      tolerance: 5  // ±5 for secret rares beyond printed total
+    );
+    if (candidates.length > 0) {
+      return { candidates, method: 'number_and_denominator', narrowingApplied: ['number', 'denominator'] };
+    }
+  }
+
+  // Strategy 2: Number + expansion signal (when denominator is missing)
+  if (cardNumber && (setName || setCode)) {
+    const expansion = resolveExpansion(setName, setCode, db);
+    if (expansion) {
+      const candidates = db.findByNumberAndExpansion(cardNumber, expansion.scrydexId);
+      if (candidates.length > 0) {
+        return { candidates, method: 'number_only', narrowingApplied: ['number', 'expansion'] };
+      }
+    }
+  }
+
+  // Strategy 3: Number only (broad — may return many candidates)
+  if (cardNumber) {
+    const candidates = db.findByNumber(cardNumber);
+    if (candidates.length > 0 && candidates.length <= 50) {
+      return { candidates, method: 'number_only', narrowingApplied: ['number'] };
+    }
+  }
+
+  // Strategy 4: Name search (last resort — no card number extracted)
+  if (cardName) {
+    const candidates = db.searchByName(cardName, limit: 20);
+    return { candidates, method: 'name_search', narrowingApplied: ['name'] };
+  }
+
+  return { candidates: [], method: 'none', narrowingApplied: [] };
 }
 ```
 
-**Resolution strategy (ordered by confidence):**
-1. **Set code match** (confidence: 0.98) — `"sv8"` → Surging Sparks. Lookup against expansion catalog.
-2. **Exact name match** (confidence: 0.95) — `"Surging Sparks"` → exact match in catalog.
-3. **Alias match** (confidence: 0.92) — `"SuMo"` → `"Sun & Moon"`. Maintained alias table.
-4. **Promo prefix match** (confidence: 0.90) — `"SVP"` → SV Black Star Promos.
-5. **Fuzzy name match** (confidence: 0.60-0.85) — Levenshtein distance with score. Only accept if edit distance ≤ 2 for short names, ≤ 3 for long names.
-6. **Denominator inference** (confidence: 0.40-0.60) — Multiple candidates, weighted by recency. Only used if no other signal works.
+**Why number-first beats expansion-first:**
+- Card numbers are unambiguous in eBay titles: `"123/456"` is a regex, not a fuzzy match
+- The beta's expansion-first approach required guessing the set from free text, then querying Scrydex live. If the set guess was wrong, every subsequent step failed
+- Number + denominator alone narrows to 1-3 candidate cards in most cases, because few sets share the same printed total
+- No API credits consumed — it's a local DB query
 
-**Denominator cross-validation:** If expansion is matched by name AND the listing has a denominator, check `|denominator - expansion.printedTotal| ≤ 5`. If it matches, boost confidence +0.15. If it doesn't match and the expansion was fuzzy-matched, **reject the match** (don't just log a warning).
+#### Stage 2: Candidate Disambiguation
 
-#### Stage 2: Card Resolution
+With candidates returned, we score each one against all available signals:
 
 ```typescript
-interface CardResolveResult {
-  card: ScrydexCard | null;
-  method: 'exact_number' | 'padded_number' | 'scoped_search' | 'name_and_number' | 'none';
-  confidence: number;
-  nameMatchScore: number;       // 0.0 - 1.0
-  numberMatchExact: boolean;
+interface ScoredCandidate {
+  card: LocalCard;
+  scores: {
+    numberMatch: number;       // 1.0 if exact, 0.9 if normalized match
+    denominatorMatch: number;  // 1.0 if exact, scaled by distance
+    nameMatch: number;         // Levenshtein similarity (0.0-1.0)
+    expansionMatch: number;    // How well the set signal matches
+  };
+  composite: number;
+}
+
+function disambiguate(
+  candidates: LocalCard[],
+  listing: NormalizedListing,
+): ScoredCandidate[] {
+  return candidates
+    .map(card => {
+      const nameScore = listing.cardName
+        ? validateNameMatch(listing.cardName, card.name)
+        : 0.5;  // No name signal = neutral
+
+      const denomScore = listing.denominator
+        ? scoreDenominator(listing.denominator, card.printedTotal)
+        : 0.5;
+
+      const expScore = scoreExpansionMatch(listing, card);
+
+      const composite = weightedGeometricMean({
+        numberMatch: { score: 1.0, weight: 0.20 },  // Already filtered by number
+        denominatorMatch: { score: denomScore, weight: 0.25 },
+        nameMatch: { score: nameScore, weight: 0.35 },       // Most important
+        expansionMatch: { score: expScore, weight: 0.20 },
+      });
+
+      return { card, scores: { numberMatch: 1.0, denominatorMatch: denomScore, nameMatch: nameScore, expansionMatch: expScore }, composite };
+    })
+    .filter(c => c.scores.nameMatch >= 0.60)  // Hard floor: reject if name similarity < 0.60
+    .sort((a, b) => b.composite - a.composite);
 }
 ```
-
-**Resolution strategy (ordered by confidence):**
-
-1. **Exact query** (confidence: 0.95) — `expansion.id:{id} number:{number}`. Single Scrydex API call.
-2. **Padded query** (confidence: 0.90) — For subset cards, try zero-padded: `TG7` → `TG07`.
-3. **Expansion-scoped search** (confidence: 0.80) — If exact fails, search within the expansion and find exact number match in results.
-4. **Name + number cross-expansion** (confidence: 0.50) — Only if expansion confidence < 0.7. Search recent expansions. Require name similarity ≥ 0.6 (not 0.25).
-
-**Critical change: No more cascading fallbacks to broader searches.** If the card isn't found in the matched expansion after strategies 1-3, and expansion confidence was ≥ 0.7, return `card: null`. Don't guess. A missed deal is better than a wrong deal.
 
 **Name validation is mandatory, not optional:**
 ```typescript
-function validateNameMatch(parsedName: string, scrydexName: string): number {
-  // Normalize both: lowercase, remove punctuation, remove type suffixes (V, VMAX, ex, GX)
+function validateNameMatch(parsedName: string, cardName: string): number {
   const normalizedParsed = normalizeName(parsedName);
-  const normalizedScrydex = normalizeName(scrydexName);
+  const normalizedCard = normalizeName(cardName);
 
   // Exact match after normalization
-  if (normalizedParsed === normalizedScrydex) return 1.0;
+  if (normalizedParsed === normalizedCard) return 1.0;
 
   // One contains the other (handles "Pikachu" vs "Pikachu V")
-  if (normalizedScrydex.startsWith(normalizedParsed) ||
-      normalizedParsed.startsWith(normalizedScrydex)) {
+  if (normalizedCard.startsWith(normalizedParsed) ||
+      normalizedParsed.startsWith(normalizedCard)) {
     return 0.85;
   }
 
   // Levenshtein-based similarity
-  return levenshteinSimilarity(normalizedParsed, normalizedScrydex);
+  return levenshteinSimilarity(normalizedParsed, normalizedCard);
 }
 ```
 
-**Minimum name similarity: 0.6** (up from beta's 0.3). This is the single most impactful change for accuracy.
+**Minimum name similarity: 0.60** (up from beta's 0.25-0.30). This is the single most impactful change for accuracy. At the local-index scale, we can afford to be strict — rejecting a candidate costs nothing (no wasted API credit), and the correct card is almost certainly in the candidate set if the number was right.
 
-#### Stage 3: Variant Resolution
+#### Stage 3: Expansion Cross-Validation
+
+If the top candidate scores well on name but the listing also has expansion signals, cross-validate:
+
+```typescript
+function crossValidateExpansion(
+  topCandidate: ScoredCandidate,
+  listing: NormalizedListing,
+  db: CardIndex,
+): { validated: boolean; confidenceAdjust: number } {
+  if (!listing.setName && !listing.setCode && !listing.denominator) {
+    return { validated: false, confidenceAdjust: 0 };  // No signal to validate against
+  }
+
+  const card = topCandidate.card;
+
+  // Denominator check
+  if (listing.denominator) {
+    const denomDiff = Math.abs(listing.denominator - card.printedTotal);
+    if (denomDiff <= 5) return { validated: true, confidenceAdjust: +0.10 };
+    if (denomDiff > 15) return { validated: false, confidenceAdjust: -0.20 };
+  }
+
+  // Expansion name/code check
+  if (listing.setCode && card.expansionCode.toLowerCase() === listing.setCode.toLowerCase()) {
+    return { validated: true, confidenceAdjust: +0.15 };
+  }
+
+  if (listing.setName) {
+    const expNameSimilarity = levenshteinSimilarity(
+      listing.setName.toLowerCase(),
+      card.expansionName.toLowerCase()
+    );
+    if (expNameSimilarity >= 0.85) return { validated: true, confidenceAdjust: +0.10 };
+    if (expNameSimilarity < 0.50) return { validated: false, confidenceAdjust: -0.15 };
+  }
+
+  return { validated: false, confidenceAdjust: 0 };
+}
+```
+
+#### Stage 4: Variant Resolution
 
 ```typescript
 interface VariantResolveResult {
-  variant: ScrydexVariant | null;
+  variant: LocalVariant | null;
   method: 'exact' | 'inferred' | 'default';
   confidence: number;
-  prices: ScrydexPrice[];
 }
 ```
 
@@ -658,54 +865,51 @@ interface VariantResolveResult {
    [1stEdition?] + [Shadowless?] + [Holo|ReverseHolo|Normal]
    ```
 
-2. Match against Scrydex variant names using a **mapping table** (not string matching):
+2. Match against the card's local variant names using a **mapping table** (not string matching):
    ```typescript
    const VARIANT_MAP: Record<string, string[]> = {
      'holofoil': ['holofoil', 'holo', 'unlimitedHolofoil'],
      'reverseHolofoil': ['reverseHolofoil', 'reverseHolo'],
      'firstEditionHolofoil': ['firstEditionHolofoil', '1stEditionHolofoil', 'firstEditionHolo'],
      'normal': ['normal', 'unlimited', 'unlimitedNormal'],
-     // ...
    };
    ```
 
-3. If no variant is detected from the listing but the card only has ONE variant with prices, use it (common for modern singles).
+3. If no variant is detected but the card only has ONE variant with prices, use it (common for modern singles).
 
 4. If multiple variants exist and none is detected, **default to the lowest-priced variant** (conservative) and set confidence to 0.5.
 
-#### Composite Confidence Score
+#### Composite Confidence & Match Result
 
 ```typescript
 interface MatchResult {
   listing: NormalizedListing;
-  card: ScrydexCard;
-  expansion: LocalExpansion;
-  variant: ScrydexVariant;
-  prices: ScrydexPrice[];
+  card: LocalCard;
+  variant: LocalVariant;
 
   confidence: {
-    expansion: number;       // 0.0 - 1.0
-    card: number;            // 0.0 - 1.0
-    name: number;            // 0.0 - 1.0
+    numberMatch: number;     // 0.0 - 1.0
+    denominatorMatch: number;// 0.0 - 1.0
+    nameMatch: number;       // 0.0 - 1.0
+    expansionMatch: number;  // 0.0 - 1.0
     variant: number;         // 0.0 - 1.0
-    normalization: number;   // From the normalization pipeline
-    composite: number;       // Weighted average
+    normalization: number;   // From the signal extraction pipeline
+    composite: number;       // Weighted geometric mean
   };
 
   method: {
-    expansion: string;
-    card: string;
-    variant: string;
+    lookup: string;          // 'number_and_denominator' | 'number_only' | 'name_search'
+    variant: string;         // 'exact' | 'inferred' | 'default'
   };
 }
 
 function calculateCompositeConfidence(scores: ConfidenceScores): number {
   // Weighted geometric mean — any single low score drags the composite down
-  // This prevents high expansion confidence from masking low name confidence
   const weights = {
-    expansion: 0.25,
-    card: 0.25,
-    name: 0.30,    // Name match is the most important signal
+    nameMatch: 0.30,         // Name match is the most important signal
+    denominatorMatch: 0.25,  // Denominator validates the expansion implicitly
+    numberMatch: 0.15,       // Usually 1.0 (filtered by number)
+    expansionMatch: 0.10,    // Bonus validation signal
     variant: 0.10,
     normalization: 0.10,
   };
@@ -727,10 +931,12 @@ function calculateCompositeConfidence(scores: ConfidenceScores): number {
 
 | Composite Confidence | Action |
 |---|---|
-| ≥ 0.85 | **High confidence** — process automatically, show in dashboard |
+| >= 0.85 | **High confidence** — process automatically, show in dashboard |
 | 0.65 - 0.84 | **Medium confidence** — process but flag with warning badge |
 | 0.45 - 0.64 | **Low confidence** — log for training data only, do not display as deal |
 | < 0.45 | **Reject** — skip entirely |
+
+**Critical difference from beta:** A rejected or low-confidence match costs **nothing** — no wasted API credit, no fallback cascade. The beta's 6-layer fallback existed because each miss was expensive (a wasted Scrydex credit). With local matching, we can afford to be strict and prefer "no match" over a wrong match.
 
 ---
 
@@ -738,7 +944,7 @@ function calculateCompositeConfidence(scores: ConfidenceScores): number {
 
 #### Validation Layers
 
-Every match passes through explicit validation before becoming a deal:
+Every match passes through explicit validation before becoming a deal. Because matching is local and free, we can apply stricter validation than the beta without worrying about wasted API credits.
 
 ```typescript
 interface ValidationResult {
@@ -748,6 +954,7 @@ interface ValidationResult {
     nameMatch: boolean;
     expansionLanguage: boolean;
     priceDataAvailable: boolean;
+    priceDataFresh: boolean;            // Local prices not stale (< 7 days)
     exchangeRateFresh: boolean;
     sellerCountry: boolean;
   };
@@ -756,21 +963,41 @@ interface ValidationResult {
 ```
 
 **Hard gates (instant rejection):**
-- Name similarity < 0.6
-- Expansion language ≠ EN
+- Name similarity < 0.60
+- Expansion language ≠ EN (should never happen with EN-only local index, but defensive check)
 - Seller country ≠ GB
-- No price data available for matched variant
+- No price data available for matched variant in local DB
+- Local price data older than 7 days (stale — wait for next sync)
 - Exchange rate > 6 hours stale (don't guess at currency conversion)
 
 **Soft gates (confidence reduction):**
 - Denominator mismatch (but within ±15): reduce confidence by 0.2
 - Name similarity 0.6-0.7: reduce confidence by 0.1
-- Expansion matched via fuzzy/denominator: inherent lower confidence already
+- Only 1 narrowing signal used in candidate lookup: reduce confidence by 0.1
 - Condition defaulted (not from structured data or title): reduce confidence by 0.05
 
-#### Accuracy Tracking
+#### Arbitrage Calculation
 
-Every deal should be stored with its match metadata for later analysis:
+Once a match passes validation, compute profitability using local price data:
+
+```typescript
+interface ArbitrageResult {
+  ebayPriceGBP: number;           // Listing price + shipping
+  scrydexPriceUSD: number;        // From local variant prices (market or low)
+  scrydexPriceGBP: number;        // Converted at current exchange rate
+  profitGBP: number;              // scrydexPriceGBP - ebayPriceGBP - fees
+  profitPercent: number;
+  tier: 'S' | 'A' | 'B' | 'C';   // Configurable thresholds
+  exchangeRate: number;
+  exchangeRateAge: number;        // Minutes since last refresh
+}
+```
+
+Price data comes from the local card index — no live Scrydex call needed. The exchange rate service is the only external dependency at deal-evaluation time.
+
+#### Audit Trail
+
+Every deal is stored with full match metadata for accuracy measurement:
 
 ```typescript
 interface DealAuditRecord {
@@ -781,7 +1008,7 @@ interface DealAuditRecord {
   // What we parsed
   normalizedListing: NormalizedListing;
 
-  // What we matched
+  // What we matched (from local index)
   matchResult: MatchResult;
 
   // Confidence breakdown
@@ -804,7 +1031,7 @@ This audit table is the foundation for measuring and improving accuracy over tim
 
 #### How to Measure Accuracy
 
-**Definition:** A match is "accurate" if the Scrydex card returned is the same card being sold in the eBay listing. Specifically:
+**Definition:** A match is "accurate" if the local card index entry matched is the same card being sold in the eBay listing. Specifically:
 1. Correct Pokemon / card name
 2. Correct expansion / set
 3. Correct card number
@@ -815,7 +1042,7 @@ This audit table is the foundation for measuring and improving accuracy over tim
 1. **Automated validation (continuous):**
    - Cross-check: if eBay listing has item specifics for "Set" and "Card Number", verify they match our resolved expansion and number
    - Denominator validation: verify listing denominator matches expansion printed_total
-   - Name containment check: verify parsed name appears in Scrydex card name (or vice versa)
+   - Name containment check: verify parsed name appears in matched card name (or vice versa)
    - Track: `automated_accuracy = validated_correct / total_validated`
 
 2. **Manual review sampling (weekly):**
@@ -873,77 +1100,91 @@ describe('Match accuracy corpus', () => {
 
 ### 2.8 Implementation Roadmap
 
-#### Phase 1: Foundation (Week 1-2)
+#### Phase 1: Card Index Foundation (Week 1-2)
 
-**Goal:** Establish the project structure, data layer, and Scrydex catalog sync.
+**Goal:** Build the local card database and Scrydex sync infrastructure. This is the foundation everything else depends on.
 
 - [ ] Project scaffolding with modular directory structure
-- [ ] Database schema: `expansions`, `deals`, `deal_audit`, `match_corpus`
-- [ ] Scrydex Catalog Sync Service: fetch all EN expansions, store locally
-- [ ] Expansion lookup service: name/code/alias/fuzzy/denominator resolution
-- [ ] Unit tests for expansion resolution with 95%+ coverage
+- [ ] Database schema: `expansions`, `cards`, `variants`, `deals`, `deal_audit`, `match_corpus`
+- [ ] Scrydex client with rate limiting and credit tracking
+- [ ] Expansion sync: fetch all EN expansions, store locally
+- [ ] **Full card sync: paginate all EN cards with `?include=prices`, store locally**
+- [ ] Search indexes: number, number+denominator, name (FTS), expansion code
+- [ ] Delta sync for hot sets (10 most recent expansions)
+- [ ] Sync scheduler: weekly full, daily delta, daily expansion check
+- [ ] Unit tests for sync, storage, and index queries
 
 ```
 src/
-├── collection/          # Data collection layer
-│   ├── ebay-poller.ts
-│   ├── catalog-sync.ts
-│   └── exchange-rate.ts
-├── normalization/       # Normalization pipeline
+├── index/               # Scrydex card index (the core innovation)
+│   ├── card-sync.ts          # Full + delta sync logic
+│   ├── expansion-sync.ts     # Expansion catalog sync
+│   ├── card-store.ts         # Local DB read/write
+│   ├── search-index.ts       # Number/name/expansion lookups
+│   ├── sync-scheduler.ts     # Cron-like scheduling
+│   └── types.ts
+├── extraction/          # Signal extraction from eBay listings
 │   ├── title-parser.ts
 │   ├── structured-extractor.ts
 │   ├── signal-merger.ts
 │   └── types.ts
-├── matching/            # Matching engine
-│   ├── expansion-resolver.ts
-│   ├── card-resolver.ts
+├── matching/            # Local index matching engine
+│   ├── candidate-lookup.ts   # Number-first candidate search
+│   ├── disambiguator.ts      # Score + rank candidates
 │   ├── variant-resolver.ts
 │   ├── confidence.ts
+│   ├── validator.ts
 │   └── types.ts
 ├── arbitrage/           # Arbitrage calculator
 │   ├── price-engine.ts
 │   ├── deal-classifier.ts
 │   └── deal-store.ts
+├── scan/                # eBay scanning
+│   ├── ebay-poller.ts
+│   ├── scan-scheduler.ts
+│   └── ebay-client.ts
 ├── api/                 # REST API
 ├── config/
 ├── database/
 └── utils/
 ```
 
-#### Phase 2: Normalization (Week 2-3)
+#### Phase 2: Signal Extraction (Week 2-3)
 
 **Goal:** Build the improved title parser and structured data extractor.
 
 - [ ] Port regex patterns from beta as starting point
-- [ ] Replace hardcoded Pokemon name list with catalog-driven lookup
-- [ ] Replace era-specific set name regexes with catalog-driven matching
+- [ ] Replace hardcoded Pokemon name list with local card DB lookup
+- [ ] Replace era-specific set name regexes with local expansion catalog matching
 - [ ] Build structured data extractor for eBay item specifics
 - [ ] Build signal merger with per-field conflict resolution
 - [ ] Create initial match corpus (100 titles) from beta's training data
 - [ ] Unit tests: parse accuracy ≥ 90% on corpus
 
-#### Phase 3: Matching Engine (Week 3-4)
+#### Phase 3: Local Matching Engine (Week 3-4)
 
-**Goal:** Build the card resolution pipeline with composite confidence scoring.
+**Goal:** Build the number-first local matching pipeline with composite confidence scoring.
 
-- [ ] Expansion resolver with ordered strategy chain
-- [ ] Card resolver with exact → padded → scoped search (no broad fallbacks)
-- [ ] Name validation with 0.6 minimum threshold
+- [ ] Candidate lookup: number+denominator → number+expansion → number-only → name search
+- [ ] Candidate disambiguation: score by name, denominator, expansion signals
+- [ ] Expansion cross-validation
+- [ ] Name validation with 0.60 minimum threshold
 - [ ] Variant resolver with mapping table
 - [ ] Composite confidence scoring (weighted geometric mean)
 - [ ] Confidence-gated processing (high/medium/low/reject)
-- [ ] Integration tests: end-to-end matching against live Scrydex API
-- [ ] Regression test suite with match corpus: accuracy ≥ 85%
+- [ ] End-to-end integration tests: eBay title → local match → deal
+- [ ] **Regression test suite with match corpus: accuracy ≥ 85%**
 
 #### Phase 4: Arbitrage & Presentation (Week 4-5)
 
-**Goal:** Price calculation, deal storage, and dashboard.
+**Goal:** Price calculation, deal storage, scanning, and dashboard.
 
-- [ ] Price engine: extract correct price from variant, convert currency
+- [ ] Price engine: extract correct price from local variant data, convert currency
 - [ ] Deal classifier: tier assignment with configurable thresholds
-- [ ] Deal store: PostgreSQL with deduplication and audit logging
+- [ ] Deal store: database with deduplication and audit logging
+- [ ] eBay poller with scan scheduling and rate limit handling
 - [ ] REST API endpoints
-- [ ] Dashboard frontend
+- [ ] Dashboard frontend (card index stats, deal grid, confidence breakdown)
 - [ ] Telegram notifications for high-confidence deals only
 
 #### Phase 5: Accuracy Loop (Ongoing)
@@ -955,6 +1196,7 @@ src/
 - [ ] Corpus growth: add every misidentified deal to regression suite
 - [ ] Monitoring: accuracy dashboard with alerting
 - [ ] Pattern updates: add new regex patterns when new card formats appear
+- [ ] Sync health monitoring: alert if card index is stale or sync fails
 
 ---
 
@@ -962,15 +1204,22 @@ src/
 
 | Aspect | Beta | Redesign |
 |---|---|---|
-| Expansion catalog | Hardcoded 500+ entries with ID remapping | Live-synced from Scrydex, Scrydex IDs canonical |
-| Title parsing | 50+ regexes, single confidence score | Regex + structured data, per-field confidence |
-| Pokemon name matching | Hardcoded ~300 names | Catalog-driven from Scrydex card database |
-| Set name matching | 9 era-specific regexes | Catalog-driven from expansion mirror |
-| Match fallbacks | 6 cascading strategies, thresholds lowered over time | 3 strategies max, strict thresholds, prefer "no match" over wrong match |
-| Name similarity threshold | 0.25-0.30 | 0.60 minimum |
-| Confidence scoring | Single parse confidence (0-100) | Composite weighted score per field |
-| Confidence response | Binary pass/fail at 28% | 4-tier graduated response |
-| Architecture | God object (ArbitrageEngine, 1800 lines) | 4 separate layers, each independently testable |
-| Accuracy measurement | None (only diagnostic stage counters) | Automated checks + manual review sampling + regression corpus |
-| State management | In-memory Maps, lost on restart | Database-backed with Redis cache |
-| Expansion updates | Requires code change + redeploy | Automated daily sync |
+| **Core architecture** | eBay-first: parse title → query Scrydex live per listing | Scrydex-first: sync all cards locally → match against local index |
+| **Scrydex API cost per listing** | 1-6 credits (primary + fallbacks) | **0 credits** (local DB query) |
+| **Monthly Scrydex budget usage** | ~45,000 / 50,000 (90%) | ~3,000 / 50,000 (6%) |
+| **Matching approach** | Expansion-first: guess set → query API by expansion + number | Number-first: extract number → query local DB → disambiguate |
+| **Expansion catalog** | Hardcoded 500+ entries with ID remapping | Live-synced from Scrydex, Scrydex IDs canonical |
+| **Card price data** | Fetched live per listing from Scrydex | Pre-synced locally with weekly/daily refresh |
+| **Title parsing** | 50+ regexes, single confidence score | Regex + structured data, per-field confidence |
+| **Pokemon name matching** | Hardcoded ~300 names | Driven by local card index (~35,000 cards) |
+| **Set name matching** | 9 era-specific regexes | Driven by local expansion catalog |
+| **Match fallbacks** | 6 cascading strategies, thresholds lowered over time | Number-first candidate lookup, strict disambiguation, prefer "no match" over wrong match |
+| **Name similarity threshold** | 0.25-0.30 | **0.60 minimum** |
+| **Cost of a rejected match** | 1-6 wasted API credits | **Zero** (local query) |
+| **Confidence scoring** | Single parse confidence (0-100) | Composite weighted geometric mean per field |
+| **Confidence response** | Binary pass/fail at 28% | 4-tier graduated response (high/med/low/reject) |
+| **Architecture** | God object (ArbitrageEngine, 1800 lines) | 5 separate layers, each independently testable |
+| **Accuracy measurement** | None (only diagnostic stage counters) | Automated checks + manual review sampling + regression corpus |
+| **State management** | In-memory Maps, lost on restart | Database-backed with persistent card index |
+| **Expansion updates** | Requires code change + redeploy | Automated daily sync |
+| **Scan throughput** | Limited by Scrydex credit budget | **Limited only by eBay rate limits** (Scrydex is no longer a bottleneck) |
