@@ -45,37 +45,44 @@ const sendEvent = (res: express.Response, event: string, data: any, id?: number)
 };
 
 app.get("/api/deals/stream", requireAuth, async (req, res) => {
-  res.writeHead(200, {
-    "Content-Type": "text/event-stream",
-    "Cache-Control": "no-cache",
-    Connection: "keep-alive"
-  });
-  const lastIdHeader = req.headers["last-event-id"];
-  const lastId = lastIdHeader ? Number(lastIdHeader) : 0;
-  if (lastId) {
-    const { rows } = await pool.query(
-      `SELECT d.event_id, d.id, d.ebay_url, d.ebay_title, d.ebay_image, d.ebay_price_gbp, d.ebay_shipping_gbp,
-              d.market_price_usd, d.fx_rate, d.profit_gbp, d.profit_pct, d.confidence, d.liquidity, d.condition, d.tier,
-              d.match_details, d.comps_by_condition, d.liquidity_breakdown,
-              d.created_at, c.name as card_name, c.card_number, e.name as expansion_name, e.code
-       FROM deals d
-       JOIN cards c ON d.card_id = c.id
-       JOIN expansions e ON c.expansion_id = e.id
-       WHERE d.event_id > $1
-       ORDER BY d.event_id ASC`,
-      [lastId]
-    );
-    rows.forEach((row) => sendEvent(res, "deal", row, row.event_id));
-  }
-  sendEvent(res, "ping", { time: Date.now() });
-  clients.add(res);
-  const pingTimer = setInterval(() => {
+  try {
+    res.writeHead(200, {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache",
+      Connection: "keep-alive",
+      "X-Accel-Buffering": "no"
+    });
+    res.flushHeaders();
+    const lastIdHeader = req.headers["last-event-id"];
+    const lastId = lastIdHeader ? Number(lastIdHeader) : 0;
+    if (lastId) {
+      const { rows } = await pool.query(
+        `SELECT d.event_id, d.id, d.ebay_url, d.ebay_title, d.ebay_image, d.ebay_price_gbp, d.ebay_shipping_gbp,
+                d.market_price_usd, d.fx_rate, d.profit_gbp, d.profit_pct, d.confidence, d.liquidity, d.condition, d.tier,
+                d.match_details, d.comps_by_condition, d.liquidity_breakdown,
+                d.created_at, c.name as card_name, c.card_number, e.name as expansion_name, e.code
+         FROM deals d
+         JOIN cards c ON d.card_id = c.id
+         JOIN expansions e ON c.expansion_id = e.id
+         WHERE d.event_id > $1
+         ORDER BY d.event_id ASC`,
+        [lastId]
+      );
+      rows.forEach((row) => sendEvent(res, "deal", row, row.event_id));
+    }
     sendEvent(res, "ping", { time: Date.now() });
-  }, 15000);
-  req.on("close", () => {
-    clearInterval(pingTimer);
-    clients.delete(res);
-  });
+    clients.add(res);
+    const pingTimer = setInterval(() => {
+      sendEvent(res, "ping", { time: Date.now() });
+    }, 15000);
+    req.on("close", () => {
+      clearInterval(pingTimer);
+      clients.delete(res);
+    });
+  } catch (err) {
+    logger.error({ err }, "SSE stream setup failed");
+    if (!res.headersSent) res.status(500).json({ error: "stream_error" });
+  }
 });
 
 const pollDeals = async () => {
