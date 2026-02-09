@@ -1,6 +1,6 @@
-# PokéSnipe Arbitrage Scanner (Prototype)
+# PokéSnipe Arbitrage Scanner (Frontend)
 
-A front-end prototype for the PokéSnipe Arbitrage Scanner, built to mirror the ground-up redesign and the provided mock-up. The UI is a single-page React app with mocked data and simulated live updates.
+A production-ready frontend for the PokéSnipe Arbitrage Scanner, built to mirror the ground-up redesign and the provided mock-up. The UI is a single-page React app that connects to the live backend (SSE + REST) for deals, lookup, and settings.
 
 ## Local Development (Quick Start)
 
@@ -10,6 +10,8 @@ npm run dev
 ```
 
 Then open `http://localhost:5173`.
+
+> This frontend expects the backend to be running on the same origin (or proxied) with the API contract from `ARBITRAGE_SCANNER_REVIEW.md` (SSE + REST + OAuth).
 
 ## Build + Production (Local)
 
@@ -29,7 +31,7 @@ The production server will serve the built `dist/` bundle and bind to `process.e
 ```bash
 git init
 git add .
-git commit -m "Initial PokéSnipe Arbitrage Scanner prototype"
+git commit -m "Initial PokéSnipe Arbitrage Scanner frontend"
 ```
 
 Create a GitHub repo (empty) and then:
@@ -66,12 +68,16 @@ git push -u origin main
    npm run start
    ```
 
-## 4) Set Environment Variables (if needed)
+## 4) Set Environment Variables
 1. Click the **Variables** tab in the service.
 2. Click **“New Variable”**.
-3. Add any needed key/value pairs (example placeholders):
+3. Add the required backend + auth variables (examples):
    - `NODE_ENV=production`
-   - `PORT` is provided by Railway automatically (do not hardcode it).
+   - `SESSION_SECRET=<min-32-char-secret>`
+   - `GITHUB_CLIENT_ID=<your-github-oauth-client-id>`
+   - `GITHUB_CLIENT_SECRET=<your-github-oauth-client-secret>`
+   - `ALLOWED_GITHUB_IDS=<comma-separated-github-user-ids>`
+4. `PORT` is provided by Railway automatically (do not hardcode it).
 
 ## 5) Deploy + Find Your Public URL
 1. Railway will auto-deploy on first connect.
@@ -100,6 +106,26 @@ Railway will detect the push and redeploy.
 
 ---
 
+# GitHub OAuth Setup (Required)
+
+You must configure a GitHub OAuth App so the login screen can authenticate.
+
+1. Go to https://github.com/settings/developers and click **New OAuth App**.
+2. Set **Application name** (e.g., “PokéSnipe Scanner”).
+3. Set **Homepage URL** to your Railway domain (or `http://localhost:5173` for local).
+4. Set **Authorization callback URL** to:
+   ```
+   https://<your-railway-domain>/auth/github/callback
+   ```
+   For local dev:
+   ```
+   http://localhost:5173/auth/github/callback
+   ```
+5. Save the app and copy the **Client ID** and **Client Secret**.
+6. Add them to Railway variables (`GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`) and to your local `.env` if you run the backend locally.
+
+> If the login screen shows “Checking session…” with a JSON parse error, it usually means the backend is redirecting to GitHub OAuth or returning HTML instead of JSON. Confirm your OAuth app + env vars are set and the backend is running.
+
 # Troubleshooting
 
 ## Build fails
@@ -117,5 +143,5 @@ Railway will detect the push and redeploy.
 ---
 
 # Notes
-- This is a **frontend prototype** with mocked data to demonstrate the UI/UX flows.
+- This frontend expects a live backend implementing the API contract (SSE + REST + OAuth).
 - It’s designed for a **single-service Railway deploy** and runs in any Node 18 environment.
