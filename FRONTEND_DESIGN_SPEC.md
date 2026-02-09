@@ -61,7 +61,7 @@ Clicking a deal opens a **right-side panel** (not a modal, not a new page — th
 - Large card image (from Scrydex CDN)
 - eBay listing image (from eBay) — side by side for visual match verification
 - "Open on eBay" button (primary CTA, prominent)
-- Profit calculation breakdown: `eBay price + shipping - fees = cost` vs `market value = profit`
+- Profit calculation breakdown: `eBay price + shipping + Buyer Protection fee = total cost` vs `market value = profit`
 - Confidence score with per-field breakdown (expandable)
 
 **Middle section — Match & Liquidity Details:**
@@ -167,7 +167,7 @@ Key settings:
 - **Default filters:** Which tiers, conditions, confidence levels, and profit minimums to show by default
 - **Notification settings:** Telegram bot token + chat ID, notification tier/confidence/profit thresholds, watched expansions and cards
 - **Currency display:** Show prices in GBP, USD, or both
-- **eBay fees:** Configure fee percentage for accurate profit calculation (default: 12.8% — eBay UK final value fee)
+- **eBay Buyer Protection fee:** Toggle fee breakdown visibility in deal detail. The fee is calculated automatically using eBay UK's tiered Buyer Protection structure (£0.10 flat + 7%/4%/2% bands — see architecture doc §2.6) and always deducted in the profit calculation
 - **Sound alerts:** Toggle on/off, choose which tier triggers sound on arrival
 - **Dark/light mode:** Default to dark (see Part 3)
 
@@ -242,7 +242,7 @@ The interface uses **four simultaneous channels** to communicate deal quality:
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
 │  TOP BAR                                                            │
-│  [Logo/Name]  [Search............]  [Filters ▾]  [Lookup]  [⚙]     │
+│  [Logo/Name]  [Search............]  [Filters ▾]  [Lookup]  [👤⚙]   │
 │  Active filters: [NM ×] [>20% ×] [High+Med confidence ×]           │
 ├───────────────────────────────────┬─────────────────────────────────┤
 │                                   │                                 │
@@ -419,21 +419,29 @@ After fetch: bar fills in with animation, grade may update
 
 #### Detail Panel — Price Comparison Table
 ```
-┌─────────────────────────────────────┐
-│  Pricing Breakdown                  │
-├──────────┬──────────┬──────────────┤
-│          │ eBay     │ Market Value │
-├──────────┼──────────┼──────────────┤
-│ Price    │ £12.50   │ $57.00 USD   │
-│ Shipping │ £1.99    │              │
-│ Fees     │ -£1.45   │              │
-│ FX Rate  │          │ ×0.789 GBP   │
-├──────────┼──────────┼──────────────┤
-│ Total    │ £13.04   │ £44.97 GBP   │
-├──────────┴──────────┴──────────────┤
-│ PROFIT   │ +£31.93 (+244%)         │
-└─────────────────────────────────────┘
+┌──────────────────────────────────────────┐
+│  Pricing Breakdown                       │
+├──────────────┬──────────┬───────────────┤
+│              │ eBay     │ Market Value  │
+├──────────────┼──────────┼───────────────┤
+│ Price        │ £12.50   │ $57.00 USD    │
+│ Shipping     │ £1.99    │               │
+│ Buyer Prot.  │ £0.98    │               │
+│  ├ Flat fee  │  £0.10   │               │
+│  └ 7% band   │  £0.88   │               │
+│ FX Rate      │          │ ×0.789 GBP    │
+├──────────────┼──────────┼───────────────┤
+│ Total        │ £15.47   │ £44.97 GBP    │
+├──────────────┴──────────┴───────────────┤
+│ PROFIT       │ +£29.50 (+190%)          │
+└──────────────────────────────────────────┘
+
+Buyer Protection fee: eBay UK private seller fee.
+£0.10 flat + 7% on first £20 + 4% on £20-£300 + 2% on £300-£4,000.
+For a £12.50 item: £0.10 + (£12.50 × 7%) = £0.10 + £0.88 = £0.98
 ```
+
+**Fee breakdown visibility:** The tiered sub-lines (flat fee, band breakdown) are shown by default but can be collapsed to a single "Buyer Prot." line via the `showBuyerProtectionFee` preference. The fee is **always** deducted in the profit calculation regardless of display preference.
 
 #### Status Bar Segments
 ```
@@ -472,7 +480,7 @@ Below input (after submission):
 
 - Collection tracking / portfolio features
 - Historical deal analytics or "deals I've bought" tracking
-- Multi-user / accounts (single user for v1)
+- Multi-user dashboards (GitHub OAuth supports multiple users via allowlist, but v1 is single-user)
 - Mobile app (responsive web is sufficient)
 - Card price alerts / watchlists (future: catalog feature)
 - Social features, sharing, community
@@ -484,45 +492,54 @@ Below input (after submission):
 
 This section maps the frontend to the backend API contract defined in `ARBITRAGE_SCANNER_REVIEW.md` §2.12. It covers authentication, data flow, SSE lifecycle, and deployment.
 
-### Authentication
+### Authentication: GitHub OAuth
 
-The dashboard is a private interface — it requires a bearer token (`DASHBOARD_SECRET`, a Railway environment variable) to access all non-public endpoints. The public card catalog (§2.10) does not require authentication.
+The dashboard is a private interface — it requires a valid GitHub OAuth session to access all non-public endpoints. The public card catalog (§2.10) does not require authentication. See architecture doc §2.13 for the full backend implementation.
 
 **First-visit flow:**
 ```
 1. User opens the dashboard URL
-2. Frontend checks localStorage for a stored token
-3. If no token: show a minimal login screen — single password field,
-   no username (single-user v1). Label: "Dashboard secret"
-4. User enters the DASHBOARD_SECRET
-5. Frontend calls GET /api/status with Authorization: Bearer <token>
-6. If 200: store token in localStorage, load the dashboard
-7. If 401: show "Invalid secret" error, clear the input, stay on login
+2. Frontend makes a test request (GET /api/status) — the httpOnly session
+   cookie is sent automatically by the browser
+3. If 401 (no session or expired): redirect to /auth/github
+4. GitHub OAuth flow: user approves → server issues JWT session cookie
+5. Redirect back to dashboard → session cookie is now set
+6. Dashboard loads normally — all API requests include the cookie automatically
 ```
 
-**Subsequent visits:** Token is read from localStorage and attached to every API request as `Authorization: Bearer <token>`. If any request returns 401, clear the stored token and redirect to the login screen (the secret was rotated).
+**Subsequent visits:** The httpOnly session cookie (7-day expiry) is sent automatically by the browser on every request to the same origin. No localStorage token management needed. If any request returns 401 (session expired), redirect to `/auth/github` for re-authentication.
 
-**SSE auth:** The `EventSource` API doesn't support custom headers. Pass the token as a query parameter: `GET /api/deals/stream?token=<DASHBOARD_SECRET>`. The backend validates this the same way as the header.
+**SSE auth:** The `EventSource` API doesn't support custom headers, but it **does** send cookies automatically for same-origin requests. Since the session is a httpOnly cookie on the same origin, SSE authentication works out of the box: `GET /api/deals/stream` — no query parameter token needed.
+
+**Login screen:** Instead of a password field, the login page shows a single "Sign in with GitHub" button. Clean, minimal, consistent with the dashboard's dark theme. The GitHub avatar and username are displayed in the top bar after login.
+
+**Logout:** A "Sign out" option in the settings/gear menu calls `POST /auth/logout`, which clears the session cookie and redirects to the login page.
 
 ### Data Flow on Page Load
 
 ```
 Page load
   │
-  ├─ 1. Read token from localStorage (or show login)
+  ├─ 1. Test session: GET /api/status
+  │     ├── 200: session valid, continue
+  │     └── 401: redirect to /auth/github (login page)
   │
-  ├─ 2. Parallel fetch (all with Bearer token):
+  ├─ 2. Parallel fetch (session cookie sent automatically):
   │     ├── GET /api/deals?limit=50         → Populate deal feed
   │     ├── GET /api/status                 → Populate status bar
-  │     └── GET /api/preferences            → Apply default filters + settings
+  │     ├── GET /api/preferences            → Apply default filters + settings
+  │     └── GET /api/settings/api-keys      → Check API key status (setup mode?)
   │
-  ├─ 3. Open SSE connection:
-  │     GET /api/deals/stream?token=<secret>
+  ├─ 3. If API keys not configured:
+  │     └── Show setup wizard (Settings > API Keys) instead of deal feed
+  │
+  ├─ 4. Open SSE connection:
+  │     GET /api/deals/stream  (session cookie sent automatically)
   │     ├── event: deal    → Append to deal feed (top), apply local filters
   │     ├── event: status  → Update status bar
   │     └── event: ping    → (keepalive, no UI action)
   │
-  └─ 4. Dashboard is live
+  └─ 5. Dashboard is live
 ```
 
 ### SSE Connection Lifecycle
@@ -562,8 +579,10 @@ Page load
 
 | User Action | API Call | Notes |
 |---|---|---|
-| Open dashboard | `GET /api/deals`, `GET /api/status`, `GET /api/preferences` | Parallel on load |
-| Deal feed streaming | `GET /api/deals/stream` (SSE) | Long-lived connection |
+| Sign in | `GET /auth/github` → GitHub OAuth → `/auth/github/callback` | Redirects; sets httpOnly session cookie |
+| Sign out | `POST /auth/logout` | Clears session cookie, redirects to login |
+| Open dashboard | `GET /api/status`, `GET /api/deals`, `GET /api/preferences`, `GET /api/settings/api-keys` | Parallel on load; 401 → redirect to login |
+| Deal feed streaming | `GET /api/deals/stream` (SSE) | Long-lived connection, cookie auth |
 | Click a deal | `GET /api/deals/:dealId` | Full detail + audit data |
 | Mark deal correct | `POST /api/deals/:dealId/review` `{ isCorrectMatch: true }` | |
 | Mark deal wrong | `POST /api/deals/:dealId/review` `{ isCorrectMatch: false, incorrectReason: "..." }` | |
@@ -572,6 +591,11 @@ Page load
 | Change filter | None — client-side | Applied to in-memory deal list |
 | Save filter as default | `PUT /api/preferences` `{ defaultFilters: {...} }` | Debounced 500ms |
 | Change any preference | `PUT /api/preferences` `{ ... }` | Partial update, debounced |
+| View API key status | `GET /api/settings/api-keys` | Shows connection status, never raw keys |
+| Set/update Scrydex keys | `PUT /api/settings/api-keys/scrydex` | Encrypted storage in DB |
+| Set/update eBay keys | `PUT /api/settings/api-keys/ebay` | Encrypted storage in DB |
+| Test Scrydex connection | `POST /api/settings/api-keys/scrydex/test` | Validates with live API call |
+| Test eBay connection | `POST /api/settings/api-keys/ebay/test` | Validates with OAuth token request |
 | Test Telegram config | `POST /api/notifications/telegram/test` | Show success/fail inline |
 | Load more deals (scroll) | `GET /api/deals?page=2&limit=50` | Append to feed |
 | Search deals | `GET /api/deals?q=charizard` | Re-fetch with search param |
@@ -584,7 +608,8 @@ The frontend is a **static SPA** (single-page application) served by the same Ra
 ```
 pokesnipe (Railway service)
 ├── Backend: Express/Fastify API on PORT (Railway-injected)
-│   ├── /api/*           → REST + SSE endpoints
+│   ├── /auth/*          → GitHub OAuth login/callback/logout
+│   ├── /api/*           → REST + SSE endpoints (session cookie auth)
 │   └── /catalog/*       → Public card catalog (SSR for SEO)
 └── Frontend: Static files served from /public or /dist
     ├── index.html       → SPA shell (dashboard)
