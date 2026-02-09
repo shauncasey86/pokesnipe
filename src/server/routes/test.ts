@@ -15,13 +15,16 @@ const mask = (s: string) => s.length <= 8 ? "***" : `${s.slice(0, 4)}...${s.slic
 router.get("/ebay", requireAuth, async (_req, res, next) => {
   const clientId = config.EBAY_CLIENT_ID;
   const clientSecret = config.EBAY_CLIENT_SECRET;
+  const isSandbox = clientSecret.trim().startsWith("SBX-");
+  const ebayBase = isSandbox ? "https://api.sandbox.ebay.com" : "https://api.ebay.com";
   const diagnostics = {
     client_id_length: clientId.length,
     client_id_preview: mask(clientId),
     client_secret_length: clientSecret.length,
     client_secret_preview: mask(clientSecret),
     has_whitespace: clientId !== clientId.trim() || clientSecret !== clientSecret.trim(),
-    auth_url: "https://api.ebay.com/identity/v1/oauth2/token"
+    environment: isSandbox ? "sandbox" : "production",
+    auth_url: `${ebayBase}/identity/v1/oauth2/token`
   };
 
   try {
@@ -49,7 +52,7 @@ router.get("/ebay", requireAuth, async (_req, res, next) => {
       const trimmedSecret = clientSecret.trim();
       const creds = Buffer.from(`${trimmedId}:${trimmedSecret}`).toString("base64");
       const { data } = await axios.post(
-        "https://api.ebay.com/identity/v1/oauth2/token",
+        `${ebayBase}/identity/v1/oauth2/token`,
         new URLSearchParams({
           grant_type: "client_credentials",
           scope: "https://api.ebay.com/oauth/api_scope"
