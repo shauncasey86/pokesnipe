@@ -1,14 +1,29 @@
 import { Router } from "express";
+import axios from "axios";
 import { requireAuth } from "../services/auth.js";
 import { searchItems } from "../services/ebayClient.js";
 import { fetchExpansions, fetchCardsPage } from "../services/scrydexClient.js";
 import { pool } from "../db/pool.js";
 import { getUsdToGbpRate } from "../services/exchangeRate.js";
+import { config } from "../config.js";
 
 const router = Router();
 
+const mask = (s: string) => s.length <= 8 ? "***" : `${s.slice(0, 4)}...${s.slice(-4)}`;
+
 // Test eBay API: authenticates + searches for 3 pokemon card listings
 router.get("/ebay", requireAuth, async (_req, res, next) => {
+  const clientId = config.EBAY_CLIENT_ID;
+  const clientSecret = config.EBAY_CLIENT_SECRET;
+  const diagnostics = {
+    client_id_length: clientId.length,
+    client_id_preview: mask(clientId),
+    client_secret_length: clientSecret.length,
+    client_secret_preview: mask(clientSecret),
+    has_whitespace: clientId !== clientId.trim() || clientSecret !== clientSecret.trim(),
+    auth_url: "https://api.ebay.com/identity/v1/oauth2/token"
+  };
+
   try {
     const start = Date.now();
     const results = await searchItems("pokemon card", 3);
@@ -17,6 +32,7 @@ router.get("/ebay", requireAuth, async (_req, res, next) => {
       ok: true,
       provider: "ebay",
       elapsed_ms: elapsed,
+      diagnostics,
       results_count: results.length,
       sample: results.map(r => ({
         title: r.title,
@@ -26,10 +42,31 @@ router.get("/ebay", requireAuth, async (_req, res, next) => {
       }))
     });
   } catch (error: any) {
+    // Try a direct auth call with trimmed credentials for comparison
+    let directAuthResult: any = null;
+    try {
+      const trimmedId = clientId.trim();
+      const trimmedSecret = clientSecret.trim();
+      const creds = Buffer.from(`${trimmedId}:${trimmedSecret}`).toString("base64");
+      const { data } = await axios.post(
+        "https://api.ebay.com/identity/v1/oauth2/token",
+        new URLSearchParams({
+          grant_type: "client_credentials",
+          scope: "https://api.ebay.com/oauth/api_scope"
+        }),
+        { headers: { Authorization: `Basic ${creds}`, "Content-Type": "application/x-www-form-urlencoded" }, timeout: 15000 }
+      );
+      directAuthResult = { ok: true, token_type: data.token_type, expires_in: data.expires_in };
+    } catch (retryErr: any) {
+      directAuthResult = { ok: false, error: retryErr.response?.data ?? retryErr.message };
+    }
+
     res.status(502).json({
       ok: false,
       provider: "ebay",
-      error: error.response?.data ?? error.message
+      diagnostics,
+      error: error.response?.data ?? error.message,
+      direct_auth_with_trimmed_creds: directAuthResult
     });
   }
 });
