@@ -1,6 +1,6 @@
-import { pool } from "../db/pool";
-import { fetchAllCards, fetchExpansions } from "./scrydexClient";
-import pino from "pino";
+import { pool } from "../db/pool.js";
+import { fetchAllCards, fetchExpansions } from "./scrydexClient.js";
+import { pino } from "pino";
 
 const logger = pino({ name: "sync" });
 

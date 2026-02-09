@@ -1,8 +1,8 @@
-import { pool } from "../db/pool";
-import { searchItems } from "./ebayClient";
-import { matchListing } from "./matcher";
-import { getUsdToGbpRate } from "./exchangeRate";
-import { calculateProfit } from "./pricing";
+import { pool } from "../db/pool.js";
+import { searchItems } from "./ebayClient.js";
+import { matchListing } from "./matcher.js";
+import { getUsdToGbpRate } from "./exchangeRate.js";
+import { calculateProfit } from "./pricing.js";
 import { v4 as uuidv4 } from "uuid";
 
 const QUERY_SET = [

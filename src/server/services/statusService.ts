@@ -1,5 +1,5 @@
-import { pool } from "../db/pool";
-import { getApiUsageToday } from "./apiUsageTracker";
+import { pool } from "../db/pool.js";
+import { getApiUsageToday } from "./apiUsageTracker.js";
 
 export const getStatus = async () => {
   const dealsToday = await pool.query(

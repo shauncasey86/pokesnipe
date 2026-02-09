@@ -1,7 +1,7 @@
 import axios from "axios";
-import { config } from "../config";
-import { TokenBucket } from "./rateLimiter";
-import { trackApiCall } from "./apiUsageTracker";
+import { config } from "../config.js";
+import { TokenBucket } from "./rateLimiter.js";
+import { trackApiCall } from "./apiUsageTracker.js";
 
 const authClient = axios.create({
   baseURL: "https://api.ebay.com/identity/v1",

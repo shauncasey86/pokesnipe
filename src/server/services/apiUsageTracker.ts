@@ -1,4 +1,4 @@
-import { pool } from "../db/pool";
+import { pool } from "../db/pool.js";
 
 export const trackApiCall = async (provider: string, count = 1) => {
   await pool.query(

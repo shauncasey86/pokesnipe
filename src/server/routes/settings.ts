@@ -1,7 +1,7 @@
 import { Router } from "express";
-import { requireAuth } from "../services/auth";
-import { pool } from "../db/pool";
-import { encryptJson } from "../services/crypto";
+import { requireAuth } from "../services/auth.js";
+import { pool } from "../db/pool.js";
+import { encryptJson } from "../services/crypto.js";
 import { z } from "zod";
 
 const router = Router();
