@@ -15,7 +15,7 @@ const LIQ = { high: { color: "#34d399", label: "HIGH", short: "HI" }, med: { col
 const COND_C = { NM: "#34d399", LP: "#fbbf24", MP: "#fb923c", HP: "#ef4444" };
 const CONF_C = v => v >= 0.85 ? "#34d399" : v >= 0.65 ? "#fbbf24" : "#ef4444";
 const TYPE_C = { fire: "#ff6b6b", water: "#60a5fa", electric: "#fbbf24", psychic: "#c084fc", grass: "#4ade80", dark: "#8b7ec8", dragon: "#f59e0b", normal: "#94a3b8" };
-const fG = n => `£${Math.abs(n).toFixed(2)}`;
+const fG = n => `£${Math.abs(n ?? 0).toFixed(2)}`;
 const calcBPFee = (price) => {
   const flat = 0.10;
   const b1 = Math.min(price, 20) * 0.07;
@@ -23,27 +23,47 @@ const calcBPFee = (price) => {
   const b3 = Math.max(0, Math.min(price, 4000) - 300) * 0.02;
   return { flat, b1, b2, b3, total: flat + b1 + b2 + b3 };
 };
-const calc = d => { const c = d.ep + d.sh, bp = calcBPFee(c), t = c + bp.total, m = d.mu * d.fx, p = m - t; return { cost: t, market: m, profit: p, pct: (p / t) * 100, fees: bp.total, bp }; };
-const ts = m => m < 60 ? `${m}m` : `${Math.floor(m / 60)}h`;
-
-const DEALS = [
-  { id:1,name:"Zard ex",num:"006/197",set:"Obsidian Flames",sc:"sv3",ep:12.5,sh:1.99,mu:57,fx:.789,conf:.92,cond:"NM",liq:"high",liqS:.82,ta:3,tr:8.2,tier:"grail",type:"fire",cb:{Name:.95,Number:1,Denom:.92,Expan:.88,Variant:.85,Extract:.90},lb:{Trend:.75,Prices:.90,Spread:.80,Supply:.90,Sold:.67,Velocity:null},cp:{NM:45,LP:38.5,MP:28,HP:18},rev:null },
-  { id:2,name:"Pika VMAX",num:"044/185",set:"Vivid Voltage",sc:"swsh4",ep:8.99,sh:1.5,mu:35.5,fx:.789,conf:.88,cond:"NM",liq:"high",liqS:.79,ta:7,tr:2.1,tier:"hit",type:"electric",cb:{Name:.92,Number:1,Denom:.88,Expan:.85,Variant:.82,Extract:.88},lb:{Trend:.80,Prices:.85,Spread:.75,Supply:.80,Sold:.72,Velocity:null},cp:{NM:28,LP:22.5,MP:16,HP:10},rev:null },
-  { id:3,name:"Mew2 ex",num:"058/165",set:"SV 151",sc:"sv3pt5",ep:6.5,sh:1.25,mu:22.8,fx:.789,conf:.95,cond:"LP",liq:"med",liqS:.58,ta:12,tr:-3.4,tier:"hit",type:"psychic",cb:{Name:.98,Number:1,Denom:.95,Expan:.92,Variant:.90,Extract:.95},lb:{Trend:.60,Prices:.70,Spread:.55,Supply:.50,Sold:.45,Velocity:null},cp:{NM:22,LP:18,MP:12.5,HP:7},rev:null },
-  { id:4,name:"Moonbreon VMAX",num:"095/203",set:"Evolving Skies",sc:"swsh7",ep:45,sh:3.99,mu:145,fx:.789,conf:.78,cond:"NM",liq:"high",liqS:.91,ta:18,tr:12.5,tier:"grail",type:"dark",cb:{Name:.85,Number:.90,Denom:.78,Expan:.72,Variant:.65,Extract:.80},lb:{Trend:.95,Prices:.95,Spread:.85,Supply:.92,Sold:.88,Velocity:.85},cp:{NM:114.4,LP:95,MP:70,HP:45},rev:null },
-  { id:5,name:"Mew ex",num:"151/165",set:"SV 151",sc:"sv3pt5",ep:15,sh:2,mu:42,fx:.789,conf:.91,cond:"NM",liq:"high",liqS:.76,ta:22,tr:1.8,tier:"hit",type:"psychic",cb:{Name:.94,Number:1,Denom:.90,Expan:.88,Variant:.86,Extract:.92},lb:{Trend:.70,Prices:.80,Spread:.78,Supply:.75,Sold:.70,Velocity:null},cp:{NM:33.14,LP:27,MP:19,HP:12},rev:"correct" },
-  { id:6,name:"Gar ex",num:"104/197",set:"Obsidian Flames",sc:"sv3",ep:4.5,sh:1.2,mu:14.5,fx:.789,conf:.85,cond:"NM",liq:"med",liqS:.52,ta:35,tr:-1.2,tier:"flip",type:"psychic",cb:{Name:.90,Number:.95,Denom:.85,Expan:.82,Variant:.78,Extract:.85},lb:{Trend:.55,Prices:.60,Spread:.50,Supply:.45,Sold:.40,Velocity:null},cp:{NM:11.44,LP:9,MP:6.5,HP:4},rev:null },
-  { id:7,name:"Rayray VMAX",num:"218/203",set:"Evolving Skies",sc:"swsh7",ep:32,sh:2.5,mu:78,fx:.789,conf:.82,cond:"LP",liq:"high",liqS:.84,ta:40,tr:5.6,tier:"hit",type:"dragon",cb:{Name:.88,Number:.92,Denom:.80,Expan:.78,Variant:.75,Extract:.82},lb:{Trend:.85,Prices:.88,Spread:.82,Supply:.85,Sold:.78,Velocity:null},cp:{NM:61.54,LP:50,MP:35,HP:22},rev:null },
-  { id:8,name:"Giratina V",num:"130/196",set:"Lost Origin",sc:"swsh11",ep:3.2,sh:.99,mu:9.8,fx:.789,conf:.93,cond:"NM",liq:"med",liqS:.55,ta:48,tr:.3,tier:"flip",type:"dragon",cb:{Name:.96,Number:1,Denom:.93,Expan:.90,Variant:.88,Extract:.93},lb:{Trend:.50,Prices:.65,Spread:.55,Supply:.50,Sold:.45,Velocity:null},cp:{NM:7.73,LP:6,MP:4.2,HP:2.5},rev:null },
-  { id:9,name:"Eevee",num:"133/165",set:"SV 151",sc:"sv3pt5",ep:2,sh:.85,mu:6.2,fx:.789,conf:.97,cond:"NM",liq:"low",liqS:.32,ta:55,tr:-.5,tier:"flip",type:"normal",cb:{Name:.99,Number:1,Denom:.97,Expan:.95,Variant:.94,Extract:.97},lb:{Trend:.30,Prices:.40,Spread:.35,Supply:.25,Sold:.20,Velocity:null},cp:{NM:4.89,LP:3.8,MP:2.6,HP:1.5},rev:null },
-  { id:10,name:"Lugia V",num:"186/195",set:"Silver Tempest",sc:"swsh12",ep:5.5,sh:1.3,mu:12.4,fx:.789,conf:.72,cond:"MP",liq:"low",liqS:.28,ta:67,tr:-4.8,tier:"sleeper",type:"water",cb:{Name:.80,Number:.85,Denom:.72,Expan:.68,Variant:.60,Extract:.70},lb:{Trend:.25,Prices:.35,Spread:.30,Supply:.20,Sold:.18,Velocity:null},cp:{NM:9.78,LP:7.8,MP:5.5,HP:3.2},rev:null },
-  { id:11,name:"Arceus VSTAR",num:"123/172",set:"Brilliant Stars",sc:"swsh9",ep:7,sh:1.5,mu:19.5,fx:.789,conf:.89,cond:"NM",liq:"med",liqS:.61,ta:72,tr:3.2,tier:"flip",type:"normal",cb:{Name:.92,Number:.98,Denom:.88,Expan:.85,Variant:.82,Extract:.89},lb:{Trend:.65,Prices:.70,Spread:.58,Supply:.55,Sold:.50,Velocity:null},cp:{NM:15.39,LP:12,MP:8.5,HP:5},rev:"wrong" },
-  { id:12,name:"Palkia VSTAR",num:"040/189",set:"Astral Radiance",sc:"swsh10",ep:2.8,sh:1,mu:5.9,fx:.789,conf:.94,cond:"NM",liq:"illiquid",liqS:.15,ta:85,tr:.8,tier:"sleeper",type:"water",cb:{Name:.97,Number:1,Denom:.94,Expan:.92,Variant:.90,Extract:.94},lb:{Trend:.10,Prices:.20,Spread:.15,Supply:.10,Sold:.08,Velocity:null},cp:{NM:4.65,LP:3.6,MP:2.5,HP:1.4},rev:null },
-];
-
-const SIM_N = ["Alakazam ex","Dragonite V","Blast ex","Venu ex","TTar V","Gardevoir ex","Snorlax","Esp VMAX"];
-const SIM_S = ["Obsidian Flames","Paldea Evolved","Temporal Forces","Shrouded Fable"];
-const SIM_T = Object.keys(TYPE_C);
+const calc = d => {
+  const cost = d?.pricing?.ebayCostTotal ?? d?.ep ?? 0;
+  const market = d?.pricing?.marketPriceGBP ?? d?.market ?? 0;
+  const profit = d?.pricing?.profitGBP ?? d?.profit ?? (market - cost);
+  const pct = d?.pricing?.profitPercent ?? d?.pct ?? (cost ? (profit / cost) * 100 : 0);
+  return { cost, market, profit, pct };
+};
+const ts = m => (m == null ? "—" : m < 60 ? `${m}m` : `${Math.floor(m / 60)}h`);
+const minsSince = (iso) => {
+  if (!iso) return null;
+  const delta = Date.now() - new Date(iso).getTime();
+  return Math.max(0, Math.round(delta / 60000));
+};
+const tierMap = { S: "grail", A: "hit", B: "flip", C: "sleeper" };
+const liqMap = { high: "high", medium: "med", low: "low", illiquid: "illiquid" };
+const normalizeDealSummary = (deal) => ({
+  id: deal.dealId,
+  name: deal.cardName || "Unknown card",
+  num: deal.cardNumber || "—",
+  set: deal.expansionName || "Unknown set",
+  sc: deal.expansionCode || "—",
+  ep: deal.ebayPriceGBP ?? 0,
+  market: deal.marketPriceGBP ?? 0,
+  profit: deal.profitGBP ?? 0,
+  pct: deal.profitPercent ?? 0,
+  conf: deal.confidence ?? 0,
+  cond: deal.condition || "—",
+  liq: liqMap[deal.liquidityGrade] || "low",
+  liqS: deal.liquidityScore ?? 0,
+  ta: minsSince(deal.listedAt || deal.createdAt),
+  tr: deal.priceTrend7d ?? 0,
+  tier: tierMap[deal.tier] || "flip",
+  type: "normal",
+  images: {
+    card: deal.cardImage,
+    ebay: deal.ebayImage,
+    expansionLogo: deal.expansionLogo,
+  },
+  ebayUrl: deal.ebayUrl,
+  review: deal.review || null,
+});
 
 /* ─── STYLES ─── */
 const CSS = `
@@ -154,7 +174,7 @@ const DealRow = ({ deal, selected, onSelect, idx }) => {
           {/* Type color top edge */}
           <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: 2.5, background: TYPE_C[deal.type], opacity: 0.7, borderRadius: "var(--r-sm) var(--r-sm) 0 0" }} />
           {/* Placeholder text */}
-          <span style={{ fontFamily: "var(--fm)", fontSize: 7, color: "var(--tGho)", letterSpacing: 1.5, marginTop: 4 }}>{deal.name.substring(0, 4).toUpperCase()}</span>
+          <span style={{ fontFamily: "var(--fm)", fontSize: 7, color: "var(--tGho)", letterSpacing: 1.5, marginTop: 4 }}>{(deal.name || "CARD").substring(0, 4).toUpperCase()}</span>
         </div>
         {/* Tier badge overlaid at bottom-left */}
         <div style={{ position: "absolute", bottom: -3, left: -3, zIndex: 2 }}>
@@ -219,6 +239,8 @@ const Detail = ({ deal, onClose, onReview }) => {
   );
 
   const p = calc(deal);
+  const pricing = deal?.pricing;
+  const bp = pricing?.buyerProtectionFee || calcBPFee((pricing?.ebayPrice ?? deal?.ep ?? 0) + (pricing?.ebayShipping ?? 0));
   const sec = { padding: "16px 22px", borderBottom: "1px solid var(--brd)" };
   const secT = { fontFamily: "var(--fm)", fontWeight: 500, fontSize: 9, textTransform: "uppercase", letterSpacing: 2.5, color: "var(--tMut)", marginBottom: 12, paddingBottom: 8, borderBottom: "1px solid var(--brd)" };
 
@@ -236,9 +258,12 @@ const Detail = ({ deal, onClose, onReview }) => {
       </div>
       {/* Images */}
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6, padding: "14px 22px" }}>
-        {["SCRYDEX", "EBAY"].map(l => (
-          <div key={l} style={{ aspectRatio: "5/7", borderRadius: "var(--r-md)", overflow: "hidden", background: "var(--glass)", border: "1px solid var(--brd)", display: "flex", alignItems: "center", justifyContent: "center", position: "relative" }}>
-            <span style={{ fontFamily: "var(--fm)", fontSize: 8, color: "var(--tGho)", letterSpacing: 2 }}>{l}</span>
+        {[
+          { label: "SCRYDEX", src: deal?.images?.card },
+          { label: "EBAY", src: deal?.images?.ebay },
+        ].map(l => (
+          <div key={l.label} style={{ aspectRatio: "5/7", borderRadius: "var(--r-md)", overflow: "hidden", background: "var(--glass)", border: "1px solid var(--brd)", display: "flex", alignItems: "center", justifyContent: "center", position: "relative" }}>
+            {l.src ? <img src={l.src} alt={`${deal.name} ${l.label}`} style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : <span style={{ fontFamily: "var(--fm)", fontSize: 8, color: "var(--tGho)", letterSpacing: 2 }}>{l.label}</span>}
           </div>
         ))}
       </div>
@@ -246,9 +271,12 @@ const Detail = ({ deal, onClose, onReview }) => {
       <div style={sec}>
         <div style={{ fontWeight: 800, fontSize: 20, letterSpacing: -0.3, marginBottom: 6, color: "var(--tMax)" }}>{deal.name} #{deal.num}</div>
         <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-          {/* Expansion logo placeholder — loaded from Scrydex CDN in production */}
-          <div style={{ width: 22, height: 22, borderRadius: "var(--r-sm)", background: "var(--glass)", border: "1px solid var(--brd)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-            <span style={{ fontFamily: "var(--fm)", fontSize: 7, color: "var(--tGho)" }}>◆</span>
+          <div style={{ width: 22, height: 22, borderRadius: "var(--r-sm)", background: "var(--glass)", border: "1px solid var(--brd)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, overflow: "hidden" }}>
+            {deal?.images?.expansionLogo ? (
+              <img src={deal.images.expansionLogo} alt={`${deal.set} logo`} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+            ) : (
+              <span style={{ fontFamily: "var(--fm)", fontSize: 7, color: "var(--tGho)" }}>◆</span>
+            )}
           </div>
           <span style={{ fontSize: 13, color: "var(--tSec)" }}>{deal.set} <span style={{ color: "var(--tMut)" }}>({deal.sc})</span></span>
           <span style={{ opacity: 0.2 }}>·</span>
@@ -269,24 +297,26 @@ const Detail = ({ deal, onClose, onReview }) => {
       </div>
       {/* CTA */}
       <div style={sec}>
-        <button style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, width: "100%", height: 46, background: "linear-gradient(135deg, #34d399, #2dd4bf)", color: "var(--bg0)", fontWeight: 800, fontSize: 13, letterSpacing: 2.5, borderRadius: "var(--r-md)", textTransform: "uppercase", boxShadow: "0 4px 20px rgba(52,211,153,0.2)", transition: "all 0.2s var(--ease)" }}
-          onMouseEnter={e => e.currentTarget.style.boxShadow = "0 6px 28px rgba(52,211,153,0.35)"}
-          onMouseLeave={e => e.currentTarget.style.boxShadow = "0 4px 20px rgba(52,211,153,0.2)"}>SNAG ON EBAY →</button>
+        <a href={deal.ebayUrl || "#"} target="_blank" rel="noreferrer" style={{ textDecoration: "none" }}>
+          <button disabled={!deal.ebayUrl} style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, width: "100%", height: 46, background: "linear-gradient(135deg, #34d399, #2dd4bf)", color: "var(--bg0)", fontWeight: 800, fontSize: 13, letterSpacing: 2.5, borderRadius: "var(--r-md)", textTransform: "uppercase", boxShadow: "0 4px 20px rgba(52,211,153,0.2)", transition: "all 0.2s var(--ease)", opacity: deal.ebayUrl ? 1 : 0.5, cursor: deal.ebayUrl ? "pointer" : "not-allowed" }}
+            onMouseEnter={e => e.currentTarget.style.boxShadow = "0 6px 28px rgba(52,211,153,0.35)"}
+            onMouseLeave={e => e.currentTarget.style.boxShadow = "0 4px 20px rgba(52,211,153,0.2)"}>SNAG ON EBAY →</button>
+        </a>
       </div>
       {/* Pricing — Buyer Protection tiered breakdown */}
       <div style={sec}>
         <div style={secT}>NO BS PRICING</div>
         <table style={{ width: "100%", borderCollapse: "collapse" }}><tbody>
           {[
-            ["eBay", fG(deal.ep), ""],
-            ["Shipping", fG(deal.sh), ""],
-            ["Buyer Prot.", fG(p.bp.total), ""],
-            ["  ├ Flat fee", `£${p.bp.flat.toFixed(2)}`, ""],
-            ...(p.bp.b1 > 0 ? [["  ├ 7% band", `£${p.bp.b1.toFixed(2)}`, ""]] : []),
-            ...(p.bp.b2 > 0 ? [["  ├ 4% band", `£${p.bp.b2.toFixed(2)}`, ""]] : []),
-            ...(p.bp.b3 > 0 ? [["  └ 2% band", `£${p.bp.b3.toFixed(2)}`, ""]] : []),
-            ["Market (USD)", "", `$${deal.mu.toFixed(2)}`],
-            ["FX rate", "", `×${deal.fx}`],
+            ["eBay", fG(pricing?.ebayPrice ?? deal.ep), ""],
+            ["Shipping", fG(pricing?.ebayShipping ?? 0), ""],
+            ["Buyer Prot.", fG(bp.total), ""],
+            ["  ├ Flat fee", `£${bp.flat.toFixed(2)}`, ""],
+            ...(bp.b1 > 0 ? [["  ├ 7% band", `£${bp.b1.toFixed(2)}`, ""]] : []),
+            ...(bp.b2 > 0 ? [["  ├ 4% band", `£${bp.b2.toFixed(2)}`, ""]] : []),
+            ...(bp.b3 > 0 ? [["  └ 2% band", `£${bp.b3.toFixed(2)}`, ""]] : []),
+            ["Market (USD)", "", pricing?.scrydexPriceUSD != null ? `$${pricing.scrydexPriceUSD.toFixed(2)}` : "—"],
+            ["FX rate", "", pricing?.exchangeRate != null ? `×${pricing.exchangeRate}` : "—"],
           ].map(([l, a, b], i) => {
             const isSub = l.startsWith("  ");
             return <tr key={i}><td style={{ padding: "5px 0", paddingLeft: isSub ? 10 : 0, fontFamily: "var(--fm)", fontSize: isSub ? 10 : 12, borderBottom: "1px solid var(--brd)", color: isSub ? "var(--tGho)" : "var(--tMut)", fontWeight: 500 }}>{l.trim()}</td><td style={{ padding: "5px 0", fontFamily: "var(--fm)", fontSize: isSub ? 10 : 12, borderBottom: "1px solid var(--brd)", textAlign: "right", color: isSub ? "var(--tGho)" : "var(--tPri)" }}>{a}</td><td style={{ padding: "5px 0", fontFamily: "var(--fm)", fontSize: isSub ? 10 : 12, borderBottom: "1px solid var(--brd)", textAlign: "right", paddingLeft: 10, color: "var(--tPri)" }}>{b}</td></tr>;
@@ -299,10 +329,10 @@ const Detail = ({ deal, onClose, onReview }) => {
       <div style={sec}>
         <div style={secT}>MATCH CONFIDENCE</div>
         <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 12, paddingBottom: 10, borderBottom: "1px solid var(--brd)" }}>
-          <span style={{ fontWeight: 800, fontSize: 30, lineHeight: 1, color: CONF_C(deal.conf), textShadow: `0 0 16px ${CONF_C(deal.conf)}25` }}>{(deal.conf * 100).toFixed(0)}%</span>
+        <span style={{ fontWeight: 800, fontSize: 30, lineHeight: 1, color: CONF_C(deal.conf), textShadow: `0 0 16px ${CONF_C(deal.conf)}25` }}>{deal.conf != null ? `${(deal.conf * 100).toFixed(0)}%` : "—"}</span>
           <span style={{ fontFamily: "var(--fm)", fontSize: 9, color: "var(--tMut)", letterSpacing: 1.5, lineHeight: 1.8 }}>COMPOSITE<br />CONFIDENCE</span>
         </div>
-        {Object.entries(deal.cb).map(([k, v]) => <BarRow key={k} label={k} value={v} />)}
+        {Object.entries(deal.cb || {}).map(([k, v]) => <BarRow key={k} label={k} value={v} />)}
       </div>
       {/* Liquidity */}
       <div style={sec}>
@@ -312,18 +342,28 @@ const Detail = ({ deal, onClose, onReview }) => {
           <span style={{ fontFamily: "var(--fm)", fontSize: 13, fontWeight: 700, color: LIQ[deal.liq]?.color }}>{(deal.liqS * 100).toFixed(0)}%</span>
           <span style={{ fontFamily: "var(--fm)", fontSize: 9, color: "var(--tMut)", letterSpacing: 1.5 }}>COMPOSITE</span>
         </div>
-        {Object.entries(deal.lb).map(([k, v]) => (
+        {Object.entries(deal.lb || {}).map(([k, v]) => (
           <BarRow key={k} label={k} value={k === "Velocity" && !velFetched ? null : (k === "Velocity" ? velVal : v)}
-            showFetch={k === "Velocity" && !velFetched} onFetch={() => { setTimeout(() => { setVelFetched(true); setVelVal(0.85); }, 800); }} />
+            showFetch={k === "Velocity" && !velFetched} onFetch={async () => {
+              try {
+                const res = await fetch(`/api/deals/${deal.id}/liquidity`).then(r => r.json());
+                const score = res?.liquidity?.salesVelocity?.sales7d != null ? Math.min(1, res.liquidity.salesVelocity.sales7d / 20) : null;
+                setVelFetched(true);
+                setVelVal(score);
+              } catch (err) {
+                setVelFetched(true);
+                setVelVal(null);
+              }
+            }} />
         ))}
       </div>
       {/* Comps */}
       <div style={sec}>
         <div style={secT}>COMPS BY CONDITION</div>
-        {Object.entries(deal.cp).map(([c, pr]) => {
-          const act = c === deal.cond;
-          return <div key={c} style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", borderBottom: "1px solid var(--brd)", fontFamily: "var(--fm)", fontSize: 12, color: act ? "var(--tMax)" : "var(--tMut)", fontWeight: act ? 700 : 400 }}><span>{c}{act ? " ●" : ""}</span><span>{fG(pr)}</span></div>;
-        })}
+      {Object.entries(deal.cp || {}).map(([c, pr]) => {
+        const act = c === deal.cond;
+        return <div key={c} style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", borderBottom: "1px solid var(--brd)", fontFamily: "var(--fm)", fontSize: 12, color: act ? "var(--tMax)" : "var(--tMut)", fontWeight: act ? 700 : 400 }}><span>{c}{act ? " ●" : ""}</span><span>{fG(pr)}</span></div>;
+      })}
       </div>
       {/* Expansion Info */}
       <div style={sec}>
@@ -337,7 +377,7 @@ const Detail = ({ deal, onClose, onReview }) => {
             <div style={{ fontFamily: "var(--fm)", fontSize: 10, color: "var(--tMut)" }}>{deal.sc}</div>
           </div>
         </div>
-        {[["Total Cards", deal.sc.startsWith("sv") ? "197" : "203"], ["Release", deal.sc.startsWith("sv3pt5") ? "Sep 2023" : deal.sc.startsWith("sv3") ? "Aug 2023" : deal.sc.startsWith("swsh7") ? "Aug 2022" : "2022"], ["Series", deal.sc.startsWith("sv") ? "Scarlet & Violet" : "Sword & Shield"]].map(([l, v], i) => (
+        {[["Total Cards", "—"], ["Release", "—"], ["Series", "—"]].map(([l, v], i) => (
           <div key={i} style={{ display: "flex", justifyContent: "space-between", padding: "5px 0", borderBottom: "1px solid var(--brd)", fontFamily: "var(--fm)", fontSize: 11 }}>
             <span style={{ color: "var(--tMut)" }}>{l}</span>
             <span style={{ color: "var(--tSec)", fontWeight: 500 }}>{v}</span>
@@ -347,7 +387,7 @@ const Detail = ({ deal, onClose, onReview }) => {
       {/* Card Metadata */}
       <div style={sec}>
         <div style={secT}>CARD DATA</div>
-        {[["Rarity", deal.tier === "grail" || deal.tier === "hit" ? "Ultra Rare" : "Rare"], ["Supertype", "Pokémon"], ["Subtypes", "ex, Stage 2"], ["Artist", "5ban Graphics"]].map(([l, v], i) => (
+        {[["Rarity", "—"], ["Supertype", "—"], ["Subtypes", "—"], ["Artist", "—"]].map(([l, v], i) => (
           <div key={i} style={{ display: "flex", justifyContent: "space-between", padding: "5px 0", borderBottom: "1px solid var(--brd)", fontFamily: "var(--fm)", fontSize: 11 }}>
             <span style={{ color: "var(--tMut)" }}>{l}</span>
             <span style={{ color: "var(--tSec)", fontWeight: 500 }}>{v}</span>
@@ -356,16 +396,16 @@ const Detail = ({ deal, onClose, onReview }) => {
       </div>
       {/* Review */}
       <div style={{ padding: "14px 22px" }}>
-        {deal.rev ? (
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 14px", borderRadius: "var(--r-md)", background: deal.rev === "correct" ? "rgba(52,211,153,0.05)" : "rgba(248,113,113,0.05)", border: `1px solid ${deal.rev === "correct" ? "rgba(52,211,153,0.2)" : "rgba(248,113,113,0.2)"}`, fontFamily: "var(--fm)", fontSize: 11, color: deal.rev === "correct" ? "var(--green)" : "var(--red)" }}>
-            <span>Marked {deal.rev}</span>
-            <button onClick={() => onReview(deal.id, null)} style={{ fontSize: 10, color: "var(--tMut)", padding: "3px 10px", borderRadius: "var(--r-pill)", border: "1px solid var(--brd)", fontFamily: "var(--fm)" }}>Undo</button>
+        {deal.review?.reviewedAt ? (
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 14px", borderRadius: "var(--r-md)", background: deal.review.isCorrectMatch ? "rgba(52,211,153,0.05)" : "rgba(248,113,113,0.05)", border: `1px solid ${deal.review.isCorrectMatch ? "rgba(52,211,153,0.2)" : "rgba(248,113,113,0.2)"}`, fontFamily: "var(--fm)", fontSize: 11, color: deal.review.isCorrectMatch ? "var(--green)" : "var(--red)" }}>
+            <span>Marked {deal.review.isCorrectMatch ? "correct" : "wrong"}</span>
+            <span style={{ fontFamily: "var(--fm)", fontSize: 9, color: "var(--tMut)" }}>{deal.review.reviewedAt ? new Date(deal.review.reviewedAt).toLocaleDateString() : ""}</span>
           </div>
         ) : (
           <>
             <div style={{ display: "flex", gap: 8 }}>
               {[["correct", "✓ Correct", "var(--green)"], ["wrong", "✗ Wrong", "var(--red)"]].map(([act, lbl, clr]) => (
-                <button key={act} onClick={() => act === "wrong" ? setShowReasons(!showReasons) : onReview(deal.id, "correct")}
+                <button key={act} onClick={() => act === "wrong" ? setShowReasons(!showReasons) : onReview(deal.id, true, null)}
                   style={{ flex: 1, height: 42, display: "flex", alignItems: "center", justifyContent: "center", gap: 6, fontWeight: 600, fontSize: 12, letterSpacing: 0.5, borderRadius: "var(--r-md)", background: "var(--glass)", border: "1px solid var(--brd)", color: "var(--tSec)", transition: "all 0.15s" }}
                   onMouseEnter={e => { e.currentTarget.style.borderColor = `${clr}40`; e.currentTarget.style.color = clr; }}
                   onMouseLeave={e => { e.currentTarget.style.borderColor = "var(--brd)"; e.currentTarget.style.color = "var(--tSec)"; }}>{lbl}</button>
@@ -373,10 +413,15 @@ const Detail = ({ deal, onClose, onReview }) => {
             </div>
             {showReasons && (
               <div style={{ display: "flex", flexWrap: "wrap", gap: 5, marginTop: 8 }}>
-                {["Wrong Card", "Wrong Set", "Wrong Variant", "Wrong Price"].map(r => (
-                  <button key={r} onClick={() => onReview(deal.id, "wrong")} style={{ padding: "5px 12px", fontFamily: "var(--fm)", fontSize: 9, borderRadius: "var(--r-pill)", background: "var(--glass)", border: "1px solid var(--brd)", color: "var(--tMut)", fontWeight: 500, transition: "all 0.15s" }}
+                {[
+                  { label: "Wrong Card", reason: "wrong_card" },
+                  { label: "Wrong Set", reason: "wrong_expansion" },
+                  { label: "Wrong Variant", reason: "wrong_variant" },
+                  { label: "Wrong Price", reason: "wrong_price" },
+                ].map(r => (
+                  <button key={r.reason} onClick={() => onReview(deal.id, false, r.reason)} style={{ padding: "5px 12px", fontFamily: "var(--fm)", fontSize: 9, borderRadius: "var(--r-pill)", background: "var(--glass)", border: "1px solid var(--brd)", color: "var(--tMut)", fontWeight: 500, transition: "all 0.15s" }}
                     onMouseEnter={e => { e.currentTarget.style.borderColor = "rgba(248,113,113,0.3)"; e.currentTarget.style.color = "var(--red)"; }}
-                    onMouseLeave={e => { e.currentTarget.style.borderColor = "var(--brd)"; e.currentTarget.style.color = "var(--tMut)"; }}>{r}</button>
+                    onMouseLeave={e => { e.currentTarget.style.borderColor = "var(--brd)"; e.currentTarget.style.color = "var(--tMut)"; }}>{r.label}</button>
                 ))}
               </div>
             )}
@@ -469,21 +514,29 @@ const Stepper = ({ value, onChange, step = 5, min = 0, max = 100 }) => {
 
 /* ═══ MAIN APP ═══ */
 export default function App() {
-  const [loggedIn, setLoggedIn] = useState(false);
-  const [deals, setDeals] = useState(DEALS);
+  const [authStatus, setAuthStatus] = useState("checking"); // checking | authed | unauthed
+  const [deals, setDeals] = useState([]);
   const [selId, setSelId] = useState(null);
+  const [selDeal, setSelDeal] = useState(null);
+  const [status, setStatus] = useState(null);
+  const [dealError, setDealError] = useState(null);
   const [f, setF] = useState({ tiers: new Set(["grail", "hit", "flip"]), conds: new Set(["NM", "LP", "MP"]), confs: new Set(["high", "med"]), liqs: new Set(["high", "med"]), minP: 10, time: "6h", q: "", graded: false });
   const [showLookup, setShowLookup] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [settingsTab, setSettingsTab] = useState("general");
   const [apiTest, setApiTest] = useState({});
+  const [apiKeys, setApiKeys] = useState(null);
+  const [apiInputs, setApiInputs] = useState({ scrydex: { apiKey: "", teamId: "" }, ebay: { clientId: "", clientSecret: "", refreshToken: "" } });
+  const [apiKeyError, setApiKeyError] = useState(null);
   const [lookupSt, setLookupSt] = useState("idle");
+  const [lookupQuery, setLookupQuery] = useState("");
+  const [lookupRes, setLookupRes] = useState(null);
+  const [lookupErr, setLookupErr] = useState(null);
   const [pill, setPill] = useState(false);
   const [toast, setToast] = useState(null);
   const [saved, setSaved] = useState(false);
   const [sseStatus, setSseStatus] = useState("connected"); // connected | reconnecting | lost
   const feedRef = useRef(null);
-  const selDeal = deals.find(d => d.id === selId) || null;
 
   const tog = (k, v) => setF(prev => { const s = new Set(prev[k]); s.has(v) ? s.delete(v) : s.add(v); return { ...prev, [k]: s }; });
 
@@ -499,25 +552,143 @@ export default function App() {
     return true;
   });
 
-  const onReview = (id, v) => setDeals(ds => ds.map(d => d.id === id ? { ...d, rev: v } : d));
+  const fetchJson = async (url, options = {}) => {
+    const res = await fetch(url, options);
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      const err = new Error(body?.error || res.statusText);
+      err.status = res.status;
+      throw err;
+    }
+    return res.json();
+  };
+
+  const onReview = async (id, v, reason) => {
+    if (!id) return;
+    try {
+      await fetchJson(`/api/deals/${id}/review`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ isCorrectMatch: v, incorrectReason: reason }),
+      });
+      setDeals(ds => ds.map(d => d.id === id ? { ...d, review: { reviewedAt: new Date().toISOString(), isCorrectMatch: v, incorrectReason: reason || null } } : d));
+      if (selDeal?.id === id) {
+        setSelDeal(prev => prev ? { ...prev, review: { reviewedAt: new Date().toISOString(), isCorrectMatch: v, incorrectReason: reason || null } } : prev);
+      }
+    } catch (err) {
+      setDealError(err.message);
+    }
+  };
 
   useEffect(() => {
-    if (!loggedIn) return;
-    const iv = setInterval(() => {
-      const tier = ["grail", "hit", "flip"][~~(Math.random() * 3)];
-      const liq = ["high", "high", "med", "low"][~~(Math.random() * 4)];
-      const nd = { id: Date.now(), name: SIM_N[~~(Math.random() * SIM_N.length)], num: `${String(~~(Math.random() * 200) + 1).padStart(3, "0")}/197`, set: SIM_S[~~(Math.random() * SIM_S.length)], sc: `sv${~~(Math.random() * 6) + 1}`, ep: +(Math.random() * 30 + 2).toFixed(2), sh: +(Math.random() * 3 + 0.5).toFixed(2), mu: +(Math.random() * 100 + 20).toFixed(2), fx: 0.789, conf: +(0.65 + Math.random() * 0.3).toFixed(2), cond: ["NM", "LP"][~~(Math.random() * 2)], liq, liqS: +(0.3 + Math.random() * 0.6).toFixed(2), ta: 1, tr: +(Math.random() * 20 - 5).toFixed(1), tier, type: SIM_T[~~(Math.random() * SIM_T.length)], cb: { Name: .92, Number: 1, Denom: .88, Expan: .85, Variant: .80, Extract: .88 }, lb: { Trend: .70, Prices: .65, Spread: .60, Supply: .55, Sold: .50, Velocity: null }, cp: { NM: 30, LP: 24, MP: 17, HP: 10 }, rev: null };
-      setDeals(ds => [nd, ...ds]);
-      if (tier === "grail") { setToast(nd); setTimeout(() => setToast(null), 5000); }
+    let active = true;
+    fetchJson("/api/status")
+      .then(data => { if (active) { setStatus(data); } })
+      .catch(() => {});
+    return () => { active = false; };
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    fetchJson("/api/deals?limit=200")
+      .then(data => {
+        if (!active) return;
+        const items = data?.deals?.map(normalizeDealSummary) || [];
+        setDeals(items);
+        setAuthStatus("authed");
+        setDealError(null);
+      })
+      .catch(err => {
+        if (!active) return;
+        if (err.status === 401) {
+          setAuthStatus("unauthed");
+          return;
+        }
+        setDealError(err.message);
+      });
+    return () => { active = false; };
+  }, []);
+
+  useEffect(() => {
+    if (authStatus !== "authed") return;
+    const es = new EventSource("/api/deals/stream");
+    es.addEventListener("open", () => setSseStatus("connected"));
+    es.addEventListener("error", () => setSseStatus(prev => prev === "connected" ? "reconnecting" : "lost"));
+    es.addEventListener("deal", (evt) => {
+      const payload = JSON.parse(evt.data);
+      const incoming = normalizeDealSummary(payload);
+      setDeals(ds => [incoming, ...ds.filter(d => d.id !== incoming.id)]);
+      if (incoming.tier === "grail") { setToast(incoming); setTimeout(() => setToast(null), 5000); }
       if (feedRef.current?.scrollTop > 100) setPill(true);
-    }, 11000);
-    return () => clearInterval(iv);
-  }, [loggedIn]);
+    });
+    es.addEventListener("status", (evt) => {
+      const payload = JSON.parse(evt.data);
+      setStatus(payload);
+    });
+    return () => es.close();
+  }, [authStatus]);
+
+  const refreshApiKeys = () => fetchJson("/api/settings/api-keys")
+    .then(data => { setApiKeys(data); setApiKeyError(null); })
+    .catch(err => setApiKeyError(err.message));
+
+  useEffect(() => {
+    if (authStatus !== "authed") return;
+    refreshApiKeys();
+  }, [authStatus]);
+
+  useEffect(() => {
+    if (!selId) { setSelDeal(null); return; }
+    const base = deals.find(d => d.id === selId) || null;
+    if (base) setSelDeal(base);
+    let active = true;
+    fetchJson(`/api/deals/${selId}`)
+      .then(data => {
+        if (!active) return;
+        const detail = data?.deal ? normalizeDealSummary(data.deal) : null;
+        if (!detail) return;
+        const liquiditySignals = data?.liquidity?.signals || {};
+        const supplyScore = liquiditySignals.concurrentSupply != null ? Math.min(1, liquiditySignals.concurrentSupply / 20) : null;
+        const soldScore = liquiditySignals.quantitySold != null ? Math.min(1, liquiditySignals.quantitySold / 20) : null;
+        setSelDeal({
+          ...detail,
+          pricing: data?.pricing || null,
+          confidence: data?.confidence || null,
+          liquidity: data?.liquidity || null,
+          priceTable: data?.priceTable || [],
+          review: data?.review || detail.review,
+          cb: {
+            Name: data?.confidence?.fields?.name ?? null,
+            Number: data?.confidence?.fields?.number ?? null,
+            Denom: data?.confidence?.fields?.denominator ?? null,
+            Expan: data?.confidence?.fields?.expansion ?? null,
+            Variant: data?.confidence?.fields?.variant ?? null,
+            Extract: data?.confidence?.fields?.normalization ?? null,
+          },
+          lb: {
+            Trend: liquiditySignals.trendActivity ?? null,
+            Prices: liquiditySignals.priceCompleteness ?? null,
+            Spread: liquiditySignals.priceSpread ?? null,
+            Supply: supplyScore,
+            Sold: soldScore,
+            Velocity: data?.liquidity?.salesVelocity?.sales7d != null ? Math.min(1, data.liquidity.salesVelocity.sales7d / 20) : null,
+          },
+          liqS: data?.liquidity?.composite ?? detail.liqS,
+          liq: liqMap[data?.liquidity?.grade] || detail.liq,
+          cp: (data?.priceTable || []).reduce((acc, row) => ({ ...acc, [row.condition]: row.priceGBP }), {}),
+        });
+      })
+      .catch(err => {
+        if (!active) return;
+        setDealError(err.message);
+      });
+    return () => { active = false; };
+  }, [selId, deals]);
 
   const saveFilters = () => { setSaved(true); setTimeout(() => setSaved(false), 2000); };
 
   // Login — GitHub OAuth
-  if (!loggedIn) return (
+  if (authStatus !== "authed") return (
     <div style={{ position: "fixed", inset: 0, background: "radial-gradient(ellipse at 50% 30%, #0f1628 0%, var(--bg0) 70%)", display: "flex", alignItems: "center", justifyContent: "center" }}>
       <style>{CSS}{`@keyframes fadeSlide{from{opacity:0;transform:translateX(-14px)}to{opacity:1;transform:translateX(0)}}@keyframes floatIn{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:translateY(0)}}`}</style>
       <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 24, width: 360, maxWidth: "90vw", animation: "floatIn 0.5s var(--ease) both" }}>
@@ -526,7 +697,7 @@ export default function App() {
           <div style={{ fontWeight: 800, fontSize: 28, letterSpacing: -0.5 }}>Poké<span style={{ color: "var(--red)" }}>Snipe</span></div>
           <div style={{ fontFamily: "var(--fm)", fontSize: 10, color: "var(--tMut)", letterSpacing: 3.5, textTransform: "uppercase", marginTop: 6 }}>No BS Arbitrage</div>
         </div>
-        <button onClick={() => setLoggedIn(true)} style={{
+        <button onClick={() => { window.location.href = "/auth/github"; }} style={{
           width: "100%", height: 48, display: "flex", alignItems: "center", justifyContent: "center", gap: 10,
           background: "var(--glass)", border: "1px solid var(--brd2)", color: "var(--tMax)",
           fontWeight: 700, fontSize: 14, letterSpacing: 0.3, borderRadius: "var(--r-md)",
@@ -536,8 +707,13 @@ export default function App() {
           onMouseLeave={e => { e.currentTarget.style.borderColor = "var(--brd2)"; e.currentTarget.style.background = "var(--glass)"; }}>
           {/* GitHub mark */}
           <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z" /></svg>
-          Sign in with GitHub
+          {authStatus === "checking" ? "Checking session..." : "Sign in with GitHub"}
         </button>
+        {dealError && (
+          <div style={{ fontFamily: "var(--fm)", fontSize: 10, color: "var(--red)", textAlign: "center", lineHeight: 1.6 }}>
+            {dealError}
+          </div>
+        )}
         <div style={{ fontFamily: "var(--fm)", fontSize: 9, color: "var(--tGho)", letterSpacing: 1.5, textAlign: "center", lineHeight: 1.8 }}>
           PRIVATE DASHBOARD · GITHUB SSO<br />AUTHORIZED USERS ONLY
         </div>
@@ -545,8 +721,8 @@ export default function App() {
     </div>
   );
 
-  const grailCount = deals.filter(d => d.tier === "grail").length;
-  const hitCount = deals.filter(d => d.tier === "hit").length;
+  const grailCount = status?.deals?.countByTier?.S ?? deals.filter(d => d.tier === "grail").length;
+  const hitCount = status?.deals?.countByTier?.A ?? deals.filter(d => d.tier === "hit").length;
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100vh", overflow: "hidden", background: "radial-gradient(ellipse at 50% 0%, #0e1525 0%, var(--bg0) 60%)" }}>
@@ -597,8 +773,17 @@ export default function App() {
           </div>
           {/* SSE connection indicator */}
           <div style={{ display: "flex", alignItems: "center", gap: 5, padding: "0 10px", height: 34, borderRadius: "var(--r-pill)", background: "var(--glass)", border: "1px solid var(--brd)" }}>
-            <div style={{ width: 6, height: 6, borderRadius: "50%", background: "var(--green)", boxShadow: "0 0 6px rgba(52,211,153,0.5)", animation: "pulse 3s ease infinite" }} />
-            <span className="fl-label" style={{ fontFamily: "var(--fm)", fontSize: 9, color: "var(--tMut)", letterSpacing: 1 }}>LIVE</span>
+            <div style={{
+              width: 6,
+              height: 6,
+              borderRadius: "50%",
+              background: sseStatus === "connected" ? "var(--green)" : sseStatus === "reconnecting" ? "var(--amber)" : "var(--red)",
+              boxShadow: sseStatus === "connected" ? "0 0 6px rgba(52,211,153,0.5)" : sseStatus === "reconnecting" ? "0 0 6px rgba(251,191,36,0.5)" : "0 0 6px rgba(248,113,113,0.5)",
+              animation: "pulse 3s ease infinite"
+            }} />
+            <span className="fl-label" style={{ fontFamily: "var(--fm)", fontSize: 9, color: "var(--tMut)", letterSpacing: 1 }}>
+              {sseStatus === "connected" ? "LIVE" : sseStatus === "reconnecting" ? "RECONNECT" : "OFFLINE"}
+            </span>
           </div>
         </div>
       </header>
@@ -657,6 +842,14 @@ export default function App() {
           )}
         </div>
       )}
+      {dealError && (
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 10, padding: "8px 24px", background: "rgba(248,113,113,0.1)", borderBottom: "1px solid rgba(248,113,113,0.2)", flexShrink: 0 }}>
+          <div style={{ width: 6, height: 6, borderRadius: "50%", background: "var(--red)", animation: "pulse 1.5s ease infinite" }} />
+          <span style={{ fontFamily: "var(--fm)", fontSize: 11, fontWeight: 600, color: "var(--red)", letterSpacing: 0.5 }}>
+            {dealError}
+          </span>
+        </div>
+      )}
 
       {/* ═══ MAIN ═══ */}
       <div style={{ display: "flex", flex: 1, overflow: "hidden" }}>
@@ -684,21 +877,21 @@ export default function App() {
         {/* Left — primary operational stats */}
         <div style={{ display: "flex", alignItems: "center", gap: 0, flexShrink: 0 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "0 14px 0 0", flexShrink: 0 }}>
-            <div style={{ width: 6, height: 6, borderRadius: "50%", background: "var(--green)", boxShadow: "0 0 8px rgba(52,211,153,0.5)" }} />
-            <span style={{ color: "var(--tSec)", fontWeight: 600 }}>Hunting</span>
-            <span style={{ color: "var(--tMut)", fontSize: 10 }}>2m ago</span>
+            <div style={{ width: 6, height: 6, borderRadius: "50%", background: status?.scanner?.state === "error" ? "var(--red)" : status?.scanner?.state === "paused" ? "var(--amber)" : "var(--green)", boxShadow: "0 0 8px rgba(52,211,153,0.5)" }} />
+            <span style={{ color: "var(--tSec)", fontWeight: 600 }}>{status?.scanner?.state ? status.scanner.state[0].toUpperCase() + status.scanner.state.slice(1) : "Hunting"}</span>
+            <span style={{ color: "var(--tMut)", fontSize: 10 }}>{ts(minsSince(status?.scanner?.lastScanAt))}</span>
           </div>
           <div style={{ width: 1, height: 16, background: "var(--brd)", flexShrink: 0 }} />
           <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "0 14px", flexShrink: 0 }}>
             <span style={{ color: "var(--tMut)" }}>Today:</span>
-            <span style={{ color: "var(--tMax)", fontWeight: 700 }}>{deals.length}</span>
+            <span style={{ color: "var(--tMax)", fontWeight: 700 }}>{status?.deals?.countToday ?? deals.length}</span>
             <span style={{ fontSize: 9, color: TIERS.grail.color, fontWeight: 600 }}>{grailCount}G</span>
             <span style={{ fontSize: 9, color: TIERS.hit.color, fontWeight: 600 }}>{hitCount}H</span>
           </div>
           <div style={{ width: 1, height: 16, background: "var(--brd)", flexShrink: 0 }} />
           <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "0 14px", flexShrink: 0 }}>
             <span style={{ color: "var(--tMut)" }}>Acc:</span>
-            <span style={{ color: "var(--green)", fontWeight: 700 }}>91%</span>
+            <span style={{ color: "var(--green)", fontWeight: 700 }}>{status?.accuracy?.rolling7d != null ? `${Math.round(status.accuracy.rolling7d * 100)}%` : "—"}</span>
             <span style={{ color: "var(--tGho)", fontSize: 10 }}>7d</span>
           </div>
         </div>
@@ -706,9 +899,27 @@ export default function App() {
         {/* Right — API status indicators with dots + sync info */}
         <div className="foot-apis" style={{ display: "flex", alignItems: "center", gap: 0, flexShrink: 0 }}>
           {[
-            { label: "eBay", val: "1,847", cap: "5K", extra: null, dot: 1847/5000 < 0.8 ? "var(--green)" : 1847/5000 < 0.95 ? "var(--amber)" : "var(--red)" },
-            { label: "Scrydex", val: "2,340", cap: "50K", extra: null, dot: "var(--green)" },
-            { label: "Index", val: "34,892", cap: null, extra: "2h ago", dot: "var(--green)" },
+            {
+              label: "eBay",
+              val: status?.ebay?.callsToday != null ? status.ebay.callsToday.toLocaleString() : "—",
+              cap: status?.ebay?.dailyLimit != null ? status.ebay.dailyLimit.toLocaleString() : null,
+              extra: null,
+              dot: status?.ebay?.callsToday && status?.ebay?.dailyLimit ? (status.ebay.callsToday / status.ebay.dailyLimit < 0.8 ? "var(--green)" : status.ebay.callsToday / status.ebay.dailyLimit < 0.95 ? "var(--amber)" : "var(--red)") : "var(--tGho)"
+            },
+            {
+              label: "Scrydex",
+              val: status?.scrydex?.creditsUsedMonth != null ? status.scrydex.creditsUsedMonth.toLocaleString() : "—",
+              cap: status?.scrydex?.monthlyLimit != null ? status.scrydex.monthlyLimit.toLocaleString() : null,
+              extra: null,
+              dot: "var(--green)"
+            },
+            {
+              label: "Index",
+              val: status?.cardIndex?.totalCards != null ? status.cardIndex.totalCards.toLocaleString() : "—",
+              cap: null,
+              extra: status?.cardIndex?.lastSyncAt ? `${ts(minsSince(status.cardIndex.lastSyncAt))} ago` : null,
+              dot: status?.cardIndex?.syncState === "failed" ? "var(--red)" : status?.cardIndex?.syncState === "syncing" ? "var(--amber)" : "var(--green)"
+            },
           ].map((api, i) => (
             <div key={i} style={{ display: "flex", alignItems: "center", gap: 5, padding: "0 12px", flexShrink: 0, borderLeft: i > 0 ? "1px solid var(--brd)" : "none" }}>
               <div style={{ width: 5, height: 5, borderRadius: "50%", background: api.dot, boxShadow: `0 0 6px ${api.dot === "var(--green)" ? "rgba(52,211,153,0.4)" : api.dot === "var(--amber)" ? "rgba(251,191,36,0.4)" : "rgba(248,113,113,0.4)"}`, flexShrink: 0 }} />
@@ -735,25 +946,53 @@ export default function App() {
 
       {/* Lookup overlay */}
       {showLookup && (
-        <div onClick={e => { if (e.target === e.currentTarget) { setShowLookup(false); setLookupSt("idle"); } }} style={{ position: "fixed", inset: 0, zIndex: 1000, display: "flex", alignItems: "flex-start", justifyContent: "center", paddingTop: 80, background: "rgba(7,10,18,0.85)", backdropFilter: "blur(16px)" }}>
+        <div onClick={e => { if (e.target === e.currentTarget) { setShowLookup(false); setLookupSt("idle"); setLookupRes(null); setLookupErr(null); } }} style={{ position: "fixed", inset: 0, zIndex: 1000, display: "flex", alignItems: "flex-start", justifyContent: "center", paddingTop: 80, background: "rgba(7,10,18,0.85)", backdropFilter: "blur(16px)" }}>
           <div style={{ width: 580, maxWidth: "94vw", maxHeight: "calc(100vh - 120px)", borderRadius: "var(--r-xl)", background: "rgba(12,16,25,0.95)", border: "1px solid var(--brd2)", overflowY: "auto", backdropFilter: "blur(20px)" }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 22px", borderBottom: "1px solid var(--brd)" }}>
               <span style={{ fontWeight: 300, fontSize: 12, letterSpacing: 3, color: "var(--tMut)", textTransform: "uppercase" }}>Manual Lookup</span>
-              <button onClick={() => { setShowLookup(false); setLookupSt("idle"); }} style={{ width: 30, height: 30, borderRadius: "var(--r-pill)", background: "var(--glass)", border: "1px solid var(--brd)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, color: "var(--tMut)" }}>✕</button>
+              <button onClick={() => { setShowLookup(false); setLookupSt("idle"); setLookupRes(null); setLookupErr(null); }} style={{ width: 30, height: 30, borderRadius: "var(--r-pill)", background: "var(--glass)", border: "1px solid var(--brd)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, color: "var(--tMut)" }}>✕</button>
             </div>
             <div style={{ padding: 22 }}>
-              <input autoFocus placeholder="PASTE EBAY URL. NO BS." onKeyDown={e => { if (e.key === "Enter" && e.target.value) { setLookupSt("proc"); setTimeout(() => setLookupSt("done"), 2000); } }}
+              <input autoFocus placeholder="PASTE EBAY URL OR ITEM ID." value={lookupQuery} onChange={e => setLookupQuery(e.target.value)}
+                onKeyDown={async e => {
+                  if (e.key !== "Enter" || !lookupQuery) return;
+                  setLookupSt("proc");
+                  setLookupErr(null);
+                  try {
+                    const body = lookupQuery.includes("http") ? { ebayUrl: lookupQuery } : { ebayItemId: lookupQuery };
+                    const res = await fetchJson("/api/lookup", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+                    setLookupRes(res);
+                    setLookupSt("done");
+                  } catch (err) {
+                    setLookupErr(err.message);
+                    setLookupSt("idle");
+                  }
+                }}
                 style={{ width: "100%", height: 46, padding: "0 18px", borderRadius: "var(--r-md)", background: "var(--glass)", border: "1px solid var(--brd2)", color: "var(--tMax)", fontFamily: "var(--fm)", fontSize: 12, letterSpacing: 1 }} />
             </div>
             {lookupSt === "proc" && <div style={{ padding: "0 22px 22px", fontFamily: "var(--fm)", fontSize: 11, color: "var(--amber)", letterSpacing: 0.5 }}>Fetching... Extracting... Matching...</div>}
-            {lookupSt === "done" && (
+            {lookupErr && (
+              <div style={{ padding: "0 22px 22px", fontFamily: "var(--fm)", fontSize: 11, color: "var(--red)", letterSpacing: 0.5 }}>
+                {lookupErr}
+              </div>
+            )}
+            {lookupSt === "done" && lookupRes && (
               <div style={{ padding: "0 22px 22px" }}>
-                <div style={{ fontWeight: 800, fontSize: 17, marginBottom: 3 }}>Zard ex #006/197</div>
-                <div style={{ fontSize: 12, color: "var(--tSec)", marginBottom: 14, display: "flex", alignItems: "center", gap: 6 }}>Obsidian Flames (sv3) <CondPill cond="NM" /> <LiqPill liq="high" /></div>
+                <div style={{ fontWeight: 800, fontSize: 17, marginBottom: 3 }}>
+                  {lookupRes.match?.card?.name || "No match"} {lookupRes.match?.card?.number ? `#${lookupRes.match.card.number}` : ""}
+                </div>
+                <div style={{ fontSize: 12, color: "var(--tSec)", marginBottom: 14, display: "flex", alignItems: "center", gap: 6 }}>
+                  {lookupRes.match?.card?.expansion || "—"} <CondPill cond={lookupRes.signals?.condition?.mappedCondition || "—"} />
+                  {lookupRes.arbitrage?.liquidityGrade && <LiqPill liq={lookupRes.arbitrage.liquidityGrade} />}
+                </div>
                 <GradBorder gradient="linear-gradient(135deg, rgba(52,211,153,0.45), rgba(96,165,250,0.25))" radius="var(--r-md)" pad={1}>
                   <div style={{ padding: "18px 20px" }}>
-                    <div style={{ fontWeight: 800, fontSize: 34, color: "var(--greenB)", letterSpacing: -1.5, lineHeight: 1, textShadow: "0 0 24px rgba(52,211,153,0.2)" }}>+£34.82</div>
-                    <div style={{ fontFamily: "var(--fm)", fontSize: 13, fontWeight: 600, color: "var(--green)", marginTop: 4 }}>+199% · GRAIL territory</div>
+                    <div style={{ fontWeight: 800, fontSize: 34, color: "var(--greenB)", letterSpacing: -1.5, lineHeight: 1, textShadow: "0 0 24px rgba(52,211,153,0.2)" }}>
+                      {lookupRes.arbitrage ? `+${fG(lookupRes.arbitrage.profitGBP)}` : "—"}
+                    </div>
+                    <div style={{ fontFamily: "var(--fm)", fontSize: 13, fontWeight: 600, color: "var(--green)", marginTop: 4 }}>
+                      {lookupRes.arbitrage ? `+${Math.round(lookupRes.arbitrage.profitPercent)}%` : "No arbitrage data"}
+                    </div>
                   </div>
                 </GradBorder>
               </div>
@@ -804,7 +1043,11 @@ export default function App() {
                 ))}
                 {/* Logout */}
                 <div style={{ padding: "14px 22px" }}>
-                  <button onClick={() => { setLoggedIn(false); setShowSettings(false); }} style={{
+                  <button onClick={async () => {
+                    try { await fetch("/auth/logout", { method: "POST" }); } catch (err) {}
+                    setAuthStatus("unauthed");
+                    setShowSettings(false);
+                  }} style={{
                     width: "100%", height: 40, display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
                     borderRadius: "var(--r-md)", background: "var(--glass)", border: "1px solid var(--brd)",
                     fontFamily: "var(--fm)", fontSize: 11, fontWeight: 600, color: "var(--red)", letterSpacing: 1,
@@ -820,8 +1063,27 @@ export default function App() {
               {/* ─── API KEYS TAB ─── */}
               {settingsTab === "api" && <>
                 {[
-                  { key: "ebay", label: "eBay API", desc: "OAuth credentials for listing data and search", connected: true, fields: ["App ID", "Cert ID", "Dev ID"] },
-                  { key: "scrydex", label: "Scrydex API", desc: "Card index, pricing, and sales velocity data", connected: true, fields: ["API Key", "API Secret"] },
+                  {
+                    key: "ebay",
+                    label: "eBay API",
+                    desc: "OAuth credentials for listing data and search",
+                    fields: [
+                      { name: "clientId", label: "Client ID", type: "text" },
+                      { name: "clientSecret", label: "Client Secret", type: "password" },
+                      { name: "refreshToken", label: "Refresh Token", type: "password" },
+                    ],
+                    status: apiKeys?.ebay,
+                  },
+                  {
+                    key: "scrydex",
+                    label: "Scrydex API",
+                    desc: "Card index, pricing, and sales velocity data",
+                    fields: [
+                      { name: "apiKey", label: "API Key", type: "password" },
+                      { name: "teamId", label: "Team ID", type: "text" },
+                    ],
+                    status: apiKeys?.scrydex,
+                  },
                 ].map((api) => (
                   <div key={api.key} style={{ padding: "16px 22px", borderBottom: "1px solid var(--brd)" }}>
                     <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
@@ -830,36 +1092,68 @@ export default function App() {
                         <div style={{ fontFamily: "var(--fm)", fontSize: 10, color: "var(--tMut)" }}>{api.desc}</div>
                       </div>
                       <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                        <div style={{ width: 6, height: 6, borderRadius: "50%", background: api.connected ? "var(--green)" : "var(--red)", boxShadow: api.connected ? "0 0 6px rgba(52,211,153,0.4)" : "0 0 6px rgba(248,113,113,0.4)" }} />
-                        <span style={{ fontFamily: "var(--fm)", fontSize: 10, color: api.connected ? "var(--green)" : "var(--red)", fontWeight: 600 }}>{api.connected ? "CONNECTED" : "NOT SET"}</span>
+                        <div style={{ width: 6, height: 6, borderRadius: "50%", background: api.status?.configured ? "var(--green)" : "var(--red)", boxShadow: api.status?.configured ? "0 0 6px rgba(52,211,153,0.4)" : "0 0 6px rgba(248,113,113,0.4)" }} />
+                        <span style={{ fontFamily: "var(--fm)", fontSize: 10, color: api.status?.configured ? "var(--green)" : "var(--red)", fontWeight: 600 }}>{api.status?.configured ? "CONFIGURED" : "NOT SET"}</span>
                       </div>
                     </div>
-                    {/* Key fields — masked */}
-                    {api.fields.map((field, i) => (
-                      <div key={i} style={{ marginBottom: 6 }}>
-                        <div style={{ fontFamily: "var(--fm)", fontSize: 8, color: "var(--tGho)", letterSpacing: 2, marginBottom: 4, textTransform: "uppercase" }}>{field}</div>
+                    {api.fields.map((field) => (
+                      <div key={field.name} style={{ marginBottom: 6 }}>
+                        <div style={{ fontFamily: "var(--fm)", fontSize: 8, color: "var(--tGho)", letterSpacing: 2, marginBottom: 4, textTransform: "uppercase" }}>{field.label}</div>
                         <div style={{ display: "flex", gap: 6 }}>
-                          <input type="password" defaultValue={api.connected ? "••••••••••••••••" : ""} placeholder={`Enter ${field.toLowerCase()}...`}
+                          <input type={field.type} value={apiInputs[api.key][field.name]} placeholder={`Enter ${field.label.toLowerCase()}...`}
+                            onChange={e => setApiInputs(prev => ({ ...prev, [api.key]: { ...prev[api.key], [field.name]: e.target.value } }))}
                             style={{ flex: 1, height: 34, padding: "0 12px", borderRadius: "var(--r-sm)", background: "var(--glass)", border: "1px solid var(--brd)", color: "var(--tMax)", fontFamily: "var(--fm)", fontSize: 11 }} />
                         </div>
                       </div>
                     ))}
-                    {/* Actions */}
                     <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
                       <button style={{ flex: 1, height: 34, borderRadius: "var(--r-sm)", background: "var(--glass)", border: "1px solid var(--brd)", fontFamily: "var(--fm)", fontSize: 10, fontWeight: 600, color: "var(--tSec)", letterSpacing: 1, transition: "all 0.15s" }}
+                        onClick={async () => {
+                          setApiTest(p => ({ ...p, [api.key]: "saving" }));
+                          try {
+                            await fetchJson(`/api/settings/api-keys/${api.key}`, {
+                              method: "PUT",
+                              headers: { "Content-Type": "application/json" },
+                              body: JSON.stringify(apiInputs[api.key]),
+                            });
+                            await refreshApiKeys();
+                            setApiTest(p => ({ ...p, [api.key]: "saved" }));
+                          } catch (err) {
+                            setApiKeyError(err.message);
+                            setApiTest(p => ({ ...p, [api.key]: "error" }));
+                          }
+                        }}
                         onMouseEnter={e => { e.currentTarget.style.borderColor = "var(--brd3)"; }}
-                        onMouseLeave={e => { e.currentTarget.style.borderColor = "var(--brd)"; }}>SAVE KEYS</button>
-                      <button onClick={() => { setApiTest(p => ({ ...p, [api.key]: "testing" })); setTimeout(() => setApiTest(p => ({ ...p, [api.key]: "ok" })), 1500); }}
-                        style={{ flex: 1, height: 34, borderRadius: "var(--r-sm)", background: apiTest[api.key] === "ok" ? "rgba(52,211,153,0.06)" : "var(--glass)", border: `1px solid ${apiTest[api.key] === "ok" ? "rgba(52,211,153,0.25)" : "var(--brd)"}`, fontFamily: "var(--fm)", fontSize: 10, fontWeight: 600, color: apiTest[api.key] === "ok" ? "var(--green)" : apiTest[api.key] === "testing" ? "var(--amber)" : "var(--blue)", letterSpacing: 1, transition: "all 0.25s" }}>
-                        {apiTest[api.key] === "testing" ? "TESTING..." : apiTest[api.key] === "ok" ? "✓ CONNECTED" : "TEST CONNECTION"}
+                        onMouseLeave={e => { e.currentTarget.style.borderColor = "var(--brd)"; }}>
+                        {apiTest[api.key] === "saving" ? "SAVING..." : "SAVE KEYS"}
+                      </button>
+                      <button onClick={async () => {
+                        setApiTest(p => ({ ...p, [api.key]: "testing" }));
+                        try {
+                          await fetchJson(`/api/settings/api-keys/${api.key}/test`, { method: "POST" });
+                          await refreshApiKeys();
+                          setApiTest(p => ({ ...p, [api.key]: "ok" }));
+                        } catch (err) {
+                          setApiKeyError(err.message);
+                          setApiTest(p => ({ ...p, [api.key]: "error" }));
+                        }
+                      }}
+                        style={{ flex: 1, height: 34, borderRadius: "var(--r-sm)", background: apiTest[api.key] === "ok" ? "rgba(52,211,153,0.06)" : "var(--glass)", border: `1px solid ${apiTest[api.key] === "ok" ? "rgba(52,211,153,0.25)" : "var(--brd)"}`, fontFamily: "var(--fm)", fontSize: 10, fontWeight: 600, color: apiTest[api.key] === "ok" ? "var(--green)" : apiTest[api.key] === "testing" ? "var(--amber)" : apiTest[api.key] === "error" ? "var(--red)" : "var(--blue)", letterSpacing: 1, transition: "all 0.25s" }}>
+                        {apiTest[api.key] === "testing" ? "TESTING..." : apiTest[api.key] === "ok" ? "✓ CONNECTED" : apiTest[api.key] === "error" ? "ERROR" : "TEST CONNECTION"}
                       </button>
                     </div>
+                    {api.status?.error && (
+                      <div style={{ marginTop: 8, fontFamily: "var(--fm)", fontSize: 9, color: "var(--red)" }}>{api.status.error}</div>
+                    )}
                   </div>
                 ))}
                 <div style={{ padding: "14px 22px" }}>
                   <div style={{ fontFamily: "var(--fm)", fontSize: 9, color: "var(--tGho)", lineHeight: 1.8, letterSpacing: 0.5 }}>
                     API keys are encrypted at rest. Keys are never exposed after saving — only connection status is shown. Contact Anthropic support if you need to rotate keys.
                   </div>
+                  {apiKeyError && (
+                    <div style={{ marginTop: 8, fontFamily: "var(--fm)", fontSize: 9, color: "var(--red)" }}>{apiKeyError}</div>
+                  )}
                 </div>
               </>}
 
@@ -867,23 +1161,22 @@ export default function App() {
               {settingsTab === "notif" && <>
                 <div style={{ padding: "16px 22px", borderBottom: "1px solid var(--brd)" }}>
                   <div style={{ fontFamily: "var(--fm)", fontSize: 9, letterSpacing: 2.5, color: "var(--tGho)", marginBottom: 12, textTransform: "uppercase" }}>Telegram</div>
-                  {[["Bot Token", "••••••••:AAF..."], ["Chat ID", "-100..."]].map(([label, val], i) => (
+                  {[["Bot Token", ""], ["Chat ID", ""]].map(([label, val], i) => (
                     <div key={i} style={{ marginBottom: 8 }}>
                       <div style={{ fontFamily: "var(--fm)", fontSize: 8, color: "var(--tGho)", letterSpacing: 2, marginBottom: 4, textTransform: "uppercase" }}>{label}</div>
-                      <input type={i === 0 ? "password" : "text"} defaultValue={val} style={{ width: "100%", height: 34, padding: "0 12px", borderRadius: "var(--r-sm)", background: "var(--glass)", border: "1px solid var(--brd)", color: "var(--tMax)", fontFamily: "var(--fm)", fontSize: 11 }} />
+                      <input type={i === 0 ? "password" : "text"} defaultValue={val} placeholder={`Enter ${label.toLowerCase()}...`} style={{ width: "100%", height: 34, padding: "0 12px", borderRadius: "var(--r-sm)", background: "var(--glass)", border: "1px solid var(--brd)", color: "var(--tMax)", fontFamily: "var(--fm)", fontSize: 11 }} />
                     </div>
                   ))}
                   <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
-                    <button style={{ flex: 1, height: 34, borderRadius: "var(--r-sm)", background: "var(--glass)", border: "1px solid var(--brd)", fontFamily: "var(--fm)", fontSize: 10, fontWeight: 600, color: "var(--tSec)", letterSpacing: 1 }}>SAVE</button>
-                    <button onClick={() => { setApiTest(p => ({ ...p, tg: "testing" })); setTimeout(() => setApiTest(p => ({ ...p, tg: "ok" })), 1200); }}
-                      style={{ flex: 1, height: 34, borderRadius: "var(--r-sm)", background: apiTest.tg === "ok" ? "rgba(52,211,153,0.06)" : "var(--glass)", border: `1px solid ${apiTest.tg === "ok" ? "rgba(52,211,153,0.25)" : "var(--brd)"}`, fontFamily: "var(--fm)", fontSize: 10, fontWeight: 600, color: apiTest.tg === "ok" ? "var(--green)" : apiTest.tg === "testing" ? "var(--amber)" : "var(--blue)", letterSpacing: 1, transition: "all 0.25s" }}>
-                      {apiTest.tg === "testing" ? "SENDING..." : apiTest.tg === "ok" ? "✓ SENT" : "TEST MESSAGE"}
+                    <button style={{ flex: 1, height: 34, borderRadius: "var(--r-sm)", background: "var(--glass)", border: "1px solid var(--brd)", fontFamily: "var(--fm)", fontSize: 10, fontWeight: 600, color: "var(--tSec)", letterSpacing: 1 }} disabled>SAVE</button>
+                    <button style={{ flex: 1, height: 34, borderRadius: "var(--r-sm)", background: "var(--glass)", border: "1px solid var(--brd)", fontFamily: "var(--fm)", fontSize: 10, fontWeight: 600, color: "var(--tMut)", letterSpacing: 1 }} disabled>
+                      TEST MESSAGE
                     </button>
                   </div>
                 </div>
                 <div style={{ padding: "16px 22px", borderBottom: "1px solid var(--brd)" }}>
                   <div style={{ fontFamily: "var(--fm)", fontSize: 9, letterSpacing: 2.5, color: "var(--tGho)", marginBottom: 12, textTransform: "uppercase" }}>Alert Rules</div>
-                  {[["GRAIL deals", "Instant push", "var(--green)"], ["HIT deals", "Instant push", "var(--green)"], ["FLIP deals", "OFF", "var(--tMut)"], ["System warnings", "Push on error", "var(--amber)"]].map(([l, v, c], i) => (
+                  {[["GRAIL deals", "—", "var(--tMut)"], ["HIT deals", "—", "var(--tMut)"], ["FLIP deals", "—", "var(--tMut)"], ["System warnings", "—", "var(--tMut)"]].map(([l, v, c], i) => (
                     <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "7px 0", fontSize: 13 }}>
                       <span style={{ fontWeight: 600, color: "var(--tPri)" }}>{l}</span>
                       <span style={{ fontFamily: "var(--fm)", fontSize: 10, fontWeight: 600, color: c }}>{v}</span>
@@ -892,7 +1185,7 @@ export default function App() {
                 </div>
                 <div style={{ padding: "16px 22px" }}>
                   <div style={{ fontFamily: "var(--fm)", fontSize: 9, letterSpacing: 2.5, color: "var(--tGho)", marginBottom: 12, textTransform: "uppercase" }}>Thresholds</div>
-                  {[["Min profit %", "25"], ["Min confidence", "0.80"], ["Watched expansions", "All"]].map(([l, v], i) => (
+                  {[["Min profit %", "—"], ["Min confidence", "—"], ["Watched expansions", "—"]].map(([l, v], i) => (
                     <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "7px 0", fontSize: 13 }}>
                       <span style={{ fontWeight: 500, color: "var(--tSec)" }}>{l}</span>
                       <span style={{ fontFamily: "var(--fm)", fontSize: 11, fontWeight: 600, color: "var(--tMax)" }}>{v}</span>
