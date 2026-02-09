@@ -19,6 +19,7 @@
   - [2.8 Manual Listing Lookup Tool](#28-manual-listing-lookup-tool)
   - [2.9 Public Card Catalog](#29-public-card-catalog)
   - [2.10 Implementation Roadmap](#210-implementation-roadmap)
+  - [2.11 Backend API Contract](#211-backend-api-contract)
 
 ---
 
@@ -1424,6 +1425,354 @@ src/
 - [ ] Monitoring: accuracy dashboard with alerting
 - [ ] Pattern updates: add new regex patterns when new card formats appear
 - [ ] Sync health monitoring: alert if card index is stale or sync fails
+
+---
+
+### 2.11 Backend API Contract
+
+This section defines the backend endpoints that serve the frontend dashboard (see `FRONTEND_DESIGN_SPEC.md`). Endpoints for the manual lookup tool (section 2.8) and public card catalog (section 2.9) are defined in their respective sections and not repeated here.
+
+#### Real-Time Deal Stream
+
+The deal feed requires real-time push — the dashboard should not poll. Use **Server-Sent Events (SSE)** over WebSocket for simplicity: SSE is unidirectional (server → client), works through proxies/CDNs, reconnects automatically, and the dashboard has no need to send structured messages back over the same channel.
+
+```typescript
+// GET /api/deals/stream
+// Accept: text/event-stream
+// Connection: keep-alive
+
+// Event types:
+
+// New deal discovered by the scanner
+event: deal
+data: {
+  dealId: string;
+  ebayItemId: string;
+  cardName: string;
+  cardNumber: string;
+  expansionName: string;
+  expansionLogo: string;          // URL from local index
+  cardImage: string;              // URL from local index
+  ebayImage: string;              // eBay listing image URL
+  ebayPriceGBP: number;
+  marketPriceGBP: number;
+  profitGBP: number;
+  profitPercent: number;
+  tier: 'S' | 'A' | 'B' | 'C';
+  confidence: number;             // Composite score 0-1
+  confidenceTier: 'high' | 'medium' | 'low';
+  condition: string;              // NM | LP | MP | HP
+  priceTrend7d: number;           // % change
+  ebayUrl: string;
+  listedAt: string;               // ISO 8601
+  createdAt: string;              // ISO 8601
+}
+
+// System status update (emitted every 30s, or on state change)
+event: status
+data: {
+  scanner: {
+    state: 'running' | 'paused' | 'stopped' | 'error';
+    lastScanAt: string;
+    errorMessage: string | null;
+  };
+  ebay: {
+    callsToday: number;
+    dailyLimit: number;            // ~5,000
+  };
+  scrydex: {
+    creditsUsedMonth: number;
+    monthlyLimit: number;          // 50,000
+  };
+  cardIndex: {
+    totalCards: number;
+    lastSyncAt: string;
+    nextSyncAt: string;
+    syncState: 'idle' | 'syncing' | 'failed';
+  };
+  deals: {
+    countToday: number;
+    countByTier: { S: number; A: number; B: number; C: number };
+  };
+  accuracy: {
+    rolling7d: number | null;      // null if <10 reviewed deals
+    totalReviewed: number;
+  };
+}
+
+// Heartbeat to keep connection alive (every 15s)
+event: ping
+data: { ts: string }
+```
+
+**Reconnection:** SSE has built-in reconnection via the `Last-Event-Id` header. Each `deal` event includes the deal ID as the SSE `id` field. On reconnect, the server replays any deals the client missed.
+
+**Filtering:** The SSE stream sends all deals. Client-side filtering (by tier, confidence, condition, profit minimum) is applied in the frontend — this keeps the server stream simple and avoids per-client filter state on the backend.
+
+#### Deal REST API
+
+For initial page load, historical browsing, and any state the SSE stream doesn't cover.
+
+```typescript
+// GET /api/deals
+// Paginated deal list for initial load and historical browsing
+//
+// Query parameters:
+//   page: number (default 1)
+//   limit: number (default 50, max 200)
+//   tier: string (comma-separated: "S,A,B")
+//   confidenceMin: number (0-1, e.g., 0.65)
+//   condition: string (comma-separated: "NM,LP")
+//   profitMin: number (minimum profit %, e.g., 10)
+//   since: string (ISO 8601 — deals after this timestamp)
+//   sort: string (default "-createdAt", options: "-profitPercent", "-confidence", "createdAt")
+//   q: string (free text search across card name, expansion name, eBay title)
+//
+// Response:
+interface DealListResponse {
+  deals: DealSummary[];
+  pagination: {
+    page: number;
+    limit: number;
+    total: number;
+    hasMore: boolean;
+  };
+}
+
+interface DealSummary {
+  dealId: string;
+  ebayItemId: string;
+  cardName: string;
+  cardNumber: string;
+  expansionName: string;
+  expansionLogo: string;
+  cardImage: string;
+  ebayImage: string;
+  ebayPriceGBP: number;
+  marketPriceGBP: number;
+  profitGBP: number;
+  profitPercent: number;
+  tier: 'S' | 'A' | 'B' | 'C';
+  confidence: number;
+  confidenceTier: 'high' | 'medium' | 'low';
+  condition: string;
+  priceTrend7d: number;
+  ebayUrl: string;
+  listedAt: string;
+  createdAt: string;
+}
+
+// GET /api/deals/:dealId
+// Full deal detail including match audit data
+//
+// Response:
+interface DealDetailResponse {
+  deal: DealSummary;
+
+  // Match confidence breakdown (per-field)
+  confidence: {
+    composite: number;
+    fields: {
+      name: number;
+      number: number;
+      denominator: number;
+      expansion: number;
+      variant: number;
+      normalization: number;
+    };
+    tier: 'high' | 'medium' | 'low';
+  };
+
+  // Price breakdown
+  pricing: {
+    ebayPrice: number;            // GBP
+    ebayShipping: number;         // GBP
+    ebayFees: number;             // GBP (estimated)
+    ebayCostTotal: number;        // GBP
+    scrydexPriceUSD: number;      // USD (for this condition)
+    exchangeRate: number;
+    exchangeRateAge: number;      // minutes
+    marketPriceGBP: number;       // converted
+    profitGBP: number;
+    profitPercent: number;
+    priceTrend: { days_7: number; days_30: number };
+  };
+
+  // All conditions and their prices for this card variant
+  priceTable: {
+    condition: string;             // NM | LP | MP | HP
+    priceUSD: number;
+    priceGBP: number;
+    isListingCondition: boolean;   // true for the condition matched to this listing
+  }[];
+
+  // Condition mapping detail
+  conditionMapping: {
+    source: string;                // "conditionDescriptors" | "localizedAspects" | "title" | "default"
+    rawValue: string;              // What the source provided
+    mappedCondition: string;       // NM | LP | MP | HP
+  };
+
+  // Match details (expandable in UI)
+  matchDetails: {
+    signals: {
+      title: TitleSignals;
+      structured: StructuredSignals | null;
+      condition: ConditionResult;
+    };
+    normalized: NormalizedListing;
+    candidateCount: number;
+    topCandidates: ScoredCandidate[];  // Top 10 with scores
+    matchedCard: {
+      scrydexId: string;
+      name: string;
+      number: string;
+      expansion: string;
+      variant: string;
+      imageUrl: string;
+    };
+  };
+
+  // Accuracy review state
+  review: {
+    reviewedAt: string | null;
+    isCorrectMatch: boolean | null;
+    incorrectReason: string | null;
+  };
+}
+
+// POST /api/deals/:dealId/review
+// Submit accuracy feedback for a deal
+//
+// Body:
+interface DealReviewRequest {
+  isCorrectMatch: boolean;
+  incorrectReason?: 'wrong_card' | 'wrong_expansion' | 'wrong_variant' | 'wrong_price';
+}
+```
+
+#### System Status API
+
+Standalone endpoint for initial page load (the SSE stream provides ongoing updates).
+
+```typescript
+// GET /api/status
+// Returns the same structure as the SSE `status` event
+// Used for initial dashboard render before SSE connection is established
+```
+
+#### Preferences API
+
+User preferences persist across sessions and control deal filtering defaults, notification thresholds, and display settings.
+
+```typescript
+// GET /api/preferences
+// PUT /api/preferences
+//
+// Body (all fields optional on PUT — partial updates merge):
+interface UserPreferences {
+  // Deal tier thresholds (% profit)
+  tiers: {
+    S: { minProfit: number; minProfitGBP: number };   // default: 40%, £10
+    A: { minProfit: number; minProfitGBP: number };   // default: 25%, £5
+    B: { minProfit: number; minProfitGBP: number };   // default: 15%, £3
+    C: { minProfit: number; minProfitGBP: number };   // default: 5%, £1
+  };
+
+  // Default filter state for deal feed
+  defaultFilters: {
+    tiers: ('S' | 'A' | 'B' | 'C')[];              // default: ['S', 'A', 'B']
+    confidenceMin: 'high' | 'medium' | 'low';       // default: 'medium'
+    conditions: ('NM' | 'LP' | 'MP' | 'HP')[];      // default: all
+    profitMinPercent: number;                         // default: 10
+    timeRange: '1h' | '6h' | '24h' | 'all';         // default: '6h'
+    showGraded: boolean;                              // default: false
+  };
+
+  // Notification settings
+  notifications: {
+    telegram: {
+      enabled: boolean;
+      botToken: string | null;          // Encrypted at rest
+      chatId: string | null;
+      minTier: 'S' | 'A' | 'B' | 'C'; // default: 'S'
+      minConfidence: 'high' | 'medium'; // default: 'high'
+      minProfitPercent: number;          // default: 30
+      watchedExpansions: string[];       // Scrydex expansion IDs, empty = all
+      watchedCards: string[];            // Scrydex card IDs, empty = none
+    };
+    inApp: {
+      soundEnabled: boolean;            // default: true
+      soundOnTier: 'S' | 'A';          // default: 'S'
+      toastDuration: number;            // seconds, default: 5
+    };
+  };
+
+  // Display preferences
+  display: {
+    currency: 'GBP' | 'USD' | 'both';  // default: 'GBP'
+    theme: 'dark' | 'light';            // default: 'dark'
+    ebayFeePercent: number;              // default: 12.8 (eBay UK final value fee)
+  };
+}
+```
+
+**Storage:** Single-user for v1, stored in the database. No authentication layer needed initially — the dashboard is assumed to be private (not publicly accessible). If multi-user is added later, preferences become per-user with an auth layer in front.
+
+#### Telegram Bot Integration
+
+```typescript
+// POST /api/notifications/telegram/test
+// Send a test message to verify bot token and chat ID are configured correctly
+//
+// Response:
+interface TelegramTestResponse {
+  success: boolean;
+  error: string | null;       // e.g., "Invalid bot token", "Chat not found"
+  messageId: number | null;   // Telegram message ID if successful
+}
+
+// GET /api/notifications/telegram/status
+// Check current Telegram integration health
+//
+// Response:
+interface TelegramStatusResponse {
+  configured: boolean;          // bot token + chat ID are set
+  lastMessageAt: string | null; // ISO 8601
+  lastError: string | null;
+  messagesSentToday: number;
+}
+```
+
+**Message format:** Telegram notifications use a compact template:
+
+```
+🟢 S-tier Deal: Charizard ex #006/197
+Obsidian Flames · NM
+eBay: £12.50 → Market: £45.00
+Profit: +£32.50 (+260%)
+Confidence: 92% (high)
+🔗 ebay.co.uk/itm/...
+```
+
+#### Endpoint Summary
+
+| Endpoint | Method | Auth | Purpose |
+|---|---|---|---|
+| `/api/deals/stream` | GET (SSE) | Private | Real-time deal push |
+| `/api/deals` | GET | Private | Paginated deal list |
+| `/api/deals/:id` | GET | Private | Deal detail with audit |
+| `/api/deals/:id/review` | POST | Private | Accuracy feedback |
+| `/api/status` | GET | Private | System health |
+| `/api/preferences` | GET/PUT | Private | User preferences |
+| `/api/notifications/telegram/test` | POST | Private | Test Telegram config |
+| `/api/notifications/telegram/status` | GET | Private | Telegram health |
+| `/api/lookup` | POST | Private | Manual listing lookup (§2.8) |
+| `/api/catalog/expansions` | GET | Public | Expansion list (§2.9) |
+| `/api/catalog/expansions/:id` | GET | Public | Expansion detail (§2.9) |
+| `/api/catalog/cards/search` | GET | Public | Card search (§2.9) |
+| `/api/catalog/cards/:id` | GET | Public | Card detail (§2.9) |
+| `/api/catalog/trending` | GET | Public | Price movers (§2.9) |
 
 ---
 
