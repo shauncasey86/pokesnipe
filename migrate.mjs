@@ -6,11 +6,20 @@ if (!url) {
   process.exit(0);
 }
 
+// Railway sets PGHOST/PGPORT/etc. env vars that override the connection string
+// in the pg library. Strip them so node-pg-migrate uses our DATABASE_URL.
+const env = { ...process.env };
+delete env.PGHOST;
+delete env.PGPORT;
+delete env.PGDATABASE;
+delete env.PGUSER;
+delete env.PGPASSWORD;
+
 console.log(`migrate: running against ${url.replace(/\/\/.*@/, "//***@")}`);
 try {
   execSync(`node-pg-migrate -m migrations -d "${url}" up`, {
     stdio: "inherit",
-    env: process.env
+    env
   });
 } catch (err) {
   console.error("migrate: migration failed, continuing startup anyway", err);
