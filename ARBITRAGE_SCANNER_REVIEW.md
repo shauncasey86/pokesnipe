@@ -19,6 +19,7 @@
   - [2.8 Manual Listing Lookup Tool](#28-manual-listing-lookup-tool)
   - [2.9 Public Card Catalog](#29-public-card-catalog)
   - [2.10 Implementation Roadmap](#210-implementation-roadmap)
+  - [2.11 Backend API Contract](#211-backend-api-contract)
 
 ---
 
@@ -307,6 +308,36 @@ This isn't a marginal improvement. It's a **97% reduction in matching-related AP
 4. **Each component is independently testable.** The matching engine works entirely offline against the local index.
 5. **Confidence is accumulated per field** and a composite score gates whether a match becomes a deal.
 
+#### Deployment Topology
+
+Source code is hosted on **GitHub** and deployed to **Railway.app**. The application runs as a **single Railway service** — one Node.js process handles the eBay scanner, Scrydex sync scheduler, REST/SSE API, and frontend serving. This is deliberately simple for v1.
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│  Railway                                                            │
+│                                                                     │
+│  ┌───────────────────────────────────┐   ┌───────────────────────┐ │
+│  │  pokesnipe (Node.js service)      │──▶│  PostgreSQL (managed) │ │
+│  │  • REST API + SSE                 │   │  • Card index         │ │
+│  │  • eBay scanner (in-process)      │   │  • Deals + audit      │ │
+│  │  • Scrydex sync scheduler         │   │  • Preferences        │ │
+│  │  • Static frontend serving        │   └───────────────────────┘ │
+│  └───────────────────────────────────┘                              │
+│       ▲                                                             │
+│       │ HTTPS (Railway-provided domain or custom)                   │
+└───────┼─────────────────────────────────────────────────────────────┘
+        │
+   ┌────┴────┐
+   │ Browser  │  Dashboard / Public Catalog
+   └─────────┘
+```
+
+**Why a single service:** The eBay scanner, sync scheduler, and API server share the same database and card index. Running them in one process avoids inter-service communication complexity. Railway's managed PostgreSQL handles persistence — no volumes or file-system state. If the service restarts, in-process schedulers resume on boot and the local card index is immediately available from PostgreSQL.
+
+**Why PostgreSQL over SQLite:** Railway services are ephemeral — the filesystem doesn't survive redeploys. PostgreSQL is a managed Railway add-on with automatic backups, persistent storage, and native support for trigram indexes (`pg_trgm`) and full-text search needed for card name matching.
+
+**CI/CD pipeline:** GitHub → Railway auto-deploy on push to `main`. GitHub Actions runs linting, tests, and the accuracy regression suite on every PR. Railway builds from the Dockerfile in the repo root.
+
 ---
 
 ### 2.2 API Budget & Rate Limit Constraints
@@ -407,6 +438,27 @@ Both APIs must have independent circuit breakers:
 - **Both healthy:** Normal operation.
 
 The critical insight: **eBay rate limits are now the only bottleneck.** Scrydex budget is no longer a constraining factor for scan throughput.
+
+#### Secrets & Environment Variables
+
+All API credentials are stored as **Railway environment variables** — never committed to the GitHub repository. The application reads them via `process.env` at startup.
+
+| Variable | Purpose |
+|---|---|
+| `DATABASE_URL` | Railway-managed PostgreSQL connection string (auto-injected by Railway) |
+| `SCRYDEX_API_KEY` | Scrydex API key |
+| `SCRYDEX_TEAM_ID` | Scrydex team identifier |
+| `EBAY_CLIENT_ID` | eBay OAuth client ID |
+| `EBAY_CLIENT_SECRET` | eBay OAuth client secret |
+| `EBAY_REFRESH_TOKEN` | eBay long-lived refresh token |
+| `TELEGRAM_BOT_TOKEN` | Telegram bot token (optional) |
+| `TELEGRAM_CHAT_ID` | Telegram chat ID (optional) |
+| `EXCHANGE_RATE_API_KEY` | Currency conversion API key |
+| `DASHBOARD_SECRET` | Bearer token for private API endpoints |
+| `NODE_ENV` | `production` on Railway, `development` locally |
+| `PORT` | HTTP port (Railway injects this automatically) |
+
+**Local development** uses a `.env` file (git-ignored). Railway's environment variable UI handles production secrets. No secrets in code, no secrets in Docker images.
 
 ---
 
@@ -512,7 +564,7 @@ NOT 40,000 credits — each page of up to 100 cards costs just 1 credit.
 
 **Weekly full resync (~400 credits):**
 
-Re-fetch everything to catch price movements, new printings, and corrections. Run during off-peak hours (e.g., 03:00 UK time Sunday). Upsert into the local DB — don't delete/recreate.
+Re-fetch everything to catch price movements, new printings, and corrections. Run during off-peak hours (e.g., 03:00 UK time Sunday). Upsert into the local DB — don't delete/recreate. Scheduling is handled in-process using `node-cron` (or similar) — the Railway service runs continuously, so cron-style scheduling works naturally. If the service restarts mid-sync, the scheduler re-registers on boot and the next scheduled window triggers a full resync.
 
 **What `?include=prices` returns per card:**
 - `low` — lowest known sale price (USD)
@@ -557,7 +609,7 @@ Build these indexes on the local card DB for fast matching:
 | `expansionName` | Expansion text search | "Surging Sparks" |
 | `expansionCode` | Code lookup | "sv8" |
 
-With SQLite FTS5 or PostgreSQL trigram indexes, these queries execute in <1ms — orders of magnitude faster than a live API call.
+With PostgreSQL trigram indexes (`pg_trgm`) and GIN-backed full-text search, these queries execute in <1ms — orders of magnitude faster than a live API call. PostgreSQL is the right choice here because Railway's managed Postgres persists across redeploys and supports the fuzzy matching features (trigram similarity, FTS ranking) needed for card name lookup.
 
 #### eBay Poller
 
@@ -1167,7 +1219,7 @@ Enforcement mechanisms:
 
 1. **Confidence floor:** Don't show deals below the composite confidence threshold that corresponds to 85% empirical accuracy (start at 0.65, calibrate based on data).
 
-2. **Regression testing:** Maintain a corpus of 200+ eBay titles with known correct matches. Run the full normalization + matching pipeline against this corpus on every code change. Fail the build if accuracy drops below 85%.
+2. **Regression testing:** Maintain a corpus of 200+ eBay titles with known correct matches. Run the full normalization + matching pipeline against this corpus on every code change. **GitHub Actions runs this suite on every PR** — the PR cannot merge if accuracy drops below 85%. Railway auto-deploys from `main`, so the accuracy gate prevents regressions from ever reaching production.
 
 ```typescript
 // test/accuracy/match-corpus.test.ts
@@ -1195,9 +1247,9 @@ describe('Match accuracy corpus', () => {
 });
 ```
 
-3. **Monitoring dashboard:** Track rolling 7-day accuracy from automated checks. Alert if it drops below 80%.
+3. **Monitoring dashboard:** Track rolling 7-day accuracy from automated checks. Alert if it drops below 80%. This data is surfaced in the dashboard status bar and via Telegram alerts.
 
-4. **Feedback loop:** When manual review finds incorrect matches, add the failing case to the regression corpus. This ensures the same error never recurs.
+4. **Feedback loop:** When manual review finds incorrect matches, add the failing case to the regression corpus. This ensures the same error never recurs — the new test case runs in GitHub Actions on every subsequent PR.
 
 ---
 
@@ -1300,11 +1352,17 @@ The catalog is always backed by the same local card index used for arbitrage mat
 - **All other sets:** Updated weekly
 - **New expansions:** Detected and synced within 24 hours of appearing on Scrydex
 
+#### Deployment
+
+The public catalog is served by the same Railway service as the dashboard. Railway provides an HTTPS domain automatically (e.g., `pokesnipe-production.up.railway.app`), but a **custom domain** should be configured for the catalog (e.g., `catalog.pokesnipe.com`) — Railway supports this natively via their domain settings.
+
+**SEO considerations:** Card detail pages should use server-side rendering (SSR) so they're indexable by search engines. The Railway service renders HTML for card/expansion URLs when the request doesn't have an `Accept: application/json` header. This means `/api/catalog/cards/:id` serves JSON for the SPA and pre-rendered HTML for crawlers — or use a separate `/catalog/cards/:id` route for the public HTML pages.
+
 #### Value Proposition
 
 - **For the arbitrage scanner:** The catalog doubles as a verification tool — users can browse to the matched card and visually confirm it's correct
 - **For the community:** A fast, free, well-indexed Pokemon card price database with images
-- **For SEO/traffic:** Card pages are statically renderable, indexable, and attract organic search traffic
+- **For SEO/traffic:** Card pages are statically renderable, indexable, and attract organic search traffic. Custom domain on Railway gives a clean public URL.
 - **For future monetization:** A catalog with pricing data is a natural platform for alerts, wishlists, and collection tracking
 
 ---
@@ -1313,55 +1371,74 @@ The catalog is always backed by the same local card index used for arbitrage mat
 
 #### Phase 1: Card Index Foundation (Week 1-2)
 
-**Goal:** Build the local card database and Scrydex sync infrastructure. This is the foundation everything else depends on.
+**Goal:** Set up infrastructure and build the local card database with Scrydex sync.
 
+- [ ] **GitHub repo:** Initialize repository, branch protection on `main` (require PR + passing CI)
+- [ ] **Railway project:** Create Railway project, provision managed PostgreSQL, configure environment variables (see §2.2)
+- [ ] **CI pipeline:** GitHub Actions workflow — lint, typecheck, test on every PR
+- [ ] **Dockerfile + railway.toml:** Containerized build with Railway deployment config
 - [ ] Project scaffolding with modular directory structure
-- [ ] Database schema: `expansions`, `cards`, `variants`, `deals`, `deal_audit`, `match_corpus`
+- [ ] Database schema + migrations: `expansions`, `cards`, `variants`, `deals`, `deal_audit`, `match_corpus`, `preferences`
 - [ ] Scrydex client with rate limiting and credit tracking
-- [ ] Expansion sync: fetch all EN expansions, store locally
-- [ ] **Full card sync: paginate all EN cards with `?include=prices`, store locally**
-- [ ] Search indexes: number, number+denominator, name (FTS), expansion code
+- [ ] Expansion sync: fetch all EN expansions, store in PostgreSQL
+- [ ] **Full card sync: paginate all EN cards with `?include=prices`, store in PostgreSQL**
+- [ ] Search indexes: PostgreSQL trigram (`pg_trgm`) + GIN indexes for number, name, expansion lookups
 - [ ] Delta sync for hot sets (10 most recent expansions)
-- [ ] Sync scheduler: weekly full, daily delta, daily expansion check
+- [ ] Sync scheduler (`node-cron`): weekly full, daily delta, daily expansion check
 - [ ] Unit tests for sync, storage, and index queries
+- [ ] **First Railway deploy:** Verify sync runs on Railway, PostgreSQL connection healthy
 
 ```
-src/
-├── index/               # Scrydex card index (the core innovation)
-│   ├── card-sync.ts          # Full + delta sync logic
-│   ├── expansion-sync.ts     # Expansion catalog sync
-│   ├── card-store.ts         # Local DB read/write
-│   ├── search-index.ts       # Number/name/expansion lookups
-│   ├── sync-scheduler.ts     # Cron-like scheduling
-│   └── types.ts
-├── extraction/          # Signal extraction from eBay listings
-│   ├── title-parser.ts
-│   ├── structured-extractor.ts
-│   ├── signal-merger.ts
-│   └── types.ts
-├── matching/            # Local index matching engine
-│   ├── candidate-lookup.ts   # Number-first candidate search
-│   ├── disambiguator.ts      # Score + rank candidates
-│   ├── variant-resolver.ts
-│   ├── confidence.ts
-│   ├── validator.ts
-│   └── types.ts
-├── arbitrage/           # Arbitrage calculator
-│   ├── price-engine.ts
-│   ├── deal-classifier.ts
-│   └── deal-store.ts
-├── scan/                # eBay scanning
-│   ├── ebay-poller.ts
-│   ├── scan-scheduler.ts
-│   └── ebay-client.ts
-├── lookup/              # Manual listing lookup tool
-│   └── lookup-service.ts
-├── catalog/             # Public card catalog
-│   └── catalog-service.ts
-├── api/                 # REST API (deals, lookup, catalog, admin)
-├── config/
-├── database/
-└── utils/
+pokesnipe/
+├── Dockerfile                 # Multi-stage build: build TS → slim Node runtime
+├── railway.toml               # Railway deployment config (build + start commands)
+├── .github/
+│   └── workflows/
+│       ├── ci.yml             # Lint + typecheck + test + accuracy regression
+│       └── deploy.yml         # (optional) Railway auto-deploys from main
+├── src/
+│   ├── index/                 # Scrydex card index (the core innovation)
+│   │   ├── card-sync.ts            # Full + delta sync logic
+│   │   ├── expansion-sync.ts       # Expansion catalog sync
+│   │   ├── card-store.ts           # PostgreSQL read/write
+│   │   ├── search-index.ts         # Number/name/expansion lookups
+│   │   ├── sync-scheduler.ts       # node-cron scheduling
+│   │   └── types.ts
+│   ├── extraction/            # Signal extraction from eBay listings
+│   │   ├── title-parser.ts
+│   │   ├── structured-extractor.ts
+│   │   ├── signal-merger.ts
+│   │   └── types.ts
+│   ├── matching/              # Local index matching engine
+│   │   ├── candidate-lookup.ts     # Number-first candidate search
+│   │   ├── disambiguator.ts        # Score + rank candidates
+│   │   ├── variant-resolver.ts
+│   │   ├── confidence.ts
+│   │   ├── validator.ts
+│   │   └── types.ts
+│   ├── arbitrage/             # Arbitrage calculator
+│   │   ├── price-engine.ts
+│   │   ├── deal-classifier.ts
+│   │   └── deal-store.ts
+│   ├── scan/                  # eBay scanning
+│   │   ├── ebay-poller.ts
+│   │   ├── scan-scheduler.ts
+│   │   └── ebay-client.ts
+│   ├── lookup/                # Manual listing lookup tool
+│   │   └── lookup-service.ts
+│   ├── catalog/               # Public card catalog
+│   │   └── catalog-service.ts
+│   ├── api/                   # REST API + SSE (deals, lookup, catalog, preferences)
+│   ├── config/                # Environment-based config (reads Railway env vars)
+│   ├── database/              # PostgreSQL migrations, connection pool
+│   └── utils/
+├── test/
+│   ├── fixtures/
+│   │   └── match-corpus.json  # Accuracy regression corpus
+│   └── accuracy/
+│       └── match-corpus.test.ts
+├── .env.example               # Template for local development (git-tracked)
+└── .env                       # Local secrets (git-ignored)
 ```
 
 #### Phase 2: Signal Extraction (Week 2-3)
@@ -1389,6 +1466,7 @@ src/
 - [ ] Confidence-gated processing (high/medium/low/reject)
 - [ ] End-to-end integration tests: eBay title → local match → deal
 - [ ] **Regression test suite with match corpus: accuracy ≥ 85%**
+- [ ] **GitHub Actions accuracy gate:** CI fails if regression accuracy < 85%
 
 #### Phase 4: Arbitrage, Lookup Tool & Presentation (Week 4-5)
 
@@ -1399,9 +1477,10 @@ src/
 - [ ] Deal store: database with deduplication and audit logging
 - [ ] eBay poller with scan scheduling and rate limit handling
 - [ ] **Manual listing lookup tool:** paste eBay URL → full pipeline evaluation with confidence breakdown
-- [ ] REST API endpoints (deals, lookup, card index stats)
-- [ ] Dashboard frontend (card index stats, deal grid, confidence breakdown, lookup tool)
-- [ ] Telegram notifications for high-confidence deals only
+- [ ] REST API + SSE endpoints (deals stream, deals list, lookup, status, preferences)
+- [ ] Dashboard frontend (deal feed, detail panel, filters, status bar, lookup tool)
+- [ ] Telegram bot integration with test/status endpoints
+- [ ] **Railway production deploy:** Full pipeline running — eBay scan → match → deal → dashboard
 
 #### Phase 5: Public Card Catalog (Week 5-6)
 
@@ -1413,6 +1492,7 @@ src/
 - [ ] Card detail page: large image, variant prices, trend data, expansion info
 - [ ] Trending page: biggest price movers (7d/30d up/down)
 - [ ] Server-side rendering for SEO (card pages should be indexable)
+- [ ] **Custom domain on Railway** for the public catalog (e.g., `catalog.pokesnipe.com`)
 
 #### Phase 6: Accuracy Loop (Ongoing)
 
@@ -1424,6 +1504,365 @@ src/
 - [ ] Monitoring: accuracy dashboard with alerting
 - [ ] Pattern updates: add new regex patterns when new card formats appear
 - [ ] Sync health monitoring: alert if card index is stale or sync fails
+- [ ] Railway health checks: ensure service stays alive, monitor restart frequency
+- [ ] Database maintenance: PostgreSQL VACUUM, index health, connection pool tuning
+
+---
+
+### 2.11 Backend API Contract
+
+This section defines the backend endpoints that serve the frontend dashboard (see `FRONTEND_DESIGN_SPEC.md`). Endpoints for the manual lookup tool (section 2.8) and public card catalog (section 2.9) are defined in their respective sections and not repeated here.
+
+#### Real-Time Deal Stream
+
+The deal feed requires real-time push — the dashboard should not poll. Use **Server-Sent Events (SSE)** over WebSocket for simplicity: SSE is unidirectional (server → client), works through proxies/CDNs, reconnects automatically, and the dashboard has no need to send structured messages back over the same channel.
+
+```typescript
+// GET /api/deals/stream
+// Accept: text/event-stream
+// Connection: keep-alive
+
+// Event types:
+
+// New deal discovered by the scanner
+event: deal
+data: {
+  dealId: string;
+  ebayItemId: string;
+  cardName: string;
+  cardNumber: string;
+  expansionName: string;
+  expansionLogo: string;          // URL from local index
+  cardImage: string;              // URL from local index
+  ebayImage: string;              // eBay listing image URL
+  ebayPriceGBP: number;
+  marketPriceGBP: number;
+  profitGBP: number;
+  profitPercent: number;
+  tier: 'S' | 'A' | 'B' | 'C';
+  confidence: number;             // Composite score 0-1
+  confidenceTier: 'high' | 'medium' | 'low';
+  condition: string;              // NM | LP | MP | HP
+  priceTrend7d: number;           // % change
+  ebayUrl: string;
+  listedAt: string;               // ISO 8601
+  createdAt: string;              // ISO 8601
+}
+
+// System status update (emitted every 30s, or on state change)
+event: status
+data: {
+  scanner: {
+    state: 'running' | 'paused' | 'stopped' | 'error';
+    lastScanAt: string;
+    errorMessage: string | null;
+  };
+  ebay: {
+    callsToday: number;
+    dailyLimit: number;            // ~5,000
+  };
+  scrydex: {
+    creditsUsedMonth: number;
+    monthlyLimit: number;          // 50,000
+  };
+  cardIndex: {
+    totalCards: number;
+    lastSyncAt: string;
+    nextSyncAt: string;
+    syncState: 'idle' | 'syncing' | 'failed';
+  };
+  deals: {
+    countToday: number;
+    countByTier: { S: number; A: number; B: number; C: number };
+  };
+  accuracy: {
+    rolling7d: number | null;      // null if <10 reviewed deals
+    totalReviewed: number;
+  };
+}
+
+// Heartbeat to keep connection alive (every 15s)
+event: ping
+data: { ts: string }
+```
+
+**Reconnection:** SSE has built-in reconnection via the `Last-Event-Id` header. Each `deal` event includes the deal ID as the SSE `id` field. On reconnect, the server replays any deals the client missed.
+
+**Filtering:** The SSE stream sends all deals. Client-side filtering (by tier, confidence, condition, profit minimum) is applied in the frontend — this keeps the server stream simple and avoids per-client filter state on the backend.
+
+**Railway compatibility:** Railway supports long-lived HTTP connections (SSE, WebSocket). However, Railway's default request timeout is 5 minutes for inactive connections. The `ping` heartbeat every 15 seconds keeps the SSE connection alive well within this window. If Railway's load balancer ever drops the connection, the browser's `EventSource` reconnects automatically with `Last-Event-Id`.
+
+#### Deal REST API
+
+For initial page load, historical browsing, and any state the SSE stream doesn't cover.
+
+```typescript
+// GET /api/deals
+// Paginated deal list for initial load and historical browsing
+//
+// Query parameters:
+//   page: number (default 1)
+//   limit: number (default 50, max 200)
+//   tier: string (comma-separated: "S,A,B")
+//   confidenceMin: number (0-1, e.g., 0.65)
+//   condition: string (comma-separated: "NM,LP")
+//   profitMin: number (minimum profit %, e.g., 10)
+//   since: string (ISO 8601 — deals after this timestamp)
+//   sort: string (default "-createdAt", options: "-profitPercent", "-confidence", "createdAt")
+//   q: string (free text search across card name, expansion name, eBay title)
+//
+// Response:
+interface DealListResponse {
+  deals: DealSummary[];
+  pagination: {
+    page: number;
+    limit: number;
+    total: number;
+    hasMore: boolean;
+  };
+}
+
+interface DealSummary {
+  dealId: string;
+  ebayItemId: string;
+  cardName: string;
+  cardNumber: string;
+  expansionName: string;
+  expansionLogo: string;
+  cardImage: string;
+  ebayImage: string;
+  ebayPriceGBP: number;
+  marketPriceGBP: number;
+  profitGBP: number;
+  profitPercent: number;
+  tier: 'S' | 'A' | 'B' | 'C';
+  confidence: number;
+  confidenceTier: 'high' | 'medium' | 'low';
+  condition: string;
+  priceTrend7d: number;
+  ebayUrl: string;
+  listedAt: string;
+  createdAt: string;
+}
+
+// GET /api/deals/:dealId
+// Full deal detail including match audit data
+//
+// Response:
+interface DealDetailResponse {
+  deal: DealSummary;
+
+  // Match confidence breakdown (per-field)
+  confidence: {
+    composite: number;
+    fields: {
+      name: number;
+      number: number;
+      denominator: number;
+      expansion: number;
+      variant: number;
+      normalization: number;
+    };
+    tier: 'high' | 'medium' | 'low';
+  };
+
+  // Price breakdown
+  pricing: {
+    ebayPrice: number;            // GBP
+    ebayShipping: number;         // GBP
+    ebayFees: number;             // GBP (estimated)
+    ebayCostTotal: number;        // GBP
+    scrydexPriceUSD: number;      // USD (for this condition)
+    exchangeRate: number;
+    exchangeRateAge: number;      // minutes
+    marketPriceGBP: number;       // converted
+    profitGBP: number;
+    profitPercent: number;
+    priceTrend: { days_7: number; days_30: number };
+  };
+
+  // All conditions and their prices for this card variant
+  priceTable: {
+    condition: string;             // NM | LP | MP | HP
+    priceUSD: number;
+    priceGBP: number;
+    isListingCondition: boolean;   // true for the condition matched to this listing
+  }[];
+
+  // Condition mapping detail
+  conditionMapping: {
+    source: string;                // "conditionDescriptors" | "localizedAspects" | "title" | "default"
+    rawValue: string;              // What the source provided
+    mappedCondition: string;       // NM | LP | MP | HP
+  };
+
+  // Match details (expandable in UI)
+  matchDetails: {
+    signals: {
+      title: TitleSignals;
+      structured: StructuredSignals | null;
+      condition: ConditionResult;
+    };
+    normalized: NormalizedListing;
+    candidateCount: number;
+    topCandidates: ScoredCandidate[];  // Top 10 with scores
+    matchedCard: {
+      scrydexId: string;
+      name: string;
+      number: string;
+      expansion: string;
+      variant: string;
+      imageUrl: string;
+    };
+  };
+
+  // Accuracy review state
+  review: {
+    reviewedAt: string | null;
+    isCorrectMatch: boolean | null;
+    incorrectReason: string | null;
+  };
+}
+
+// POST /api/deals/:dealId/review
+// Submit accuracy feedback for a deal
+//
+// Body:
+interface DealReviewRequest {
+  isCorrectMatch: boolean;
+  incorrectReason?: 'wrong_card' | 'wrong_expansion' | 'wrong_variant' | 'wrong_price';
+}
+```
+
+#### System Status API
+
+Standalone endpoint for initial page load (the SSE stream provides ongoing updates).
+
+```typescript
+// GET /api/status
+// Returns the same structure as the SSE `status` event
+// Used for initial dashboard render before SSE connection is established
+```
+
+#### Preferences API
+
+User preferences persist across sessions and control deal filtering defaults, notification thresholds, and display settings.
+
+```typescript
+// GET /api/preferences
+// PUT /api/preferences
+//
+// Body (all fields optional on PUT — partial updates merge):
+interface UserPreferences {
+  // Deal tier thresholds (% profit)
+  tiers: {
+    S: { minProfit: number; minProfitGBP: number };   // default: 40%, £10
+    A: { minProfit: number; minProfitGBP: number };   // default: 25%, £5
+    B: { minProfit: number; minProfitGBP: number };   // default: 15%, £3
+    C: { minProfit: number; minProfitGBP: number };   // default: 5%, £1
+  };
+
+  // Default filter state for deal feed
+  defaultFilters: {
+    tiers: ('S' | 'A' | 'B' | 'C')[];              // default: ['S', 'A', 'B']
+    confidenceMin: 'high' | 'medium' | 'low';       // default: 'medium'
+    conditions: ('NM' | 'LP' | 'MP' | 'HP')[];      // default: all
+    profitMinPercent: number;                         // default: 10
+    timeRange: '1h' | '6h' | '24h' | 'all';         // default: '6h'
+    showGraded: boolean;                              // default: false
+  };
+
+  // Notification settings
+  notifications: {
+    telegram: {
+      enabled: boolean;
+      botToken: string | null;          // Encrypted at rest
+      chatId: string | null;
+      minTier: 'S' | 'A' | 'B' | 'C'; // default: 'S'
+      minConfidence: 'high' | 'medium'; // default: 'high'
+      minProfitPercent: number;          // default: 30
+      watchedExpansions: string[];       // Scrydex expansion IDs, empty = all
+      watchedCards: string[];            // Scrydex card IDs, empty = none
+    };
+    inApp: {
+      soundEnabled: boolean;            // default: true
+      soundOnTier: 'S' | 'A';          // default: 'S'
+      toastDuration: number;            // seconds, default: 5
+    };
+  };
+
+  // Display preferences
+  display: {
+    currency: 'GBP' | 'USD' | 'both';  // default: 'GBP'
+    theme: 'dark' | 'light';            // default: 'dark'
+    ebayFeePercent: number;              // default: 12.8 (eBay UK final value fee)
+  };
+}
+```
+
+**Storage:** Single-user for v1, stored in PostgreSQL on Railway. No full authentication layer needed initially, but **private endpoints must not be publicly accessible.** Two approaches:
+
+1. **Simple shared secret:** Private API endpoints require an `Authorization: Bearer <token>` header where the token is a `DASHBOARD_SECRET` environment variable on Railway. The frontend stores this in localStorage after a one-time entry. Simple, sufficient for single-user.
+2. **Path-based split:** Public catalog routes (`/api/catalog/*`) are open. Everything else (`/api/deals/*`, `/api/preferences`, `/api/notifications/*`, `/api/lookup`) is behind the bearer token check.
+
+The public catalog endpoints remain unauthenticated — they're the public-facing product. If multi-user is added later, replace the shared secret with proper auth (e.g., GitHub OAuth).
+
+#### Telegram Bot Integration
+
+```typescript
+// POST /api/notifications/telegram/test
+// Send a test message to verify bot token and chat ID are configured correctly
+//
+// Response:
+interface TelegramTestResponse {
+  success: boolean;
+  error: string | null;       // e.g., "Invalid bot token", "Chat not found"
+  messageId: number | null;   // Telegram message ID if successful
+}
+
+// GET /api/notifications/telegram/status
+// Check current Telegram integration health
+//
+// Response:
+interface TelegramStatusResponse {
+  configured: boolean;          // bot token + chat ID are set
+  lastMessageAt: string | null; // ISO 8601
+  lastError: string | null;
+  messagesSentToday: number;
+}
+```
+
+**Message format:** Telegram notifications use a compact template:
+
+```
+🟢 S-tier Deal: Charizard ex #006/197
+Obsidian Flames · NM
+eBay: £12.50 → Market: £45.00
+Profit: +£32.50 (+260%)
+Confidence: 92% (high)
+🔗 ebay.co.uk/itm/...
+```
+
+#### Endpoint Summary
+
+| Endpoint | Method | Auth | Purpose |
+|---|---|---|---|
+| `/api/deals/stream` | GET (SSE) | Bearer token | Real-time deal push |
+| `/api/deals` | GET | Bearer token | Paginated deal list |
+| `/api/deals/:id` | GET | Bearer token | Deal detail with audit |
+| `/api/deals/:id/review` | POST | Bearer token | Accuracy feedback |
+| `/api/status` | GET | Bearer token | System health |
+| `/api/preferences` | GET/PUT | Bearer token | User preferences |
+| `/api/notifications/telegram/test` | POST | Bearer token | Test Telegram config |
+| `/api/notifications/telegram/status` | GET | Bearer token | Telegram health |
+| `/api/lookup` | POST | Bearer token | Manual listing lookup (§2.8) |
+| `/api/catalog/expansions` | GET | None (public) | Expansion list (§2.9) |
+| `/api/catalog/expansions/:id` | GET | None (public) | Expansion detail (§2.9) |
+| `/api/catalog/cards/search` | GET | None (public) | Card search (§2.9) |
+| `/api/catalog/cards/:id` | GET | None (public) | Card detail (§2.9) |
+| `/api/catalog/trending` | GET | None (public) | Price movers (§2.9) |
+
+All private endpoints require `Authorization: Bearer <DASHBOARD_SECRET>`. The `DASHBOARD_SECRET` is a Railway environment variable. Public catalog endpoints are open — they serve the public-facing card database.
 
 ---
 
@@ -1447,6 +1886,9 @@ src/
 | **Confidence response** | Binary pass/fail at 28% | 4-tier graduated response (high/med/low/reject) |
 | **Architecture** | God object (ArbitrageEngine, 1800 lines) | 5 separate layers, each independently testable |
 | **Accuracy measurement** | None (only diagnostic stage counters) | Automated checks + manual review sampling + regression corpus |
-| **State management** | In-memory Maps, lost on restart | Database-backed with persistent card index |
+| **State management** | In-memory Maps, lost on restart | PostgreSQL on Railway — persistent across redeploys |
 | **Expansion updates** | Requires code change + redeploy | Automated daily sync |
 | **Scan throughput** | Limited by Scrydex credit budget | **Limited only by eBay rate limits** (Scrydex is no longer a bottleneck) |
+| **Deployment** | Manual (not documented) | GitHub → Railway auto-deploy, GitHub Actions CI with accuracy gate |
+| **Database** | None (in-memory) | Managed PostgreSQL on Railway with trigram + FTS indexes |
+| **Secrets management** | Hardcoded or .env file | Railway environment variables, never in repo |

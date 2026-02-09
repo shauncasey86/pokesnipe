@@ -44,9 +44,15 @@ The deal feed is a **live-updating vertical list** of arbitrage opportunities, n
 
 **Real-time behavior:** New deals slide in at the top with a brief highlight animation. The feed does NOT auto-scroll — the user controls their scroll position. A "New deals" pill appears at the top if they've scrolled down and new items arrive.
 
+**Data source:**
+- **Initial load:** `GET /api/deals?limit=50&sort=-createdAt` populates the feed on page load (with any active filter params)
+- **Real-time updates:** An SSE connection to `GET /api/deals/stream` pushes new deals as `event: deal` messages. The frontend appends incoming deals to the top of the in-memory list
+- **Filtering is client-side.** The SSE stream sends all deals regardless of filters. The frontend applies tier/confidence/condition/profit filters locally — this avoids per-client filter state on the server and means filter changes are instant (no round-trip)
+- **Reconnection:** The browser's native `EventSource` auto-reconnects on disconnect. The server uses `Last-Event-Id` to replay missed deals, so no data is lost during brief connection drops (e.g., Railway redeploys)
+
 #### 2. Deal Detail Panel (Drill-Down)
 
-Clicking a deal opens a **right-side panel** (not a modal, not a new page — the feed stays visible on the left). The detail panel shows:
+Clicking a deal opens a **right-side panel** (not a modal, not a new page — the feed stays visible on the left). The SSE `deal` event contains enough data for the feed row, but the detail panel fetches the full record via `GET /api/deals/:dealId` — this returns the confidence breakdown per field, price table across all conditions, condition mapping detail, match internals, and review state. The detail panel shows:
 
 **Top section — Action Zone:**
 - Large card image (from Scrydex CDN)
@@ -68,9 +74,10 @@ Clicking a deal opens a **right-side panel** (not a modal, not a new page — th
 - Card metadata: rarity, artist, supertype/subtypes
 
 **Footer — Accuracy Actions:**
-- "Correct match" / "Wrong match" buttons — feeds the accuracy regression corpus
-- "Wrong match" expands to: wrong card, wrong expansion, wrong variant, wrong price
-- These are always visible and one-click. Building the accuracy corpus should be frictionless.
+- "Correct match" / "Wrong match" buttons — feeds the accuracy regression corpus via `POST /api/deals/:dealId/review`
+- "Wrong match" expands to: wrong card, wrong expansion, wrong variant, wrong price (sent as `incorrectReason` in the request body)
+- These are always visible and one-click. Building the accuracy corpus should be frictionless
+- If the deal has already been reviewed, show the existing verdict with an "Undo" option
 
 #### 3. Filters & Search Bar
 
@@ -84,7 +91,11 @@ A persistent **top bar** with:
 - **Time range:** Last hour / Last 6h / Last 24h / All. Default: Last 6h.
 - **Graded toggle:** Show/hide graded card deals (separate pricing model).
 
-Filters are **additive** (AND logic). Active filters show as removable pills below the search bar. Filter state persists across sessions (localStorage or server-side preference).
+Filters are **additive** (AND logic). Active filters show as removable pills below the search bar.
+
+**Filter persistence:** Default filter state is loaded from server-side preferences on startup (`GET /api/preferences` → `defaultFilters`). When the user changes filters, the active state is held in local component state for instant responsiveness. A "Save as default" action persists the current filter set back to the server via `PUT /api/preferences`. This means defaults survive across devices/browsers (server-side), while in-session tweaks are instant and don't trigger API calls on every toggle.
+
+**Filter application:** Filters run client-side against the in-memory deal list. The SSE stream and initial REST load provide unfiltered data. This means filter changes are instant — no network round-trip, no re-fetch. The `GET /api/deals` endpoint also accepts filter params (`tier`, `confidenceMin`, `condition`, `profitMin`, `since`, `q`) for initial load optimization, but real-time filtering is always local.
 
 #### 4. System Status Bar (Persistent Footer)
 
@@ -103,18 +114,21 @@ Color-coded status dots:
 
 Clicking any section expands to a detailed status panel (overlay, not navigation).
 
+**Data source:** Initial status is fetched from `GET /api/status` on page load. Ongoing updates arrive via the same SSE connection used for deals — the `event: status` message fires every 30 seconds (or immediately on state change). The footer re-renders reactively from the latest status object. No polling needed.
+
 #### 5. Manual Lookup Tool
 
 Accessible via a **prominent button** in the top bar ("Lookup" or a search icon with a paste indicator). Opens as an overlay panel:
 
-1. **Input:** Large text field accepting an eBay URL or item ID. Paste and press Enter.
-2. **Processing indicator:** Brief spinner with stage labels ("Fetching listing..." → "Extracting signals..." → "Matching..." → "Done")
-3. **Result:** Same layout as the Deal Detail Panel, but with additional debug information:
+1. **Input:** Large text field accepting an eBay URL or item ID. Paste and press Enter
+2. **API call:** `POST /api/lookup` with `{ ebayUrl }` or `{ ebayItemId }`. The backend fetches the listing, runs the full pipeline, and returns the `LookupResponse` (see architecture doc §2.8)
+3. **Processing indicator:** Brief spinner with stage labels ("Fetching listing..." → "Extracting signals..." → "Matching..." → "Done"). Target response time: <2s (eBay API fetch dominates; local matching is <100ms)
+4. **Result:** Same layout as the Deal Detail Panel, but with additional debug information:
    - Raw eBay API response fields (collapsible)
    - All candidates considered (not just the winner), with scores
    - Signal extraction detail: what each regex matched, what structured data was found, where conflicts occurred
    - If no match: explicit reason (no card number found, no candidates, all candidates below 0.60 name similarity, etc.)
-4. **Actions:** "Open on eBay", "Add to corpus (correct)", "Add to corpus (incorrect)"
+5. **Actions:** "Open on eBay", "Add to corpus (correct)", "Add to corpus (incorrect)"
 
 The lookup tool is also useful as a **diagnostic tool** — when a deal looks wrong, pasting its eBay URL into the lookup shows exactly why it was matched that way.
 
@@ -123,6 +137,9 @@ The lookup tool is also useful as a **diagnostic tool** — when a deal looks wr
 **Telegram integration** for high-value alerts:
 - S-tier deals with high confidence: instant push
 - Configurable: minimum profit, minimum confidence, specific expansions/cards to watch
+- Configuration is part of the preferences object (`PUT /api/preferences` → `notifications.telegram`)
+- "Test notification" button in preferences calls `POST /api/notifications/telegram/test` and shows success/failure inline
+- Connection health shown via `GET /api/notifications/telegram/status` (last message sent, error state)
 
 **In-app notifications:**
 - New S-tier deal: brief toast notification (top-right, auto-dismiss 5s)
@@ -131,15 +148,19 @@ The lookup tool is also useful as a **diagnostic tool** — when a deal looks wr
 
 #### 7. Preferences
 
-Accessible from a gear icon. Key settings:
+Accessible from a gear icon. All preferences are persisted server-side via `GET/PUT /api/preferences` (stored in PostgreSQL on Railway) so they survive across browsers and devices. The full `UserPreferences` schema is defined in the architecture doc §2.11.
 
-- **Profit thresholds:** Define what constitutes S/A/B/C tier (% and absolute GBP)
-- **Condition preferences:** Which conditions to scan for (e.g., NM only)
-- **Notification settings:** Telegram bot token, notification thresholds
+Key settings:
+
+- **Profit thresholds:** Define what constitutes S/A/B/C tier (% and absolute GBP minimum)
+- **Default filters:** Which tiers, conditions, confidence levels, and profit minimums to show by default
+- **Notification settings:** Telegram bot token + chat ID, notification tier/confidence/profit thresholds, watched expansions and cards
 - **Currency display:** Show prices in GBP, USD, or both
-- **eBay fees:** Configure fee percentage for accurate profit calculation
-- **Sound alerts:** Toggle on/off, choose sound for S-tier arrivals
+- **eBay fees:** Configure fee percentage for accurate profit calculation (default: 12.8% — eBay UK final value fee)
+- **Sound alerts:** Toggle on/off, choose which tier triggers sound on arrival
 - **Dark/light mode:** Default to dark (see Part 3)
+
+**Save behavior:** Each setting change is debounced (500ms) and sent as a partial `PUT /api/preferences` update. The UI shows a subtle "Saved" confirmation. No explicit save button needed — changes are live.
 
 ---
 
@@ -410,3 +431,126 @@ Below input (after submission):
 - Card price alerts / watchlists (future: catalog feature)
 - Social features, sharing, community
 - Onboarding / tutorial (the interface should be self-evident)
+
+---
+
+## Part 4: Backend Integration
+
+This section maps the frontend to the backend API contract defined in `ARBITRAGE_SCANNER_REVIEW.md` §2.11. It covers authentication, data flow, SSE lifecycle, and deployment.
+
+### Authentication
+
+The dashboard is a private interface — it requires a bearer token (`DASHBOARD_SECRET`, a Railway environment variable) to access all non-public endpoints. The public card catalog (§2.9) does not require authentication.
+
+**First-visit flow:**
+```
+1. User opens the dashboard URL
+2. Frontend checks localStorage for a stored token
+3. If no token: show a minimal login screen — single password field,
+   no username (single-user v1). Label: "Dashboard secret"
+4. User enters the DASHBOARD_SECRET
+5. Frontend calls GET /api/status with Authorization: Bearer <token>
+6. If 200: store token in localStorage, load the dashboard
+7. If 401: show "Invalid secret" error, clear the input, stay on login
+```
+
+**Subsequent visits:** Token is read from localStorage and attached to every API request as `Authorization: Bearer <token>`. If any request returns 401, clear the stored token and redirect to the login screen (the secret was rotated).
+
+**SSE auth:** The `EventSource` API doesn't support custom headers. Pass the token as a query parameter: `GET /api/deals/stream?token=<DASHBOARD_SECRET>`. The backend validates this the same way as the header.
+
+### Data Flow on Page Load
+
+```
+Page load
+  │
+  ├─ 1. Read token from localStorage (or show login)
+  │
+  ├─ 2. Parallel fetch (all with Bearer token):
+  │     ├── GET /api/deals?limit=50         → Populate deal feed
+  │     ├── GET /api/status                 → Populate status bar
+  │     └── GET /api/preferences            → Apply default filters + settings
+  │
+  ├─ 3. Open SSE connection:
+  │     GET /api/deals/stream?token=<secret>
+  │     ├── event: deal    → Append to deal feed (top), apply local filters
+  │     ├── event: status  → Update status bar
+  │     └── event: ping    → (keepalive, no UI action)
+  │
+  └─ 4. Dashboard is live
+```
+
+### SSE Connection Lifecycle
+
+```
+┌──────────┐     connect      ┌───────────────┐
+│  Initial  │ ──────────────▶ │  Connected     │
+│  load     │                 │  (streaming)   │
+└──────────┘                 └───────┬───────┘
+                                      │
+                              disconnect (network,
+                              Railway redeploy)
+                                      │
+                                      ▼
+                             ┌───────────────┐
+                             │  Reconnecting  │──▶ auto-retry with
+                             │  (EventSource) │    Last-Event-Id
+                             └───────┬───────┘
+                                      │
+                              reconnect success
+                              (missed deals replayed)
+                                      │
+                                      ▼
+                             ┌───────────────┐
+                             │  Connected     │
+                             │  (streaming)   │
+                             └───────────────┘
+```
+
+**Key behaviors:**
+- `EventSource` reconnects automatically — no custom retry logic needed
+- The `Last-Event-Id` header ensures the server replays any deals missed during disconnect
+- During Railway redeploys (typically <10s), the user sees the status bar briefly show a yellow "Reconnecting..." indicator. Deals resume automatically once the new instance is up
+- If the SSE connection fails for >30 seconds, show a persistent yellow banner: "Connection lost — reconnecting..." with a manual "Retry" button
+
+### User Action → API Mapping
+
+| User Action | API Call | Notes |
+|---|---|---|
+| Open dashboard | `GET /api/deals`, `GET /api/status`, `GET /api/preferences` | Parallel on load |
+| Deal feed streaming | `GET /api/deals/stream` (SSE) | Long-lived connection |
+| Click a deal | `GET /api/deals/:dealId` | Full detail + audit data |
+| Mark deal correct | `POST /api/deals/:dealId/review` `{ isCorrectMatch: true }` | |
+| Mark deal wrong | `POST /api/deals/:dealId/review` `{ isCorrectMatch: false, incorrectReason: "..." }` | |
+| Paste eBay URL for lookup | `POST /api/lookup` `{ ebayUrl: "..." }` | |
+| Change filter | None — client-side | Applied to in-memory deal list |
+| Save filter as default | `PUT /api/preferences` `{ defaultFilters: {...} }` | Debounced 500ms |
+| Change any preference | `PUT /api/preferences` `{ ... }` | Partial update, debounced |
+| Test Telegram config | `POST /api/notifications/telegram/test` | Show success/fail inline |
+| Load more deals (scroll) | `GET /api/deals?page=2&limit=50` | Append to feed |
+| Search deals | `GET /api/deals?q=charizard` | Re-fetch with search param |
+| Expand status bar section | No API call — data already in latest `status` event | |
+
+### Deployment
+
+The frontend is a **static SPA** (single-page application) served by the same Railway Node.js service that runs the backend. There is no separate frontend deployment.
+
+```
+pokesnipe (Railway service)
+├── Backend: Express/Fastify API on PORT (Railway-injected)
+│   ├── /api/*           → REST + SSE endpoints
+│   └── /catalog/*       → Public card catalog (SSR for SEO)
+└── Frontend: Static files served from /public or /dist
+    ├── index.html       → SPA shell (dashboard)
+    ├── assets/          → JS bundles, CSS, fonts
+    └── Catch-all route  → index.html (client-side routing)
+```
+
+**Build pipeline:**
+1. GitHub push to `main` triggers Railway auto-deploy
+2. `Dockerfile` builds both backend (TypeScript → JS) and frontend (bundler → static assets) in a single multi-stage build
+3. The production image serves the frontend as static files and the API from the same process
+4. No CORS configuration needed — frontend and API share the same origin
+
+**Environment-specific behavior:**
+- **Production (Railway):** `NODE_ENV=production`, static files served with cache headers, SSE keepalive enabled
+- **Development (local):** Frontend dev server (Vite/Next) proxies API requests to `localhost:3000`. `.env` file for secrets. Hot reload for UI changes
