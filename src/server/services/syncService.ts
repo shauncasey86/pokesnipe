@@ -22,14 +22,21 @@ export const runFullSync = async () => {
       );
     }
 
+    // Build expansion lookup map for fast resolution
+    const expLookup = new Map<string, number>();
+    const { rows: expRows } = await pool.query("SELECT id, scrydex_id FROM expansions");
+    for (const row of expRows) expLookup.set(row.scrydex_id, row.id);
+
     const cards = await fetchAllCards((page, count) => {
       logger.info({ page, count }, "scrydex page synced");
     });
+    let inserted = 0;
     for (const card of cards) {
-      const { rows } = await pool.query("SELECT id FROM expansions WHERE scrydex_id=$1", [card.expansionId]);
-      if (rows.length === 0) continue;
-      const expansionId = rows[0].id as number;
-      const marketUsd = card.prices?.market ?? null;
+      const expansionId = expLookup.get(card.expansionId);
+      if (!expansionId) continue;
+      // Market price: try various field names the API might use
+      const p = card.prices as Record<string, any>;
+      const marketUsd = p?.market ?? p?.tcgplayer_market ?? p?.normal?.market ?? null;
       await pool.query(
         `INSERT INTO cards (scrydex_id, name, card_number, printed_total, rarity, supertype, subtypes, image_url, expansion_id, market_price_usd, prices)
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
@@ -52,7 +59,9 @@ export const runFullSync = async () => {
           card.prices
         ]
       );
+      inserted++;
     }
+    logger.info({ expansions: expansions.length, cards: inserted }, "sync totals");
     await pool.query("UPDATE sync_log SET status='completed', finished_at=now() WHERE id=$1", [logId]);
   } catch (error) {
     logger.error({ error }, "sync failed");
