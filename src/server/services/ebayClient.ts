@@ -24,8 +24,7 @@ const getAccessToken = async () => {
   const { data } = await authClient.post(
     "/oauth2/token",
     new URLSearchParams({
-      grant_type: "refresh_token",
-      refresh_token: config.EBAY_REFRESH_TOKEN,
+      grant_type: "client_credentials",
       scope: "https://api.ebay.com/oauth/api_scope"
     }),
     { headers: { Authorization: `Basic ${credentials}`, "Content-Type": "application/x-www-form-urlencoded" } }

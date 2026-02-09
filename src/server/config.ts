@@ -10,7 +10,6 @@ const envSchema = z.object({
   SCRYDEX_TEAM_ID: z.string().min(1),
   EBAY_CLIENT_ID: z.string().min(1),
   EBAY_CLIENT_SECRET: z.string().min(1),
-  EBAY_REFRESH_TOKEN: z.string().min(1),
   EXCHANGE_RATE_API_KEY: z.string().min(1),
   TELEGRAM_BOT_TOKEN: z.string().optional(),
   TELEGRAM_CHAT_ID: z.string().optional()
@@ -28,7 +27,6 @@ export const config: AppConfig = envSchema.parse({
   SCRYDEX_TEAM_ID: process.env.SCRYDEX_TEAM_ID,
   EBAY_CLIENT_ID: process.env.EBAY_CLIENT_ID,
   EBAY_CLIENT_SECRET: process.env.EBAY_CLIENT_SECRET,
-  EBAY_REFRESH_TOKEN: process.env.EBAY_REFRESH_TOKEN,
   EXCHANGE_RATE_API_KEY: process.env.EXCHANGE_RATE_API_KEY,
   TELEGRAM_BOT_TOKEN: process.env.TELEGRAM_BOT_TOKEN,
   TELEGRAM_CHAT_ID: process.env.TELEGRAM_CHAT_ID
