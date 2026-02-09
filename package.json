@@ -13,7 +13,7 @@
     "build": "npm run build:client && npm run build:server",
     "build:client": "vite build",
     "build:server": "tsc -p tsconfig.server.json",
-    "start": "node-pg-migrate -m migrations -d $DATABASE_URL up && node dist/server/index.js",
+    "start": "node migrate.mjs && node dist/server/index.js",
     "start:worker": "node dist/server/worker.js",
     "lint": "eslint . --ext .ts,.tsx",
     "typecheck": "tsc -p tsconfig.server.json --noEmit && tsc -p tsconfig.client.json --noEmit",
