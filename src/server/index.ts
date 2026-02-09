@@ -12,10 +12,13 @@ import lookupRoutes from "./routes/lookup.js";
 import statusRoutes from "./routes/status.js";
 import settingsRoutes from "./routes/settings.js";
 import notificationsRoutes from "./routes/notifications.js";
+import testRoutes from "./routes/test.js";
 import { config } from "./config.js";
 import { requireAuth } from "./services/auth.js";
 import { pool } from "./db/pool.js";
 import { getStatus } from "./services/statusService.js";
+import { runFullSync } from "./services/syncService.js";
+import { scanEbay } from "./services/scannerService.js";
 
 const logger = pino({ name: "server" });
 
@@ -34,6 +37,50 @@ app.use("/api/lookup", lookupRoutes);
 app.use("/api/status", statusRoutes);
 app.use("/api/settings", settingsRoutes);
 app.use("/api/notifications", notificationsRoutes);
+app.use("/api/test", testRoutes);
+
+// Manual trigger: POST /api/scan (runs one eBay scan cycle)
+let scanRunning = false;
+app.post("/api/scan", requireAuth, async (_req, res) => {
+  if (scanRunning) return res.json({ ok: false, error: "scan already in progress" });
+  scanRunning = true;
+  try {
+    const before = (await pool.query("SELECT COUNT(*)::int as c FROM deals")).rows[0].c;
+    await pool.query("INSERT INTO scanner_runs (status) VALUES ('running')");
+    await scanEbay();
+    const after = (await pool.query("SELECT COUNT(*)::int as c FROM deals")).rows[0].c;
+    await pool.query(
+      "UPDATE scanner_runs SET status='completed', finished_at=now(), deals_found=$1 WHERE id=(SELECT MAX(id) FROM scanner_runs)",
+      [after - before]
+    );
+    res.json({ ok: true, deals_found: after - before });
+  } catch (error: any) {
+    await pool.query(
+      "UPDATE scanner_runs SET status='failed', finished_at=now(), error=$1 WHERE id=(SELECT MAX(id) FROM scanner_runs)",
+      [error.message]
+    ).catch(() => {});
+    res.status(500).json({ ok: false, error: error.message });
+  } finally {
+    scanRunning = false;
+  }
+});
+
+// Manual trigger: POST /api/sync (runs full Scrydex sync)
+let syncRunning = false;
+app.post("/api/sync", requireAuth, async (_req, res) => {
+  if (syncRunning) return res.json({ ok: false, error: "sync already in progress" });
+  syncRunning = true;
+  try {
+    await runFullSync();
+    const cards = (await pool.query("SELECT COUNT(*)::int as c FROM cards")).rows[0].c;
+    const exps = (await pool.query("SELECT COUNT(*)::int as c FROM expansions")).rows[0].c;
+    res.json({ ok: true, cards, expansions: exps });
+  } catch (error: any) {
+    res.status(500).json({ ok: false, error: error.message });
+  } finally {
+    syncRunning = false;
+  }
+});
 
 const clients = new Set<express.Response>();
 let lastEventId = 0;
@@ -135,4 +182,48 @@ app.use((err: Error, _req: express.Request, res: express.Response, _next: expres
 
 app.listen(config.PORT, () => {
   logger.info(`PokeSnipe server listening on ${config.PORT}`);
+
+  // Integrated worker: initial sync then scan every 5 min, resync every 24h
+  (async () => {
+    try {
+      logger.info("starting initial Scrydex sync...");
+      await runFullSync();
+      logger.info("initial sync completed");
+    } catch (error) {
+      logger.error({ error }, "initial sync failed (will retry in 24h)");
+    }
+
+    // Scan every 5 minutes
+    setInterval(() => {
+      if (scanRunning) return;
+      scanRunning = true;
+      const doScan = async () => {
+        const { rows } = await pool.query("INSERT INTO scanner_runs (status) VALUES ('running') RETURNING id");
+        const runId = rows[0].id as number;
+        try {
+          const before = (await pool.query("SELECT COUNT(*)::int as c FROM deals")).rows[0].c;
+          await scanEbay();
+          const after = (await pool.query("SELECT COUNT(*)::int as c FROM deals")).rows[0].c;
+          await pool.query("UPDATE scanner_runs SET status='completed', finished_at=now(), deals_found=$2 WHERE id=$1", [runId, after - before]);
+          logger.info({ runId, dealsFound: after - before }, "scan completed");
+        } catch (error) {
+          await pool.query("UPDATE scanner_runs SET status='failed', finished_at=now(), error=$2 WHERE id=$1", [runId, error instanceof Error ? error.message : "unknown"]).catch(() => {});
+          logger.error({ error }, "scan failed");
+        } finally {
+          scanRunning = false;
+        }
+      };
+      doScan();
+    }, 1000 * 60 * 5);
+
+    // Re-sync every 24 hours
+    setInterval(() => {
+      if (syncRunning) return;
+      syncRunning = true;
+      runFullSync()
+        .then(() => logger.info("scheduled sync completed"))
+        .catch((error) => logger.error({ error }, "scheduled sync failed"))
+        .finally(() => { syncRunning = false; });
+    }, 1000 * 60 * 60 * 24);
+  })();
 });
