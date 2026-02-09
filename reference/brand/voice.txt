@@ -1,0 +1,762 @@
+╔══════════════════════════════════════════════════════════════════════╗
+║                                                                      ║
+║   POKÉSNIPE — BRAND VOICE GUIDE v3.0                                 ║
+║   Last updated: 2026-02-09                                          ║
+║                                                                      ║
+╚══════════════════════════════════════════════════════════════════════╝
+
+
+========================================================================
+  01. VOICE DNA
+========================================================================
+
+  Peak confidence. Zero polish. Maximum impact.
+
+  This isn't corporate copy. This is collector code.
+  Fragment-first. Attitude-driven. Built for the grind.
+
+  We speak like we're already holding the grail.
+  No soft sell. No filler. No BS.
+
+  Three rules:
+  - Talk like you're at the card shop counter, not behind a marketing desk.
+  - Every word earns its spot or gets cut.
+  - If a collector wouldn't say it out loud, don't write it.
+
+
+========================================================================
+  02. LANGUAGE SYSTEM
+========================================================================
+
+------------------------------------------------------------------------
+  2.1  NOUNS — The Arsenal
+------------------------------------------------------------------------
+
+  CARDS & GRADES
+  Slabs. Raw cards. Singles. PSA 10s. BGS Black Labels. Gem mints.
+  Hits. Pulls. Bangers. Grails. Holy grails. Chase cards. Vault pieces.
+  Binder cards. PC pieces. Keepers.
+
+  CARD TYPES
+  Full arts. Alt arts. Secret rares. Rainbow rares. Gold stars.
+  Crystals. Shinings. Promos. Trophy cards. Error cards.
+  Holos. Reverse holos. 1st editions. Shadowless. Base set unlimited.
+
+  SETS & ERAS
+  WOTC .............. Base through Neo Destiny
+  e-Series .......... Expedition, Aquapolis, Skyridge
+  EX era ............ Ruby/Sapphire through Power Keepers
+  DP / BW / XY ...... Mid-era bridges
+  Modern ............ Sun & Moon forward
+  SWSH / SV ......... Current chase territory
+  Japanese .......... High class sets, vending series, JPN-only promos
+
+  CONDITION & QUALITY
+  Raw minty. Pack fresh. Near mint. LP. Damaged.
+  The four pillars: Centering. Surface. Edges. Corners.
+  OC. Whitening. Print lines. Holo scratches.
+  Slab-worthy. Gem mint candidate. Pop report standout.
+
+  MARKET TERMS
+  Comps. Recent sales. Going rate. Pop count. Pop 1.
+  Heavy hitters. Deep cuts. Sleepers. Moving. Sitting.
+
+------------------------------------------------------------------------
+  2.2  VERBS — The Action
+------------------------------------------------------------------------
+
+  BUYING / HUNTING     Rip. Crack. Hunt. Chase. Scoop. Cop. Snag.
+                       Lock in. Grab.
+
+  SELLING / MOVING     Move. List. Let go. Cash out. Part with.
+
+  HOLDING / COLLECTING Vault. Stack. Keep. Sit on. Lock away. Stash.
+                       PC. Hold forever.
+
+  GRADING              Grade. Sub. Crack and regrade. Cross.
+
+  GENERAL              Pull. Hit. Miss. Whiff. Score. Land.
+
+  CONDITION            Centered. Off-center. Dinged. Creased. Whitened.
+                       Scratched.
+
+------------------------------------------------------------------------
+  2.3  DESCRIPTORS — The Weight
+------------------------------------------------------------------------
+
+  QUALITY
+  Slab-worthy. Gem mint. Pack fresh. Raw minty. Centered AF.
+  Clean surface. Sharp corners. Strong holo. Deep color.
+  Museum piece. Binder worthy. PC-grade. Display ready.
+
+  DESIRABILITY
+  Chase-tier. Iconic. Trophy-tier. Crown jewel. Heavy hitter.
+  Sleeper. Under the radar. Heating up. Moving fast. Ice cold.
+  Top heavy.
+
+  RARITY
+  Low pop. Pop 1. None higher. Gem rate nightmare.
+  Short print. Error. Regional exclusive. Event promo.
+  Hard to find. Scarce. Unicorn.
+
+  CONDITION ISSUES
+  OC. Rough edges. Surface wear. Print line. Holo scratches.
+  Whitening. Dented. Creased. Beat. Rough AF.
+
+------------------------------------------------------------------------
+  2.4  ABBREVIATED PROFANITY — Brand Voice Enhancers
+------------------------------------------------------------------------
+
+  These are tools, not decoration. Deploy with intent.
+
+  ┌─────────┬──────────────┬───────────────────────────────────────────┐
+  │ TERM    │ FREQUENCY    │ USAGE                                     │
+  ├─────────┼──────────────┼───────────────────────────────────────────┤
+  │ AF      │ Workhorse    │ Quality emphasis. "Centered AF."          │
+  │         │              │ "Sharp AF." Your most versatile tool.     │
+  ├─────────┼──────────────┼───────────────────────────────────────────┤
+  │ No BS   │ Core pillar  │ Brand promise. Use constantly.            │
+  │         │              │ "No BS pricing." "No BS condition notes." │
+  ├─────────┼──────────────┼───────────────────────────────────────────┤
+  │ WTF     │ Sparingly    │ Genuine surprise only. "WTF pull."        │
+  │         │              │ "WTF centering." Not every listing.       │
+  ├─────────┼──────────────┼───────────────────────────────────────────┤
+  │ GTFO    │ Rare         │ Legitimate shock value only.              │
+  │         │              │ "GTFO pop count." Reserve for extremes.   │
+  └─────────┴──────────────┴───────────────────────────────────────────┘
+
+  HARD RULES:
+  - Always abbreviated. Never spelled out. Ever.
+  - Never in complaint responses or apologies.
+  - Context matters: marketing, social, product highlights = yes.
+    Customer service escalation = no.
+
+
+========================================================================
+  03. STRUCTURE PRINCIPLES
+========================================================================
+
+  These five rules govern every piece of copy we ship.
+
+  ── 3.1  FRAGMENT OVER SENTENCE ──────────────────────────────────────
+
+    YES:  Gold Star Zard. PSA 9. Clean AF. WOTC grail. No BS.
+    NO:   This is a professionally graded Charizard card from the
+          vintage era in excellent condition.
+
+    Fragments move faster. Collectors scan, they don't read essays.
+
+  ── 3.2  HARD STOPS ──────────────────────────────────────────────────
+
+    Short. Sharp. Final.
+    No weak connectors. No meandering clauses.
+    Every period is a mic drop.
+
+  ── 3.3  ALL CAPS FOR IMPACT ─────────────────────────────────────────
+
+    Use deliberately. Sparingly. For PEAK ENERGY moments only.
+    If everything screams, nothing does.
+
+    Rule of thumb: one caps phrase per block of copy. Max.
+
+  ── 3.4  BLOCK TYPOGRAPHY THINKING ───────────────────────────────────
+
+    Write like you're designing UI.
+    Every line should hit like a bold heading.
+    If it doesn't work as a standalone line on a card, rewrite it.
+
+  ── 3.5  CUT RUTHLESSLY ─────────────────────────────────────────────
+
+    If a word doesn't push weight, delete it.
+    No padding. No qualifiers.
+
+    Kill list: "just", "really", "very", "actually", "basically",
+    "honestly", "simply", "quite", "literally"
+
+    Exception: "actually" is permitted when proving authenticity.
+    "No BS — this actually happened."
+
+
+========================================================================
+  04. TONE CONTROLS
+========================================================================
+
+  ┌───────────────────┬────────────────────────────────────────────────┐
+  │ PRINCIPLE         │ IN PRACTICE                                    │
+  ├───────────────────┼────────────────────────────────────────────────┤
+  │ Peak confidence   │ State facts. Cite comps. Show condition.       │
+  │                   │ No brag, just reality. Let the card talk.      │
+  ├───────────────────┼────────────────────────────────────────────────┤
+  │ Rebellious edge   │ Break rules. Skip the fluff. Stay focused      │
+  │                   │ on cards. Use AF liberally.                     │
+  ├───────────────────┼────────────────────────────────────────────────┤
+  │ Fun via attitude  │ Not jokes. Not memes. Raw appreciation for     │
+  │                   │ heat. The cards are the punchline.              │
+  ├───────────────────┼────────────────────────────────────────────────┤
+  │ Honest AF         │ Show every flaw. Price to market. Transparent  │
+  │                   │ condition notes. No BS. Period.                 │
+  ├───────────────────┼────────────────────────────────────────────────┤
+  │ Collector-first   │ Assume TCG literacy. Talk shop, not sales.     │
+  │                   │ If you have to explain the hobby, you're       │
+  │                   │ writing for the wrong audience.                 │
+  └───────────────────┴────────────────────────────────────────────────┘
+
+  TONE ESCALATION LADDER
+  (Match energy to context, not everything is a 10)
+
+    1. Informational .... Clean facts. No hype. Shipping updates.
+    2. Confident ........ Standard listings. Category pages.
+    3. Charged .......... New arrivals. Grade returns. Drops.
+    4. Peak energy ...... Hero copy. Launch moments. Grail listings.
+
+  Most copy lives at 2-3. Reserve 4 for moments that earn it.
+
+
+========================================================================
+  05. FORBIDDEN LANGUAGE
+========================================================================
+
+  These words and phrases are permanently banned.
+  No exceptions. No "but what if." Banned.
+
+  ┌──────────────────────────────────────────────────────────────────┐
+  │ BANNED                          │ WHY IT'S DEAD TO US           │
+  ├──────────────────────────────────┼───────────────────────────────┤
+  │ Premium / Exclusive / Luxury     │ Corporate cologne. We sell    │
+  │                                  │ cards, not lifestyle brands.  │
+  ├──────────────────────────────────┼───────────────────────────────┤
+  │ Investment / Returns /           │ We're collectors, not         │
+  │ Opportunity / Asset class        │ financial advisors. SEC       │
+  │                                  │ doesn't need to know us.      │
+  ├──────────────────────────────────┼───────────────────────────────┤
+  │ Value deals / Sale event /       │ Retail brain. Kills           │
+  │ Special offer / Limited time     │ credibility instantly.        │
+  ├──────────────────────────────────┼───────────────────────────────┤
+  │ Satisfaction guaranteed /        │ Shopify template energy.      │
+  │ Welcome to our store             │ Delete on sight.              │
+  ├──────────────────────────────────┼───────────────────────────────┤
+  │ Don't miss out / Act now /       │ Urgency tactics are for       │
+  │ Last chance                      │ dropshippers, not collectors. │
+  ├──────────────────────────────────┼───────────────────────────────┤
+  │ Community                        │ Use "collector-run" instead.  │
+  │                                  │ "Community" is a tech bro     │
+  │                                  │ word now. Reclaim specificity.│
+  ├──────────────────────────────────┼───────────────────────────────┤
+  │ Mint condition (unqualified)     │ Be specific: NM, pack fresh,  │
+  │                                  │ gem mint, PSA 10. "Mint" alone│
+  │                                  │ means nothing.                │
+  ├──────────────────────────────────┼───────────────────────────────┤
+  │ Curated / Handpicked /           │ Every store says this. None   │
+  │ Hand-selected                    │ of them mean it. Show your    │
+  │                                  │ inventory, don't narrate it.  │
+  ├──────────────────────────────────┼───────────────────────────────┤
+  │ Passion / Passionate             │ Show passion through action   │
+  │                                  │ and knowledge. Don't          │
+  │                                  │ announce it.                  │
+  ├──────────────────────────────────┼───────────────────────────────┤
+  │ Journey / Story                  │ The card has a set number     │
+  │                                  │ and a grade. That's the story.│
+  └──────────────────────────────────┴───────────────────────────────┘
+
+  If you catch yourself reaching for any of these, stop.
+  Ask: "Would I say this at a card show?" If no, rewrite.
+
+
+========================================================================
+  06. VOCAL MODES
+========================================================================
+
+  Five modes. Each has a job. Match the mode to the moment.
+
+  ── 6.1  PEAK ENERGY ─────────────────────────────────────────────────
+  When: Product launches. Hero sections. Grail listings.
+
+    GOLD STAR CHARIZARD. PSA 9.
+    Dragon Frontiers. Clean AF. Centered 55/45.
+    WOTC grail. Heavy hitter. No BS pricing.
+
+  ── 6.2  COLLECTOR DNA ───────────────────────────────────────────────
+  When: About page. Mission statement. Core values. Brand story.
+
+    Built by collectors. Run by collectors.
+    We rip packs. We grade slabs. We know what matters.
+    Every card gets handled like it's going in our own PC.
+    Zero BS. Just heat.
+
+  ── 6.3  HONEST AF ───────────────────────────────────────────────────
+  When: Shipping info. Guarantees. Policies. Real talk.
+
+    Shipped in card savers. Double sleeved. Tracked AF.
+    Arrives as described or we make it right.
+    No BS. No runaround.
+
+  ── 6.4  HEAT INCOMING ───────────────────────────────────────────────
+  When: Drops. New stock. Restock alerts. Time-sensitive listings.
+
+    FRESH SLABS JUST LANDED
+    Umbreon VMAX Alt Art. PSA 10. Recent sub.
+    Centered AF. Clean surface. Moving fast.
+    No BS wait times. Listed now.
+
+  ── 6.5  CONDITION TALK ──────────────────────────────────────────────
+  When: Listings. Condition notes. Detail-heavy product copy.
+
+    CONDITION NOTES — NO BS
+    Minor whitening back right corner. Otherwise clean AF.
+    Centering 60/40 left to right. Strong top to bottom.
+    Holo pristine. No scratches. Pack fresh surface.
+    Priced to comp. Photos show everything.
+
+  ── 6.6  SOCIAL HYPE ────────────────────────────────────────────────
+  When: Instagram. Twitter/X. Discord. TikTok captions.
+
+    WTF JUST PULLED
+    Alt art Moonbreon. First pack. Centered AF.
+    This is cardboard crack.
+    No BS — this actually happened.
+
+  NOTE ON MODE MIXING:
+  Modes can blend. A listing might start at HEAT INCOMING (headline),
+  shift to CONDITION TALK (details), and close at HONEST AF (shipping).
+  The modes are ingredients, not containers. Mix with intent.
+
+
+========================================================================
+  07. MICROCOPY REFERENCE
+========================================================================
+
+------------------------------------------------------------------------
+  7.1  PRODUCT TITLES
+------------------------------------------------------------------------
+
+  CHARIZARD VMAX (Secret Rare) — PSA 10
+  Champion's Path #074. Rainbow rare. Centered AF.
+  Recent comp: $425. Low pop in 10. No BS pricing.
+
+  LUGIA — Neo Genesis 1st Edition Holo — BGS 9.5
+  Quad 9.5 subgrades. Sharp AF. Clean holo.
+  WOTC era grail. Museum piece.
+
+  PIKACHU VMAX — Vivid Voltage #188 — Raw NM
+  Rainbow secret rare. Pack fresh. Slab candidate.
+  Strong centering. Clean surface. No BS condition notes below.
+
+  UMBREON VMAX Alt Art — PSA 10
+  Evolving Skies #215. Low pop in 10.
+  Centered AF. One of the modern grails.
+
+  TITLE FORMAT (follow this order):
+  [POKEMON NAME] [VARIANT] — [SET NAME] [SET #] — [GRADE or RAW + CONDITION]
+
+------------------------------------------------------------------------
+  7.2  CATEGORY HEADERS
+------------------------------------------------------------------------
+
+  PSA 10 SLABS
+  Gem mints. Low pops. Heavy hitters. No BS pricing.
+
+  WOTC VINTAGE
+  Base through Neo. The foundation.
+  Clean slabs. Honest grades. Zero BS.
+
+  MODERN CHASE
+  Alt arts. Secrets. Full arts. Today's grails.
+
+  RAW HEAT
+  Pack fresh singles. Slab candidates. Ready to grade.
+  What you see is what you get.
+
+  JAPANESE EXCLUSIVES
+  High class. Vending. Promos. JPN-only chase.
+
+  GOLD STARS & CRYSTALS
+  Vintage holy grails. Museum pieces. Heavy hitters only.
+
+------------------------------------------------------------------------
+  7.3  CTA BUTTONS
+------------------------------------------------------------------------
+
+  Primary actions:         Secondary actions:
+  LOCK IT IN →             CHECK COMPS →
+  ADD TO VAULT →           VIEW SLAB →
+  NO BS QUOTE →            SEE CONDITION →
+                           VIEW GALLERY →
+                           BROWSE HEAT →
+
+  Button copy rules:
+  - 2-4 words max.
+  - Verb first. Always.
+  - Arrow (→) on primary CTAs. Optional on secondary.
+  - No "Submit." No "Click here." No "Learn more."
+
+------------------------------------------------------------------------
+  7.4  MARKETING COPY
+------------------------------------------------------------------------
+
+  NEW ARRIVALS: VINTAGE WOTC SLABS
+  Base Set Zard PSA 8. Clean slab. No BS pricing.
+  Jungle holos. Fossil chase cards. All gradeable.
+  First come. First served.
+
+  FRESH GRADE RETURNS
+  Just back from PSA. 6 gem mints.
+  Alt art Espeon. Rainbow Ray. Gold Mew.
+  DM for first look. No BS wait list.
+
+  BOOSTER BOX BREAK HITS
+  Ripped Evolving Skies. Pulled 3 alt arts.
+  Umbreon VMAX. Rayquaza VMAX. Glaceon V.
+  All raw minty. Ready to list. Condition photos up.
+  No BS. This actually happened.
+
+------------------------------------------------------------------------
+  7.5  BANNER TAGLINES
+------------------------------------------------------------------------
+
+  COLLECTOR RUN. CONDITION OBSESSED. ZERO BS.
+
+  WE PHOTOGRAPH EVERYTHING. YOU SEE WHAT YOU GET.
+
+  RAW OR GRADED. VINTAGE OR MODERN. JUST HEAT.
+
+  PACK FRESH TO MUSEUM GRADE. NO BS PRICING.
+
+  TRACKED AF. PACKAGED AF. DELIVERED AF.
+
+------------------------------------------------------------------------
+  7.6  SOCIAL MEDIA
+------------------------------------------------------------------------
+
+  Fresh comp on Base Zard PSA 9: $3.2K.
+  Still a heavy hitter. No BS market data.
+
+  Ripped a booster box. Pulled the chase.
+  This is why we do it.
+
+  Pop report: That alt art is Pop 47 in PSA 10.
+  Rarer than most think. Do your research.
+
+  Raw vs graded on this card: Night and day.
+  Worth the sub wait.
+
+  Just landed: Gold Star Mew. Raw NM.
+  Photos up. Condition notes added.
+  No BS asking price. Priced to comp.
+
+  SOCIAL RULES:
+  - One idea per post. Don't cram.
+  - Lead with the card or the data. Not the opinion.
+  - End with a fact, not a CTA. Let the card sell itself.
+  - Hashtags: use sparingly. #pokemon #pokemontcg #tcg max.
+    No hashtag novels.
+
+------------------------------------------------------------------------
+  7.7  TRANSACTIONAL COMMS (Email / SMS)
+------------------------------------------------------------------------
+
+  YOUR SLAB SHIPPED.
+  Tracked AF. Insured. Double boxed.
+  ETA: 2-3 business days.
+  No BS delivery updates. Check your tracking.
+
+  CONDITION PHOTOS ADDED
+  Card reviewed. Gallery updated.
+  Minor whitening noted. Priced accordingly.
+  Full transparency.
+
+  GRADE RESULTS: YOUR SUB IS BACK
+  3 gem mints. 2 nines. 1 eight.
+  Ready for pickup or shipping. Let us know.
+  Fast turnaround. No BS.
+
+  TRANSACTIONAL RULES:
+  - Informational tone. Don't sell in service emails.
+  - Lead with the update. Specifics first.
+  - One CTA max. Don't distract from the info they need.
+  - AF and No BS are still in play but dial to level 1-2.
+
+------------------------------------------------------------------------
+  7.8  BUY-IN FLOW
+------------------------------------------------------------------------
+
+  GOT SLABS TO MOVE?
+  Send photos. We'll check comps. Quote in 2 hours.
+  Fair prices. Fast payment. No BS.
+
+  SELLING YOUR COLLECTION?
+  Raw bulk. Graded singles. Sealed product.
+  We buy it all. Honest comps. Quick turnaround.
+  No lowballing.
+
+
+========================================================================
+  08. UI STATES
+========================================================================
+
+  Every UI state is a brand moment. Treat empty states,
+  errors, and loading screens with the same voice discipline
+  as hero copy.
+
+  ┌───────────────────┬────────────────────────────────────────────────┐
+  │ STATE             │ COPY                                           │
+  ├───────────────────┼────────────────────────────────────────────────┤
+  │ Homepage hero     │ POKÉSNIPE                                       │
+  │                   │ Graded slabs. Raw heat. Vintage to modern.     │
+  │                   │ Collector run. Condition obsessed. Zero BS.     │
+  ├───────────────────┼────────────────────────────────────────────────┤
+  │ Footer tagline    │ Built by collectors who actually check         │
+  │                   │ condition. No BS. Just heat.                    │
+  ├───────────────────┼────────────────────────────────────────────────┤
+  │ 404               │ THAT CARD'S NOT IN THE VAULT.                  │
+  │                   │ Browse slabs →                                  │
+  ├───────────────────┼────────────────────────────────────────────────┤
+  │ Loading           │ Loading the vault...                            │
+  ├───────────────────┼────────────────────────────────────────────────┤
+  │ Empty cart        │ NO CARDS LOCKED IN YET.                        │
+  │                   │ Start hunting →                                 │
+  ├───────────────────┼────────────────────────────────────────────────┤
+  │ Out of stock      │ THAT SLAB MOVED.                               │
+  │                   │ Similar cards →                                 │
+  ├───────────────────┼────────────────────────────────────────────────┤
+  │ Search — no       │ NO HITS FOR THAT SEARCH.                       │
+  │ results           │ Try: "charizard psa 10" or "alt art"           │
+  ├───────────────────┼────────────────────────────────────────────────┤
+  │ Add to cart       │ LOCKED IN.                                     │
+  │                   │ Card added to your vault.                       │
+  ├───────────────────┼────────────────────────────────────────────────┤
+  │ Order confirmed   │ ORDER CONFIRMED.                               │
+  │                   │ Your grails are moving. Tracked AF.             │
+  │                   │ Updates via email. No spam. No BS.              │
+  ├───────────────────┼────────────────────────────────────────────────┤
+  │ Checkout error    │ Something went wrong. Our bad.                  │
+  │                   │ Try again or hit us up. We'll fix it.           │
+  ├───────────────────┼────────────────────────────────────────────────┤
+  │ Offline / down    │ THE VAULT'S LOCKED RIGHT NOW.                  │
+  │                   │ Back shortly. Check @apextcg for updates.       │
+  ├───────────────────┼────────────────────────────────────────────────┤
+  │ Session timeout   │ YOU WENT AFK.                                  │
+  │                   │ Your vault's still here. Pick up where          │
+  │                   │ you left off.                                   │
+  └───────────────────┴────────────────────────────────────────────────┘
+
+
+========================================================================
+  09. BRAND VERBS IN ACTION
+========================================================================
+
+  Use these constructions to build rhythm and momentum:
+
+  Rip the packs. Chase the hits. Grade the gems.
+  Stack the slabs. Keep the grails. Move the extras.
+  Check the comps. Know the pops. Hunt the scarce.
+  Vault the keepers. List the heat. Collect with purpose.
+  No BS pricing. No BS condition. No BS service.
+
+  CADENCE RULES:
+  - Three-beat phrases work best. They create forward momentum.
+  - Parallel structure. Same verb form across a sequence.
+  - End sequences with a brand pillar line for closure.
+
+
+========================================================================
+  10. BRAND PILLARS
+========================================================================
+
+  Five pillars. Non-negotiable. Everything we write ladders
+  up to at least one of these.
+
+  ┌─────────────────────────────────────────────────────────────────┐
+  │                                                                 │
+  │  01  NO BS CONDITION NOTES                                      │
+  │      We photograph everything. Note every flaw.                 │
+  │      Full transparency. Always.                                 │
+  │                                                                 │
+  │  02  NO BS PRICING                                              │
+  │      Recent sales. Market rates. Comp-driven numbers.           │
+  │      We don't set prices. The market does.                      │
+  │                                                                 │
+  │  03  COLLECTOR RUN                                              │
+  │      We collect what we sell. We know these cards.              │
+  │      Every card handled like it's going in our own PC.          │
+  │                                                                 │
+  │  04  RAW AND GRADED                                             │
+  │      Slab candidates. Gem mints. Raw heat. Full spectrum.       │
+  │      We don't gatekeep format.                                  │
+  │                                                                 │
+  │  05  WOTC RESPECT. MODERN CHASE.                                │
+  │      Vintage foundation. Modern grails. Both matter.            │
+  │      We don't play era favoritism.                              │
+  │                                                                 │
+  └─────────────────────────────────────────────────────────────────┘
+
+
+========================================================================
+  11. POKEMON-SPECIFIC LANGUAGE
+========================================================================
+
+------------------------------------------------------------------------
+  11.1  SET ABBREVIATIONS (use freely in copy)
+------------------------------------------------------------------------
+
+  WOTC ERA               MID ERA                 MODERN ERA
+  BS ... Base Set         EX .... Ruby/Sapphire   SM ... Sun & Moon
+  JUN .. Jungle                  through           SWSH . Sword & Shield
+  FOS .. Fossil                  Power Keepers     SV ... Scarlet & Violet
+  BS2 .. Base Set 2       DP .... Diamond & Pearl
+  TR ... Team Rocket      BW .... Black & White
+  GYM .. Gym Heroes/      XY .... XY era
+         Challenge
+  NEO .. Neo Genesis
+         through Destiny
+  LC ... Legendary
+         Collection
+
+------------------------------------------------------------------------
+  11.2  COMMON SLANG (use naturally — don't force it)
+------------------------------------------------------------------------
+
+  Zard ......... Charizard         Ray / Rayray .. Rayquaza
+  Blast ........ Blastoise         Umb ........... Umbreon
+  Venu ......... Venusaur          Esp ........... Espeon
+  Pika ......... Pikachu           TTar .......... Tyranitar
+  Mew2 ......... Mewtwo            Moonbreon ..... Umbreon VMAX
+  Gary / Gar ... Gengar or                         Alt Art
+                 Gardevoir                         (Evolving Skies)
+                 (context-
+                 dependent)
+
+  SLANG RULE: If the abbreviation is ambiguous in context,
+  use the full name. Clarity beats cool.
+
+------------------------------------------------------------------------
+  11.3  GRADING COMPANIES (listed by market preference)
+------------------------------------------------------------------------
+
+  PSA > BGS > CGC > SGC
+
+------------------------------------------------------------------------
+  11.4  SLAB DESCRIPTION FORMAT
+------------------------------------------------------------------------
+
+  When describing a graded card, always include these six elements
+  in this order:
+
+  1. Pokemon name
+  2. Set name or set number
+  3. Grade (PSA 10, BGS 9.5, etc.)
+  4. Key identifiers (1st edition, shadowless, holo, reverse, etc.)
+  5. Notable features (centering, pop count, condition highlights)
+  6. Honest flaw disclosure (No BS)
+
+  Example:
+  CHARIZARD — Base Set #4 — PSA 9
+  1st Edition. Holo. Centered 55/45.
+  Minor whitening top edge. Otherwise clean AF.
+  Pop 287 in 9. Comps at $42K. No BS.
+
+------------------------------------------------------------------------
+  11.5  CONDITION HIERARCHY (most to least desirable)
+------------------------------------------------------------------------
+
+  Gem Mint ........... PSA 10 / BGS 10 / Black Label
+  Near Mint-Mint ..... PSA 9 / BGS 9.5
+  Near Mint .......... PSA 8 / BGS 9
+  Excellent-NM ....... PSA 7 / BGS 8
+  Excellent .......... PSA 6 / BGS 7
+  VG-Excellent ....... PSA 5 / BGS 6
+  Light Play ......... LP
+  Moderate Play ...... MP
+  Heavy Play ......... HP
+  Damaged ............ DMG
+
+
+========================================================================
+  12. QUALITY CONTROL CHECKLIST
+========================================================================
+
+  Run this before shipping ANY piece of copy.
+  All boxes checked or it doesn't go out.
+
+  [ ] Does this sound like a collector wrote it?
+  [ ] Are we using accurate hobby terminology?
+  [ ] Have we been specific about condition? (No vague "mint")
+  [ ] Did we avoid ALL forbidden language?
+  [ ] Does it include "No BS" or "AF" where appropriate?
+  [ ] Would this work in a TCG Discord or at a card show?
+  [ ] Is the tone matched to the right vocal mode?
+  [ ] Did we cut every word that doesn't push weight?
+  [ ] Are comp references current and verifiable?
+  [ ] Does it ladder up to at least one brand pillar?
+
+  If any answer is no → rewrite. No exceptions.
+
+
+========================================================================
+  13. VOICE CONSISTENCY ACROSS CHANNELS
+========================================================================
+
+  The voice doesn't change. The volume does.
+
+  ┌──────────────────┬───────────┬─────────────────────────────────────┐
+  │ CHANNEL          │ VOLUME    │ NOTES                               │
+  ├──────────────────┼───────────┼─────────────────────────────────────┤
+  │ Hero / launch    │ ████░     │ Peak energy. Full voice. AF + caps. │
+  ├──────────────────┼───────────┼─────────────────────────────────────┤
+  │ Product listings │ ███░░     │ Confident. Factual. Condition-led.  │
+  ├──────────────────┼───────────┼─────────────────────────────────────┤
+  │ Social media     │ ████░     │ Charged. Conversational. Shareable. │
+  ├──────────────────┼───────────┼─────────────────────────────────────┤
+  │ Email / SMS      │ ██░░░     │ Informational. Direct. Respectful.  │
+  ├──────────────────┼───────────┼─────────────────────────────────────┤
+  │ Customer service │ █░░░░     │ Helpful. Honest. Zero attitude.     │
+  │                  │           │ No AF. No profanity. Still direct.   │
+  ├──────────────────┼───────────┼─────────────────────────────────────┤
+  │ Legal / policy   │ █░░░░     │ Clear. Plain language. Still sounds  │
+  │                  │           │ like us, just turned all the way     │
+  │                  │           │ down. No BS remains as a principle,  │
+  │                  │           │ not a phrase.                        │
+  └──────────────────┴───────────┴─────────────────────────────────────┘
+
+  KEY PRINCIPLE: A collector should be able to read any piece
+  of our copy — from a hero banner to a shipping confirmation —
+  and know it's POKÉSNIPE without seeing the logo.
+
+
+========================================================================
+  14. WRITING PROCESS
+========================================================================
+
+  1. IDENTIFY THE MODE    What vocal mode does this moment need?
+  2. DRAFT FAST           Get the fragments down. Don't edit yet.
+  3. CUT                  Remove every word that doesn't earn its spot.
+  4. CHECK THE PILLARS    Does this ladder to at least one?
+  5. READ IT OUT LOUD     Does it sound like card shop talk?
+  6. RUN THE CHECKLIST    Section 12. All boxes. No shortcuts.
+  7. SHIP IT              If it passes, it ships. Don't overthink.
+
+
+========================================================================
+  15. FINAL MANDATE
+========================================================================
+
+  No BS. Collector talk only.
+
+  If it sounds like a stock pitch → cut it.
+  If the slang feels forced → use plain terms.
+  If condition isn't crystal clear → add details.
+  If you're hiding something → you don't work here.
+
+  We speak collector. We think curator.
+  We write like we're listing cards from our own binder.
+
+  No BS. AF emphasis. Peak confidence.
+
+  That's the voice. Ship it.
+
+
+╔══════════════════════════════════════════════════════════════════════╗
+║                                                                      ║
+║   END TRANSMISSION                                                   ║
+║   POKÉSNIPE — BRAND VOICE GUIDE v3.0                                 ║
+║                                                                      ║
+╚══════════════════════════════════════════════════════════════════════╝

@@ -1,0 +1,98 @@
+====================================================================
+                         SCRYDEX API CREDITS
+====================================================================
+
+OVERVIEW
+--------------------------------------------------------------------
+API credits are required to make requests to the Scrydex API.
+Each API request consumes a specific number of credits depending
+on the endpoint used.
+
+Most requests cost 1 credit unless otherwise specified.
+
+--------------------------------------------------------------------
+STANDARD CREDIT COST RULES
+--------------------------------------------------------------------
+• Most API requests → 1 credit per request
+• Price History requests → 3 credits per request
+• Image Analysis requests → TBD (Coming Soon)
+
+--------------------------------------------------------------------
+CREDIT COST TABLE
+--------------------------------------------------------------------
+Request Type                              Credits Consumed
+--------------------------------------------------------------------
+General Requests
+(/cards, /expansions, etc)                1
+
+Price History
+(/cards/ID/price_history)                 3
+
+Image Analysis (Coming Soon)              TBD
+
+====================================================================
+                  WHAT HAPPENS WHEN YOU RUN OUT OF CREDITS?
+====================================================================
+
+When you use all credits included in your plan, your account will
+automatically switch to OVERAGE CREDIT USAGE.
+
+--------------------------------------------------------------------
+UNINTERRUPTED ACCESS
+--------------------------------------------------------------------
+• API access will NOT stop
+• Additional requests will consume overage credits
+
+--------------------------------------------------------------------
+OVERAGE CREDIT COST
+--------------------------------------------------------------------
+• Cost per overage credit depends on your subscription plan
+
+--------------------------------------------------------------------
+OVERAGE BILLING
+--------------------------------------------------------------------
+Overage credits are billed at the start of the NEXT billing cycle.
+
+At the beginning of each new billing period you will pay:
+• Your monthly subscription fee
+• Any overage credits used during the previous billing period
+
+====================================================================
+EXAMPLE USAGE SCENARIO
+====================================================================
+
+Plan Includes:
+• 5,000 credits per month
+
+After Using All 5,000 Credits:
+
+Additional Usage:
+• 50 General Requests
+  → 50 × 1 credit = 50 overage credits
+
+• 10 Price History Requests
+  → 10 × 3 credits = 30 overage credits
+
+Total Overage Usage:
+• 50 + 30 = 80 overage credits
+
+--------------------------------------------------------------------
+NEXT BILLING CYCLE CHARGES
+--------------------------------------------------------------------
+You will be charged for:
+• Monthly plan fee
+• 80 overage credits at your plan’s overage rate
+
+====================================================================
+                    CHECKING YOUR CREDIT USAGE
+====================================================================
+
+Always monitor your usage to avoid unexpected charges.
+
+Example Command:
+
+curl -X GET "https://api.scrydex.com/account/v1/usage" \
+  -H "X-API-Key: YOUR_API_KEY" \
+  -H "X-Team-ID: YOUR_TEAM_ID"
+
+====================================================================

@@ -1,0 +1,179 @@
+====================================================================
+                      SCRYDEX API BEST PRACTICES
+====================================================================
+
+This document outlines recommended best practices for working with
+images and caching when integrating with the Scrydex API. Following
+these guidelines will improve performance, reduce API credit usage,
+and increase application reliability.
+
+====================================================================
+                              IMAGES
+====================================================================
+
+You are free to use Scrydex-provided card images in your application.
+For best performance and reliability, follow the practices below.
+
+--------------------------------------------------------------------
+1. CACHE IMAGES LOCALLY
+--------------------------------------------------------------------
+WHY
+• Reduces dependency on external servers
+• Reduces repeated network requests
+
+BENEFITS
+• Faster application load times
+• Better reliability during API downtime or network issues
+
+HOW
+• Store image URLs in your database
+• Cache downloaded images on your server or storage layer
+
+--------------------------------------------------------------------
+2. HOST IMAGES ON YOUR OWN SERVERS / CDN
+--------------------------------------------------------------------
+Hosting images yourself gives maximum control and reliability,
+especially for high-traffic applications.
+
+BENEFITS
+• Reduces load on Scrydex infrastructure
+• Prevents repeated API or image fetch requests
+• Improves global performance via CDN distribution
+
+NOTE
+• Viewing or loading images does NOT consume API credits
+• Repeated API calls just to re-fetch image URLs wastes credits
+
+--------------------------------------------------------------------
+3. USE SCRYDEX IMAGE URLS DIRECTLY (IF NEEDED)
+--------------------------------------------------------------------
+If you cannot cache or self-host images:
+
+RECOMMENDATIONS
+• Implement fallback logic (placeholder images, retry logic)
+• Always use URLs exactly as returned by the API
+• Never assume or construct image URLs manually
+
+--------------------------------------------------------------------
+KEY BENEFITS OF IMAGE BEST PRACTICES
+--------------------------------------------------------------------
+Improved Performance
+• Faster image load times
+
+Reduced API Costs
+• Preserves credits for important API calls
+
+Better User Experience
+• More reliable image availability
+
+--------------------------------------------------------------------
+COPYRIGHT NOTICE
+--------------------------------------------------------------------
+• Scrydex does NOT own the images
+• Images belong to their respective copyright holders
+• You are responsible for copyright compliance and permissions
+• Attribution is recommended when possible
+
+--------------------------------------------------------------------
+IMAGE DOWNLOAD EXAMPLE
+--------------------------------------------------------------------
+curl -o xy1-1.webp https://images.scrydex.com/cards/xy1-1/large
+
+====================================================================
+                              CACHING
+====================================================================
+
+Caching is critical for building fast, scalable, and reliable
+applications using the Scrydex API.
+
+====================================================================
+1. CACHE API RESPONSES
+====================================================================
+
+WHY
+• Avoid repeated API calls
+• Reduce credit usage
+• Improve response speed
+
+BENEFITS
+• Faster user response times
+• Lower API credit consumption
+• Better resilience during outages
+
+HOW
+• Use caching layers such as:
+  - Valkey
+  - Redis
+  - Memcached
+
+CACHE DURATION GUIDELINES
+• Pricing Data → Cache at least 24 hours
+• Card Metadata → Cache long-term (hours to days)
+• Expansion Data → Cache long-term
+
+NOTE
+• Webhooks for data change notifications are planned
+
+====================================================================
+2. PERIODICALLY REFRESH CACHED DATA
+====================================================================
+
+BEST PRACTICES
+• Use background jobs to refresh cache automatically
+• Align refresh intervals with data update frequency
+• Monitor endpoints with predictable update schedules
+
+====================================================================
+3. USE LOCAL DATABASE STORAGE (HIGH-TRAFFIC APPS)
+====================================================================
+
+RECOMMENDED FOR
+• High-traffic production applications
+• Heavy analytics or charting workloads
+
+USE CASES
+• Historical price charts
+• Card and expansion listings
+• Sales and listing data
+
+COMMON DATABASE OPTIONS
+• PostgreSQL
+• MySQL
+• MongoDB
+
+====================================================================
+KEY BENEFITS OF EFFECTIVE CACHING
+====================================================================
+
+Reduced API Costs
+• Avoid repeated queries for identical data
+
+Faster Response Times
+• Cached responses often return in milliseconds
+
+Improved Reliability
+• Continue serving users during outages or network issues
+
+====================================================================
+IMPORTANT CACHING NOTES
+====================================================================
+
+EXPIRATION STRATEGY
+• Static Data → Cache longer (hours or days)
+• Dynamic Data → Refresh more frequently
+
+DATA ACCURACY
+• Cached data may lag behind live data
+• Choose expiration times based on app requirements
+
+API CREDIT SAVINGS
+• Caching dramatically reduces credit consumption,
+  especially in high-traffic applications
+
+====================================================================
+IMAGE DOWNLOAD EXAMPLE (REFERENCE)
+====================================================================
+
+curl -o xy1-1.webp https://images.scrydex.com/cards/xy1-1/large
+
+====================================================================
