@@ -559,6 +559,8 @@ export default function App() {
     if (res.status === 204) return null;
     if (!res.ok) {
       const body = isJson ? await res.json().catch(() => ({})) : {};
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
       const err = new Error(body?.error || res.statusText);
       err.status = res.status;
       throw err;
@@ -610,6 +612,7 @@ export default function App() {
       .catch(err => {
         if (!active) return;
         if (err.status === 401 || err.code === "non_json") {
+        if (err.status === 401) {
           setAuthStatus("unauthed");
           return;
         }
