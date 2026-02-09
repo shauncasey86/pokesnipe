@@ -1,8 +1,10 @@
 import pg from "pg";
 import { config } from "../config.js";
 
-// Parse URL explicitly so Railway's PGHOST/PGPORT env vars don't override it
+// Parse URL explicitly — Railway sets PGHOST/PGPORT env vars that
+// override pg's connectionString, so we must pass individual params.
 const dbUrl = new URL(config.DATABASE_URL);
+console.log(`pool: connecting to ${dbUrl.hostname}:${dbUrl.port || 5432}/${dbUrl.pathname.slice(1)}`);
 export const pool = new pg.Pool({
   host: dbUrl.hostname,
   port: parseInt(dbUrl.port, 10) || 5432,

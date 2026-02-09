@@ -10,7 +10,7 @@
     "dev": "concurrently \"npm:dev:server\" \"npm:dev:client\"",
     "dev:server": "tsx watch src/server/index.ts",
     "dev:client": "vite",
-    "build": "npm run build:client && npm run build:server",
+    "build": "rm -rf dist && npm run build:client && npm run build:server",
     "build:client": "vite build",
     "build:server": "tsc -p tsconfig.server.json",
     "start": "node migrate.mjs && node dist/server/index.js",
