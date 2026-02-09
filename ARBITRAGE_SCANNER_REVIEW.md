@@ -21,7 +21,7 @@
   - [2.10 Public Card Catalog](#210-public-card-catalog)
   - [2.11 Observability & Operational Excellence](#211-observability--operational-excellence) **NEW** *(structured logging, metrics, alerting)*
   - [2.12 Error Handling Philosophy](#212-error-handling-philosophy) **NEW** *(typed error hierarchy, category-based response)*
-  - [2.13 Security](#213-security) **NEW** *(auth, input validation, SQL injection prevention)*
+  - [2.13 Security](#213-security) **NEW** *(GitHub OAuth, in-app API key setup, UK Buyer Protection fees, input validation)*
   - [2.14 Configuration Management](#214-configuration-management) **NEW** *(typed AppConfig, env-var overrides)*
   - [2.15 Implementation Roadmap](#215-implementation-roadmap) *(revised with infrastructure tasks)*
   - [2.16 Backend API Contract](#216-backend-api-contract)
@@ -392,7 +392,7 @@ The codebase is organized into strict layers with enforced dependency direction.
 ```
 ┌──────────────────────────────────────────────────┐
 │  HTTP Layer (api/)                                │
-│  Routes, SSE, request validation, auth middleware │
+│  Routes, SSE, request validation, GitHub OAuth    │
 ├──────────────────────────────────────────────────┤
 │  Application Layer (services/)                    │
 │  Orchestration: scan loop, sync scheduler,        │
@@ -586,15 +586,18 @@ All API credentials are stored as **Railway environment variables** — never co
 | Variable | Purpose |
 |---|---|
 | `DATABASE_URL` | Railway-managed PostgreSQL connection string (auto-injected by Railway) |
-| `SCRYDEX_API_KEY` | Scrydex API key |
-| `SCRYDEX_TEAM_ID` | Scrydex team identifier |
-| `EBAY_CLIENT_ID` | eBay OAuth client ID |
-| `EBAY_CLIENT_SECRET` | eBay OAuth client secret |
-| `EBAY_REFRESH_TOKEN` | eBay long-lived refresh token |
+| `GITHUB_CLIENT_ID` | GitHub OAuth app client ID (§2.13) |
+| `GITHUB_CLIENT_SECRET` | GitHub OAuth app client secret (§2.13) |
+| `SESSION_SECRET` | Secret for signing session JWTs + encrypting stored API keys (min 32 chars) |
+| `ALLOWED_GITHUB_IDS` | Comma-separated GitHub user IDs authorized to access private endpoints |
+| `SCRYDEX_API_KEY` | Scrydex API key (fallback — can be set in-app via §2.13) |
+| `SCRYDEX_TEAM_ID` | Scrydex team identifier (fallback — can be set in-app via §2.13) |
+| `EBAY_CLIENT_ID` | eBay OAuth client ID (fallback — can be set in-app via §2.13) |
+| `EBAY_CLIENT_SECRET` | eBay OAuth client secret (fallback — can be set in-app via §2.13) |
+| `EBAY_REFRESH_TOKEN` | eBay long-lived refresh token (fallback — can be set in-app via §2.13) |
 | `TELEGRAM_BOT_TOKEN` | Telegram bot token (optional) |
 | `TELEGRAM_CHAT_ID` | Telegram chat ID (optional) |
 | `EXCHANGE_RATE_API_KEY` | Currency conversion API key |
-| `DASHBOARD_SECRET` | Bearer token for private API endpoints |
 | `NODE_ENV` | `production` on Railway, `development` locally |
 | `PORT` | HTTP port (Railway injects this automatically) |
 
@@ -606,12 +609,18 @@ All API credentials are stored as **Railway environment variables** — never co
 // src/infra/config.ts — Validated at process start, before any service initializes
 const envSchema = z.object({
   DATABASE_URL: z.string().url(),
-  SCRYDEX_API_KEY: z.string().min(1),
-  SCRYDEX_TEAM_ID: z.string().min(1),
-  EBAY_CLIENT_ID: z.string().min(1),
-  EBAY_CLIENT_SECRET: z.string().min(1),
-  EBAY_REFRESH_TOKEN: z.string().min(1),
-  DASHBOARD_SECRET: z.string().min(32, 'Dashboard secret must be at least 32 characters'),
+  // GitHub OAuth (required for authentication)
+  GITHUB_CLIENT_ID: z.string().min(1),
+  GITHUB_CLIENT_SECRET: z.string().min(1),
+  SESSION_SECRET: z.string().min(32, 'Session secret must be at least 32 characters'),
+  ALLOWED_GITHUB_IDS: z.string().min(1).transform(s => s.split(',').map(Number)),
+  // API keys — optional at boot (can be configured in-app after login)
+  // If not set here, user must configure via Settings > API Keys in the dashboard
+  SCRYDEX_API_KEY: z.string().optional(),
+  SCRYDEX_TEAM_ID: z.string().optional(),
+  EBAY_CLIENT_ID: z.string().optional(),
+  EBAY_CLIENT_SECRET: z.string().optional(),
+  EBAY_REFRESH_TOKEN: z.string().optional(),
   // Optional services — scanner works without them
   TELEGRAM_BOT_TOKEN: z.string().optional(),
   TELEGRAM_CHAT_ID: z.string().optional(),
@@ -623,6 +632,8 @@ const envSchema = z.object({
 // Parse once, export typed config. If invalid, process.exit(1) with details.
 export const config = envSchema.parse(process.env);
 ```
+
+**Note on API key optionality:** Scrydex and eBay API keys are now optional at boot because they can be configured in-app after login (§2.13). The app boots into a "setup mode" if no keys are found — the dashboard shows the API key configuration page. GitHub OAuth credentials and `SESSION_SECRET` remain required at boot since they're needed for authentication itself.
 
 **Principle:** Fail fast and loud on misconfiguration. A missing API key should crash at boot with `"SCRYDEX_API_KEY is required"`, not 3 hours later with `"Cannot read property 'headers' of undefined"`.
 
@@ -854,6 +865,17 @@ CREATE INDEX idx_exchange_rates_latest ON exchange_rates (from_currency, to_curr
 CREATE TABLE preferences (
   id              INTEGER PRIMARY KEY DEFAULT 1 CHECK (id = 1),  -- Singleton row
   data            JSONB NOT NULL DEFAULT '{}',
+  updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- API credentials: encrypted storage for Scrydex/eBay keys (set via in-app UI, §2.13)
+CREATE TABLE api_credentials (
+  id              SERIAL PRIMARY KEY,
+  service         TEXT NOT NULL UNIQUE,              -- 'scrydex' | 'ebay'
+  credentials     BYTEA NOT NULL,                    -- AES-256-GCM encrypted JSON
+  iv              BYTEA NOT NULL,                    -- Initialization vector
+  last_tested     TIMESTAMPTZ,
+  is_valid        BOOLEAN,
   updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
@@ -1738,12 +1760,14 @@ Once a match passes validation, compute profitability using local price data:
 ```typescript
 interface ArbitrageResult {
   ebayPriceGBP: number;           // Listing price + shipping
+  buyerProtectionFeeGBP: number;  // eBay UK Buyer Protection fee (see below)
+  totalCostGBP: number;           // ebayPriceGBP + buyerProtectionFeeGBP
   condition: ScrydexCondition;    // NM | LP | MP | HP (from condition mapper)
   conditionSource: string;        // How condition was determined
   scrydexPriceUSD: number;        // From local variant prices FOR THIS CONDITION
   scrydexPriceGBP: number;        // Converted at current exchange rate
-  profitGBP: number;              // scrydexPriceGBP - ebayPriceGBP - fees
-  profitPercent: number;
+  profitGBP: number;              // scrydexPriceGBP - totalCostGBP
+  profitPercent: number;          // (profitGBP / totalCostGBP) * 100
   baseTier: 'S' | 'A' | 'B' | 'C';   // Tier from profit thresholds alone
   tier: 'S' | 'A' | 'B' | 'C';       // Final tier after liquidity adjustment (§2.7)
   exchangeRate: number;
@@ -1755,6 +1779,90 @@ interface ArbitrageResult {
   liquidity: LiquidityAssessment; // See §2.7 — independent axis from confidence
 }
 ```
+
+#### eBay UK Buyer Protection Fee
+
+When purchasing from UK-based private sellers, eBay charges a **Buyer Protection fee** to the buyer. This fee must be included in the total acquisition cost — ignoring it overstates profit and creates false positives on marginal deals.
+
+**Fee structure (UK private sellers):**
+
+| Item Price Portion | Fee Rate |
+|---|---|
+| Flat fee per item | £0.10 |
+| First £20 of item price | 7% |
+| £20.01 – £300 | 4% |
+| £300.01 – £4,000 | 2% |
+| Above £4,000 | 0% (capped) |
+
+**Rules:**
+- The flat £0.10 fee is charged **once per listing**, even when purchasing multiple quantities within the same listing.
+- The percentage tiers are **marginal** — each tier applies only to the portion of the price within that band (like income tax brackets).
+- The fee is **capped** — any portion of the item price above £4,000 incurs no additional fee.
+
+```typescript
+// src/domain/arbitrage/buyer-protection-fee.ts
+// Pure function — no I/O, fully unit-testable
+
+interface BuyerProtectionFee {
+  flatFee: number;       // Always £0.10
+  percentageFee: number; // Tiered calculation
+  totalFee: number;      // flatFee + percentageFee
+}
+
+/**
+ * Calculate eBay UK Buyer Protection fee for a private seller listing.
+ *
+ * Fee bands are marginal (like tax brackets):
+ *   £0.10 flat + 7% on first £20 + 4% on £20-£300 + 2% on £300-£4,000
+ *   Capped at £4,000 — no fee on any portion above that.
+ *
+ * @param itemPriceGBP - The item price in GBP (excluding shipping)
+ * @param quantity - Number of items (flat fee charged once regardless)
+ */
+function calculateBuyerProtectionFee(itemPriceGBP: number, quantity: number = 1): BuyerProtectionFee {
+  const pricePerItem = itemPriceGBP / quantity;
+
+  const FLAT_FEE = 0.10;
+  const BANDS = [
+    { upTo: 20,    rate: 0.07 },  // 7% on first £20
+    { upTo: 300,   rate: 0.04 },  // 4% on £20.01–£300
+    { upTo: 4000,  rate: 0.02 },  // 2% on £300.01–£4,000
+    // Above £4,000: 0% (capped)
+  ];
+
+  let remaining = pricePerItem;
+  let prevLimit = 0;
+  let percentageFee = 0;
+
+  for (const band of BANDS) {
+    if (remaining <= 0) break;
+    const taxableInBand = Math.min(remaining, band.upTo - prevLimit);
+    percentageFee += taxableInBand * band.rate;
+    remaining -= taxableInBand;
+    prevLimit = band.upTo;
+  }
+
+  // Flat fee is per-listing (charged once regardless of quantity)
+  const flatFee = FLAT_FEE;
+  // Percentage fee is per-item, multiplied by quantity
+  const totalPercentageFee = percentageFee * quantity;
+
+  return {
+    flatFee,
+    percentageFee: totalPercentageFee,
+    totalFee: flatFee + totalPercentageFee,
+  };
+}
+
+// Examples:
+// £10 item:  £0.10 + (£10 × 7%) = £0.10 + £0.70 = £0.80
+// £50 item:  £0.10 + (£20 × 7%) + (£30 × 4%) = £0.10 + £1.40 + £1.20 = £2.70
+// £500 item: £0.10 + (£20 × 7%) + (£280 × 4%) + (£200 × 2%) = £0.10 + £1.40 + £11.20 + £4.00 = £16.70
+// £5000 item: £0.10 + (£20 × 7%) + (£280 × 4%) + (£3700 × 2%) = £0.10 + £1.40 + £11.20 + £74.00 = £86.70
+//             (the £1,000 above £4,000 incurs no additional fee)
+```
+
+**Why this matters for profit accuracy:** On a typical £20 card, the buyer protection fee is £1.50 (7.5% effective rate). On a £50 card it's £2.70 (5.4%). Ignoring this fee on a deal showing 15% profit could mean actual profit is closer to 10% — potentially dropping the deal from B-tier to C-tier or below the minimum threshold entirely. The fee is always deducted before profit calculation.
 
 **Condition-specific pricing is critical.** The local card index stores separate prices for NM, LP, MP, and HP conditions. The arbitrage calculator must use the price matching the listing's mapped condition — not a generic "market" price. A NM Charizard at $200 vs LP at $120 is a completely different deal evaluation. The price trend data (synced free with `?include=prices`) is also surfaced to help gauge whether a card's value is rising or falling.
 
@@ -2449,27 +2557,150 @@ class DataQualityError extends PokeSnipeError {
 
 ### 2.13 Security
 
-#### API Authentication
+#### Authentication: GitHub OAuth
 
-**Private endpoints** (deals, preferences, lookup) are protected by a bearer token:
+**Private endpoints** (deals, preferences, lookup, API key setup) are protected by **GitHub OAuth** — not a shared secret. The user logs in via GitHub, and the server issues a session token tied to their GitHub identity.
+
+**Why GitHub OAuth over a shared secret:**
+- The codebase is already hosted on GitHub — no new account needed
+- OAuth provides proper identity (who is logged in), not just "someone who knows the secret"
+- Session management (expiry, revocation) comes free with token-based auth
+- No risk of a shared secret leaking in browser localStorage
+- Multi-user support becomes trivial later — just allowlist additional GitHub user IDs
+
+**OAuth flow:**
+
+```
+Browser                     Server                      GitHub
+   │                           │                           │
+   │  GET /auth/github         │                           │
+   │──────────────────────────▶│                           │
+   │  302 → github.com/login/  │                           │
+   │◀──────────────────────────│                           │
+   │                           │                           │
+   │  (user approves)          │                           │
+   │──────────────────────────────────────────────────────▶│
+   │                           │                           │
+   │  GET /auth/github/callback?code=xxx                   │
+   │──────────────────────────▶│                           │
+   │                           │  POST /login/oauth/access_token
+   │                           │──────────────────────────▶│
+   │                           │  { access_token }         │
+   │                           │◀──────────────────────────│
+   │                           │                           │
+   │                           │  GET /user (verify identity)
+   │                           │──────────────────────────▶│
+   │                           │  { id, login, avatar }    │
+   │                           │◀──────────────────────────│
+   │                           │                           │
+   │  Set-Cookie: session=jwt  │                           │
+   │◀──────────────────────────│                           │
+   │                           │                           │
+   │  GET /api/deals (Cookie)  │                           │
+   │──────────────────────────▶│  verify JWT, check        │
+   │                           │  GitHub user ID allowlist  │
+   │  200 { deals: [...] }     │                           │
+   │◀──────────────────────────│                           │
+```
 
 ```typescript
-// Middleware: verify DASHBOARD_SECRET on all private routes
+// src/api/middleware/auth.ts — GitHub OAuth session validation
+
+interface GitHubUser {
+  id: number;              // GitHub user ID (stable, numeric)
+  login: string;           // GitHub username (can change)
+  avatarUrl: string;
+}
+
+interface SessionPayload {
+  githubId: number;
+  githubLogin: string;
+  iat: number;             // Issued at (Unix timestamp)
+  exp: number;             // Expires at (Unix timestamp)
+}
+
+// Middleware: verify GitHub OAuth session on all private routes
 function requireAuth(req: Request, res: Response, next: NextFunction) {
-  const authHeader = req.headers.authorization;
-  if (!authHeader?.startsWith('Bearer ')) {
-    return res.status(401).json({ error: 'Missing authorization header' });
+  const sessionToken = req.cookies?.session;
+  if (!sessionToken) {
+    return res.status(401).json({ error: 'Not authenticated', loginUrl: '/auth/github' });
   }
-  const token = authHeader.slice(7);
-  // Constant-time comparison to prevent timing attacks
-  if (!timingSafeEqual(Buffer.from(token), Buffer.from(config.DASHBOARD_SECRET))) {
-    return res.status(403).json({ error: 'Invalid token' });
+
+  try {
+    const payload = jwt.verify(sessionToken, config.SESSION_SECRET) as SessionPayload;
+
+    // Check against allowlist of authorized GitHub user IDs
+    if (!config.ALLOWED_GITHUB_IDS.includes(payload.githubId)) {
+      return res.status(403).json({ error: 'Not authorized' });
+    }
+
+    req.user = payload;
+    next();
+  } catch (err) {
+    return res.status(401).json({ error: 'Session expired', loginUrl: '/auth/github' });
   }
-  next();
+}
+
+// OAuth callback handler
+async function handleGitHubCallback(req: Request, res: Response) {
+  const { code } = req.query;
+
+  // Exchange code for access token
+  const tokenResponse = await fetch('https://github.com/login/oauth/access_token', {
+    method: 'POST',
+    headers: { 'Accept': 'application/json', 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      client_id: config.GITHUB_CLIENT_ID,
+      client_secret: config.GITHUB_CLIENT_SECRET,
+      code,
+    }),
+  });
+  const { access_token } = await tokenResponse.json();
+
+  // Fetch GitHub user profile
+  const userResponse = await fetch('https://api.github.com/user', {
+    headers: { 'Authorization': `Bearer ${access_token}` },
+  });
+  const githubUser = await userResponse.json();
+
+  // Check allowlist
+  if (!config.ALLOWED_GITHUB_IDS.includes(githubUser.id)) {
+    return res.status(403).send('Not authorized. Your GitHub account is not on the allowlist.');
+  }
+
+  // Issue session JWT (httpOnly, secure, SameSite=Lax)
+  const sessionToken = jwt.sign(
+    { githubId: githubUser.id, githubLogin: githubUser.login },
+    config.SESSION_SECRET,
+    { expiresIn: '7d' },
+  );
+
+  res.cookie('session', sessionToken, {
+    httpOnly: true,
+    secure: config.NODE_ENV === 'production',
+    sameSite: 'lax',
+    maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+  });
+
+  res.redirect('/');
 }
 ```
 
-**Why constant-time comparison:** A naive `===` string comparison returns faster when the first differing character is early in the string. An attacker can measure response times to guess the secret one character at a time. `crypto.timingSafeEqual` takes the same time regardless of where characters differ.
+**Session details:**
+- **JWT in httpOnly cookie** — not localStorage. Prevents XSS from stealing the session token.
+- **7-day expiry** — long enough for daily use, short enough to limit exposure if compromised.
+- **GitHub user ID allowlist** — `ALLOWED_GITHUB_IDS` env var contains comma-separated GitHub user IDs. For v1 this is a single ID. Adding users later is an env var change, not a code change.
+- **No GitHub token stored** — the server only uses the GitHub access token during the OAuth callback to verify identity, then discards it. The session JWT contains only the GitHub user ID and login.
+
+**Logout:**
+
+```typescript
+// POST /auth/logout
+function handleLogout(req: Request, res: Response) {
+  res.clearCookie('session');
+  res.redirect('/');
+}
+```
 
 **Public endpoints** (catalog) require no authentication but have rate limiting:
 
@@ -2504,9 +2735,130 @@ SELECT * FROM cards WHERE similarity(name, $1) > 0.4 ORDER BY similarity(name, $
 -- $1 is bound as a parameter, never interpolated
 ```
 
+#### In-App API Key Setup
+
+The Scrydex and eBay API credentials can be configured **through the dashboard UI** after login, rather than requiring direct access to Railway environment variables. This makes initial setup and key rotation accessible without needing to open the Railway console.
+
+**Why in-app setup:**
+- First-time setup is guided — the dashboard walks the user through obtaining and entering API keys
+- Key rotation doesn't require Railway console access
+- The app can validate keys immediately (test call) and show clear success/failure feedback
+- eBay OAuth token refresh can be managed in-app rather than manually generating refresh tokens
+
+**Setup flow:**
+
+```
+┌─────────────────────────────────────────────────────────┐
+│  Settings > API Keys (requires GitHub auth)             │
+│                                                         │
+│  Scrydex API                                            │
+│  ┌─────────────────────────────────────────────────┐    │
+│  │ API Key:  [••••••••••••••••••] [Show] [Test]    │    │
+│  │ Team ID:  [••••••••••••••••••] [Show]           │    │
+│  │ Status:   ✓ Connected · 48,200 credits remaining│    │
+│  └─────────────────────────────────────────────────┘    │
+│                                                         │
+│  eBay API                                               │
+│  ┌─────────────────────────────────────────────────┐    │
+│  │ Client ID:      [••••••••••••••] [Show] [Test]  │    │
+│  │ Client Secret:  [••••••••••••••] [Show]         │    │
+│  │ Refresh Token:  [••••••••••••••] [Regenerate]   │    │
+│  │ Status:   ✓ Connected · Token expires in 47min  │    │
+│  └─────────────────────────────────────────────────┘    │
+│                                                         │
+│  [Save Changes]                                         │
+└─────────────────────────────────────────────────────────┘
+```
+
+```typescript
+// API endpoints for key management (all require GitHub OAuth)
+
+// GET /api/settings/api-keys
+// Returns connection status for each API (never returns raw keys)
+interface ApiKeyStatusResponse {
+  scrydex: {
+    configured: boolean;          // API key + team ID are set
+    valid: boolean | null;        // null if not yet tested
+    lastTestedAt: string | null;  // ISO 8601
+    creditsRemaining: number | null;
+    error: string | null;
+  };
+  ebay: {
+    configured: boolean;          // Client ID + secret + refresh token are set
+    valid: boolean | null;
+    lastTestedAt: string | null;
+    oauthTokenExpiresAt: string | null;  // ISO 8601
+    error: string | null;
+  };
+}
+
+// PUT /api/settings/api-keys/scrydex
+// Set or update Scrydex API credentials
+interface ScrydexKeyUpdateRequest {
+  apiKey: string;
+  teamId: string;
+}
+
+// PUT /api/settings/api-keys/ebay
+// Set or update eBay API credentials
+interface EbayKeyUpdateRequest {
+  clientId: string;
+  clientSecret: string;
+  refreshToken: string;
+}
+
+// POST /api/settings/api-keys/scrydex/test
+// Validate Scrydex credentials by making a lightweight API call
+interface ApiKeyTestResponse {
+  valid: boolean;
+  error: string | null;           // e.g., "Invalid API key", "Team not found"
+  details: {                      // Only present if valid
+    creditsRemaining?: number;
+    teamName?: string;
+  } | null;
+}
+
+// POST /api/settings/api-keys/ebay/test
+// Validate eBay credentials by requesting an OAuth token
+interface ApiKeyTestResponse {
+  valid: boolean;
+  error: string | null;           // e.g., "Invalid client ID", "Refresh token expired"
+  details: {
+    tokenExpiresIn?: number;      // seconds
+    marketplace?: string;
+  } | null;
+}
+```
+
+**Storage:** API keys are stored **encrypted at rest** in the PostgreSQL `api_credentials` table. The encryption key is derived from the `SESSION_SECRET` environment variable using HKDF. Keys are decrypted only when needed for API calls — never returned in plaintext via the API.
+
+```sql
+CREATE TABLE api_credentials (
+  id            SERIAL PRIMARY KEY,
+  service       TEXT NOT NULL UNIQUE,   -- 'scrydex' | 'ebay'
+  credentials   BYTEA NOT NULL,         -- AES-256-GCM encrypted JSON
+  iv            BYTEA NOT NULL,         -- Initialization vector
+  last_tested   TIMESTAMPTZ,
+  is_valid      BOOLEAN,
+  updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+```
+
+**Fallback to environment variables:** If no keys are stored in the database, the app falls back to `SCRYDEX_API_KEY`, `EBAY_CLIENT_ID`, etc. from environment variables. This means:
+- Fresh deploys work immediately if env vars are set on Railway
+- In-app key setup overrides env vars once configured
+- Env vars act as a safety net — if the database is wiped, the app still boots
+
+**Key rotation:** When keys are updated via the UI, the app:
+1. Validates the new keys with a test call
+2. Stores the encrypted keys in PostgreSQL
+3. Hot-reloads the API clients with the new credentials (no restart needed)
+4. Logs the key rotation event (without the key values)
+
 #### Sensitive Data
 
-- API keys and secrets are Railway environment variables — never in code or logs
+- API keys are encrypted at rest in PostgreSQL and decryptable only by the server process
+- API keys and secrets from environment variables are used as fallback — never in code or logs
 - eBay listing URLs are logged for debugging, but seller personal data (email, address) is never stored
 - Telegram bot tokens and chat IDs are stored in PostgreSQL preferences but are NOT exposed via the public catalog API
 - The `match_signals` JSONB on deals stores pipeline data for debugging — ensure it never contains raw API credentials
@@ -2627,7 +2979,7 @@ interface AppConfig {
   - [ ] Typed error hierarchy (transient/permanent/config/data_quality) (§2.12)
   - [ ] Process lifecycle manager with graceful shutdown (§2.1)
   - [ ] Health + readiness endpoints
-- [ ] Database schema + migrations (§2.3 PostgreSQL Schema): `expansions`, `cards`, `variants`, `deals`, `sales_velocity_cache`, `exchange_rates`, `preferences`, `sync_log`
+- [ ] Database schema + migrations (§2.3 PostgreSQL Schema): `expansions`, `cards`, `variants`, `deals`, `sales_velocity_cache`, `exchange_rates`, `preferences`, `api_credentials`, `sync_log`
 - [ ] Scrydex client with rate limiting, circuit breaker, and credit tracking
 - [ ] Expansion sync: fetch all EN expansions, store in PostgreSQL
 - [ ] **Full card sync: paginate all EN cards with `?include=prices`, upsert to PostgreSQL with idempotent transactions**
@@ -2666,6 +3018,7 @@ pokesnipe/
 │   │   │   ├── validator.ts             # Hard + soft gates
 │   │   │   └── types.ts
 │   │   ├── arbitrage/         # Arbitrage calculator
+│   │   │   ├── buyer-protection-fee.ts  # eBay UK Buyer Protection fee calc
 │   │   │   ├── price-engine.ts          # Condition-specific pricing
 │   │   │   ├── deal-classifier.ts       # Tier assignment (S/A/B/C)
 │   │   │   ├── liquidity-assessor.ts    # Composite liquidity scoring
@@ -2705,14 +3058,16 @@ pokesnipe/
 │   │  ┌─── HTTP LAYER (routes, middleware, SSE) ───────────────────────┐
 │   ├── api/
 │   │   ├── routes/
+│   │   │   ├── auth.ts                  # GitHub OAuth login/callback/logout
 │   │   │   ├── deals.ts
 │   │   │   ├── catalog.ts
 │   │   │   ├── lookup.ts
 │   │   │   ├── preferences.ts
+│   │   │   ├── settings.ts             # API key setup endpoints (§2.13)
 │   │   │   ├── status.ts
 │   │   │   └── health.ts
 │   │   ├── middleware/
-│   │   │   ├── auth.ts                  # Bearer token validation
+│   │   │   ├── auth.ts                  # GitHub OAuth session validation (§2.13)
 │   │   │   ├── rate-limit.ts            # Public endpoint rate limiting
 │   │   │   └── validation.ts            # Zod request validation
 │   │   └── sse.ts              # Server-Sent Events deal stream
@@ -2774,18 +3129,20 @@ pokesnipe/
 
 **Goal:** Price calculation, deal storage, scanning, manual lookup tool, and dashboard.
 
+- [ ] **eBay UK Buyer Protection fee calculator:** Tiered fee calculation (£0.10 flat + 7%/4%/2% bands), integrated into profit calculation (§2.6)
 - [ ] Price engine: condition-specific pricing from local variant data, currency conversion with staleness hard gate (no hardcoded fallback rates!)
 - [ ] Exchange rate service: periodic refresh, DB persistence, staleness tracking
 - [ ] Deal classifier: tier assignment with configurable thresholds (from AppConfig, not hardcoded)
 - [ ] Deal store: PostgreSQL with deduplication (`idx_deals_dedup`) and audit logging (`match_signals` JSONB)
 - [ ] eBay poller with scan scheduling, rate limit handling, circuit breaker
 - [ ] **Manual listing lookup tool:** paste eBay URL → full pipeline evaluation with confidence breakdown
-- [ ] REST API + SSE endpoints (deals stream, deals list, lookup, status, preferences)
-- [ ] Auth middleware: constant-time bearer token comparison (§2.13)
+- [ ] REST API + SSE endpoints (deals stream, deals list, lookup, status, preferences, settings)
+- [ ] **GitHub OAuth integration:** Login/callback/logout routes, JWT session management, GitHub user ID allowlist (§2.13)
+- [ ] **In-app API key setup:** Settings UI for Scrydex + eBay credentials with test/validate, encrypted storage in PostgreSQL (§2.13)
 - [ ] Input validation middleware: Zod schemas on all endpoints (§2.13)
-- [ ] Dashboard frontend (deal feed, detail panel, filters, status bar, lookup tool)
+- [ ] Dashboard frontend (deal feed, detail panel, filters, status bar, lookup tool, login page)
 - [ ] Telegram bot integration: deal alerts + operational alerts (separate channels)
-- [ ] **Railway production deploy:** Full pipeline running — eBay scan → match → deal → dashboard
+- [ ] **Railway production deploy:** Full pipeline running — GitHub login → eBay scan → match → deal → dashboard
 
 #### Phase 5: Public Card Catalog (Week 5-6)
 
@@ -2978,10 +3335,14 @@ interface DealDetailResponse {
 
   // Price breakdown
   pricing: {
-    ebayPrice: number;            // GBP
+    ebayPrice: number;            // GBP (item price)
     ebayShipping: number;         // GBP
-    ebayFees: number;             // GBP (estimated)
-    ebayCostTotal: number;        // GBP
+    buyerProtectionFee: {         // eBay UK Buyer Protection fee breakdown
+      flatFee: number;            // £0.10 per listing
+      percentageFee: number;      // Tiered: 7%/4%/2% (see §2.6)
+      totalFee: number;           // flatFee + percentageFee
+    };
+    ebayCostTotal: number;        // GBP (price + shipping + buyer protection fee)
     scrydexPriceUSD: number;      // USD (for this condition)
     exchangeRate: number;
     exchangeRateAge: number;      // minutes
@@ -3153,17 +3514,14 @@ interface UserPreferences {
   display: {
     currency: 'GBP' | 'USD' | 'both';  // default: 'GBP'
     theme: 'dark' | 'light';            // default: 'dark'
-    ebayFeePercent: number;              // default: 12.8 (eBay UK final value fee)
+    showBuyerProtectionFee: boolean;     // default: true (show fee breakdown in deal detail)
   };
 }
 ```
 
-**Storage:** Single-user for v1, stored in PostgreSQL on Railway. No full authentication layer needed initially, but **private endpoints must not be publicly accessible.** Two approaches:
+**Storage:** Single-user for v1, stored in PostgreSQL on Railway. All private endpoints are protected by GitHub OAuth (§2.13) — the user must log in via GitHub, and their GitHub user ID must be on the `ALLOWED_GITHUB_IDS` allowlist.
 
-1. **Simple shared secret:** Private API endpoints require an `Authorization: Bearer <token>` header where the token is a `DASHBOARD_SECRET` environment variable on Railway. The frontend stores this in localStorage after a one-time entry. Simple, sufficient for single-user.
-2. **Path-based split:** Public catalog routes (`/api/catalog/*`) are open. Everything else (`/api/deals/*`, `/api/preferences`, `/api/notifications/*`, `/api/lookup`) is behind the bearer token check.
-
-The public catalog endpoints remain unauthenticated — they're the public-facing product. If multi-user is added later, replace the shared secret with proper auth (e.g., GitHub OAuth).
+**Route split:** Public catalog routes (`/api/catalog/*`) are open — they're the public-facing product. Everything else (`/api/deals/*`, `/api/preferences`, `/api/settings/*`, `/api/notifications/*`, `/api/lookup`) requires a valid GitHub OAuth session. Multi-user support is straightforward — add additional GitHub user IDs to the allowlist.
 
 #### Telegram Bot Integration
 
@@ -3205,23 +3563,31 @@ Confidence: 92% (high)
 
 | Endpoint | Method | Auth | Purpose |
 |---|---|---|---|
-| `/api/deals/stream` | GET (SSE) | Bearer token | Real-time deal push |
-| `/api/deals` | GET | Bearer token | Paginated deal list |
-| `/api/deals/:id` | GET | Bearer token | Deal detail with audit |
-| `/api/deals/:id/review` | POST | Bearer token | Accuracy feedback |
-| `/api/deals/:id/liquidity` | GET | Bearer token | On-demand sales velocity (§2.7) |
-| `/api/status` | GET | Bearer token | System health |
-| `/api/preferences` | GET/PUT | Bearer token | User preferences |
-| `/api/notifications/telegram/test` | POST | Bearer token | Test Telegram config |
-| `/api/notifications/telegram/status` | GET | Bearer token | Telegram health |
-| `/api/lookup` | POST | Bearer token | Manual listing lookup (§2.9) |
+| `/auth/github` | GET | None | Initiate GitHub OAuth login |
+| `/auth/github/callback` | GET | None | GitHub OAuth callback |
+| `/auth/logout` | POST | Session | Clear session cookie |
+| `/api/deals/stream` | GET (SSE) | Session | Real-time deal push |
+| `/api/deals` | GET | Session | Paginated deal list |
+| `/api/deals/:id` | GET | Session | Deal detail with audit |
+| `/api/deals/:id/review` | POST | Session | Accuracy feedback |
+| `/api/deals/:id/liquidity` | GET | Session | On-demand sales velocity (§2.7) |
+| `/api/status` | GET | Session | System health |
+| `/api/preferences` | GET/PUT | Session | User preferences |
+| `/api/settings/api-keys` | GET | Session | API key connection status (§2.13) |
+| `/api/settings/api-keys/scrydex` | PUT | Session | Set/update Scrydex credentials (§2.13) |
+| `/api/settings/api-keys/ebay` | PUT | Session | Set/update eBay credentials (§2.13) |
+| `/api/settings/api-keys/scrydex/test` | POST | Session | Validate Scrydex credentials (§2.13) |
+| `/api/settings/api-keys/ebay/test` | POST | Session | Validate eBay credentials (§2.13) |
+| `/api/notifications/telegram/test` | POST | Session | Test Telegram config |
+| `/api/notifications/telegram/status` | GET | Session | Telegram health |
+| `/api/lookup` | POST | Session | Manual listing lookup (§2.9) |
 | `/api/catalog/expansions` | GET | None (public) | Expansion list (§2.10) |
 | `/api/catalog/expansions/:id` | GET | None (public) | Expansion detail (§2.10) |
 | `/api/catalog/cards/search` | GET | None (public) | Card search (§2.10) |
 | `/api/catalog/cards/:id` | GET | None (public) | Card detail (§2.10) |
 | `/api/catalog/trending` | GET | None (public) | Price movers (§2.10) |
 
-All private endpoints require `Authorization: Bearer <DASHBOARD_SECRET>`. The `DASHBOARD_SECRET` is a Railway environment variable. Public catalog endpoints are open — they serve the public-facing card database.
+All private endpoints require a valid GitHub OAuth session (httpOnly JWT cookie). Users must log in via `/auth/github` — their GitHub user ID is checked against the `ALLOWED_GITHUB_IDS` allowlist. Public catalog endpoints are open — they serve the public-facing card database.
 
 ---
 
@@ -3261,5 +3627,8 @@ All private endpoints require `Authorization: Bearer <DASHBOARD_SECRET>`. The `D
 | **Rate limiting** | None (relied on eBay not blocking) | Token-bucket rate limiter per API + circuit breaker (3-state) |
 | **Observability** | `console.log` | Pino structured JSON logging with correlation IDs, typed metrics, Telegram alerts |
 | **Liquidity assessment** | None | Composite score from trend activity, price completeness, eBay supply, and optional sales velocity |
-| **Security** | None | Bearer token auth with constant-time comparison, Zod input validation, parameterized SQL |
+| **Authentication** | None | GitHub OAuth with JWT session cookies, GitHub user ID allowlist |
+| **API key management** | Hardcoded or .env file only | In-app setup UI with test/validate, encrypted storage in PostgreSQL, env var fallback |
+| **eBay buyer fees** | Not accounted for | UK Buyer Protection fee (£0.10 flat + 7%/4%/2% tiered bands) deducted before profit calc |
+| **Security** | None | GitHub OAuth, Zod input validation, parameterized SQL, encrypted API key storage |
 | **Process lifecycle** | None (crash = lost state) | Ordered boot sequence, graceful shutdown, health/readiness endpoints |
