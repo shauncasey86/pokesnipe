@@ -1,6 +1,6 @@
 import axios from "axios";
-import { config } from "../config";
-import { pool } from "../db/pool";
+import { config } from "../config.js";
+import { pool } from "../db/pool.js";
 
 const API_URL = "https://v6.exchangerate-api.com/v6";
 

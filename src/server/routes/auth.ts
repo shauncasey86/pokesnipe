@@ -1,6 +1,6 @@
 import { Router } from "express";
-import { config } from "../config";
-import { createSessionToken, sessionCookieName, sessionTtlMs } from "../services/session";
+import { config } from "../config.js";
+import { createSessionToken, sessionCookieName, sessionTtlMs } from "../services/session.js";
 import { z } from "zod";
 
 const router = Router();

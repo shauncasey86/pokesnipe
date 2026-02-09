@@ -1,6 +1,6 @@
 import { Router } from "express";
-import { requireAuth } from "../services/auth";
-import { getStatus } from "../services/statusService";
+import { requireAuth } from "../services/auth.js";
+import { getStatus } from "../services/statusService.js";
 
 const router = Router();
 

@@ -1,5 +1,5 @@
 import crypto from "crypto";
-import { config } from "../config";
+import { config } from "../config.js";
 
 const COOKIE_NAME = "session";
 const SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 7;

@@ -1,6 +1,6 @@
 import { Router } from "express";
-import { requireAuth } from "../services/auth";
-import { sendTelegramMessage } from "../services/telegram";
+import { requireAuth } from "../services/auth.js";
+import { sendTelegramMessage } from "../services/telegram.js";
 
 const router = Router();
 

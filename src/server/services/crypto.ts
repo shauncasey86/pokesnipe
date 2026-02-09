@@ -1,5 +1,5 @@
 import crypto from "crypto";
-import { config } from "../config";
+import { config } from "../config.js";
 
 const key = crypto.createHash("sha256").update(config.SESSION_SECRET).digest();
 

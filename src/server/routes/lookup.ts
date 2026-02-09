@@ -1,11 +1,11 @@
 import { Router } from "express";
 import { z } from "zod";
-import { requireAuth } from "../services/auth";
-import { getItem } from "../services/ebayClient";
-import { matchListing } from "../services/matcher";
-import { pool } from "../db/pool";
-import { getUsdToGbpRate } from "../services/exchangeRate";
-import { calculateProfit } from "../services/pricing";
+import { requireAuth } from "../services/auth.js";
+import { getItem } from "../services/ebayClient.js";
+import { matchListing } from "../services/matcher.js";
+import { pool } from "../db/pool.js";
+import { getUsdToGbpRate } from "../services/exchangeRate.js";
+import { calculateProfit } from "../services/pricing.js";
 
 const router = Router();
 

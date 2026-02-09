@@ -1,8 +1,8 @@
 import "dotenv/config";
-import pino from "pino";
-import { runFullSync } from "./services/syncService";
-import { scanEbay } from "./services/scannerService";
-import { pool } from "./db/pool";
+import { pino } from "pino";
+import { runFullSync } from "./services/syncService.js";
+import { scanEbay } from "./services/scannerService.js";
+import { pool } from "./db/pool.js";
 
 const logger = pino({ name: "worker" });
 

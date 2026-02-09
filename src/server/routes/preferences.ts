@@ -1,6 +1,6 @@
 import { Router } from "express";
-import { pool } from "../db/pool";
-import { requireAuth } from "../services/auth";
+import { pool } from "../db/pool.js";
+import { requireAuth } from "../services/auth.js";
 import { z } from "zod";
 
 const router = Router();

@@ -1,6 +1,6 @@
 import { Request, Response, NextFunction } from "express";
 import cookie from "cookie";
-import { sessionCookieName, verifySessionToken } from "./session";
+import { sessionCookieName, verifySessionToken } from "./session.js";
 
 export const getSessionToken = (req: Request) => {
   const header = req.headers.cookie;
