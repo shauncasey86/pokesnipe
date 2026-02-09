@@ -20,7 +20,7 @@ const getAccessToken = async () => {
   if (cachedToken && Date.now() < cachedToken.expiresAt - 60_000) {
     return cachedToken.accessToken;
   }
-  const credentials = Buffer.from(`${config.EBAY_CLIENT_ID}:${config.EBAY_CLIENT_SECRET}`).toString("base64");
+  const credentials = Buffer.from(`${config.EBAY_CLIENT_ID.trim()}:${config.EBAY_CLIENT_SECRET.trim()}`).toString("base64");
   const { data } = await authClient.post(
     "/oauth2/token",
     new URLSearchParams({
