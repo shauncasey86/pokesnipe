@@ -1,6 +1,6 @@
 # PokeSnipe Arbitrage Scanner (Production)
 
-Production-ready arbitrage scanner with Scrydex-first card indexing, eBay scanning, and a live dashboard. Built for Railway deployment with a single web service and a worker service.
+Production-ready arbitrage scanner with Scrydex-first card indexing, eBay scanning, and a live dashboard. Built for Railway deployment as a single service (web server + integrated worker).
 
 ## Local Developer Setup
 
@@ -27,11 +27,7 @@ Production-ready arbitrage scanner with Scrydex-first card indexing, eBay scanni
    - API: http://localhost:3000
    - UI: http://localhost:5173
 
-5. **Start the worker (separate terminal)**
-   ```bash
-   npm run build
-   npm run start:worker
-   ```
+The worker (Scrydex sync + eBay scan) is integrated into the main server and starts automatically.
 
 ## GitHub Setup
 
@@ -72,52 +68,77 @@ In the **web service** (default service), add the variables from `.env.example`:
 - `SCRYDEX_TEAM_ID`
 - `EBAY_CLIENT_ID`
 - `EBAY_CLIENT_SECRET`
-- `EBAY_REFRESH_TOKEN`
 - `EXCHANGE_RATE_API_KEY`
 - Optional: `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`
 
-Repeat the same environment variables for the **worker service** in step 5.
-
-### 4) Set Build & Start Commands (Web)
-Open your **web service** settings and set:
+### 4) Set Build & Start Commands
+Open your service settings and set:
 - **Build Command:** `npm run build`
 - **Start Command:** `npm run start`
 
-### 5) Add a Worker Service
-1. Click **+ New** → **Service** → **Deploy from GitHub repo**
-2. Select the same repo
-3. Set:
-   - **Build Command:** `npm run build`
-   - **Start Command:** `npm run start:worker`
-4. Add the same environment variables as the web service
+Migrations run automatically on startup. The worker (Scrydex sync + eBay scan) is integrated into the main server — no separate worker service needed.
 
-### 6) Run Migrations on Railway
-In Railway **web service** → **Deployments** → **Run Command**:
-```bash
-npm run migrate:up
+### 5) Confirm Deploy
+1. Open the service URL (Railway provides a domain)
+2. Log in with `ACCESS_PASSWORD`
+3. Run the API test suite (see below)
+4. Confirm:
+   - Card index syncs (logs show "initial sync completed")
+   - Deals appear in the feed (logs show "scan completed")
+
+### 6) Redeploy After Updates
+Push to GitHub → Railway auto-deploys. Migrations run automatically on each startup.
+
+### 7) Troubleshooting
+- **App fails to boot** → Check logs for missing env vars
+- **500 errors** → Ensure `DATABASE_URL` is correct (use public Railway Postgres URL, not internal)
+- **No deals** → Confirm eBay credentials are valid using `/api/test/ebay`
+- **No sync** → Confirm Scrydex credentials are valid using `/api/test/scrydex`
+- **SSE not live** → Check browser network tab for `/api/deals/stream`
+- **ECONNREFUSED localhost:5432** → Railway's `PGHOST`/`PGPORT` env vars override connection strings; the app handles this automatically
+
+## API Test & Diagnostic Endpoints
+
+All test endpoints require authentication (must be logged in).
+
+### Test Endpoints (GET)
+
+| Endpoint | Description |
+|---|---|
+| `/api/test` | Runs all connectivity tests (DB, exchange rate, Scrydex, eBay) |
+| `/api/test/ebay` | Tests eBay OAuth + Browse API search, returns 3 sample listings |
+| `/api/test/scrydex` | Tests Scrydex API, fetches expansions + first page of cards |
+| `/api/test/exchange` | Tests exchange rate API, returns current USD→GBP rate |
+| `/api/test/db` | Shows all database tables with row counts |
+
+### Manual Triggers (POST)
+
+| Endpoint | Description |
+|---|---|
+| `/api/sync` | Triggers a full Scrydex card index sync (expansions + all cards) |
+| `/api/scan` | Triggers one eBay scan cycle (searches 4 query sets, matches and scores deals) |
+
+**From browser console (must be logged in):**
+```js
+// Run all API tests
+fetch("/api/test").then(r => r.json()).then(console.log)
+
+// Test eBay specifically
+fetch("/api/test/ebay").then(r => r.json()).then(console.log)
+
+// Trigger Scrydex sync
+fetch("/api/sync", {method: "POST"}).then(r => r.json()).then(console.log)
+
+// Trigger eBay scan
+fetch("/api/scan", {method: "POST"}).then(r => r.json()).then(console.log)
 ```
 
-### 7) Confirm Deploy
-1. Open the web service URL (Railway provides a domain)
-2. Log in with `ACCESS_PASSWORD`
-3. Confirm:
-   - Card index syncs (worker logs show sync)
-   - Deals appear in the feed (worker logs show eBay scan)
+### Automated Worker Schedule
 
-### 8) Redeploy After Updates
-1. Push to GitHub: `git push`
-2. Railway auto-deploys
-3. If DB changes were made, rerun migrations:
-   ```bash
-   npm run migrate:up
-   ```
-
-### 9) Troubleshooting
-- **App fails to boot** → Check logs for missing env vars
-- **500 errors** → Ensure migrations ran and `DATABASE_URL` is correct
-- **No deals** → Confirm worker service running and eBay credentials valid
-- **No sync** → Confirm Scrydex credentials valid and worker logs show sync progress
-- **SSE not live** → Browser must allow EventSource on same origin; check network tab
+The integrated worker runs automatically after startup:
+1. **On boot:** Full Scrydex sync (downloads all expansions + cards)
+2. **Every 5 minutes:** eBay scan (4 query sets × 25 listings each)
+3. **Every 24 hours:** Full Scrydex re-sync
 
 ## Acceptance Checklist
 
@@ -132,7 +153,7 @@ npm run migrate:up
 - PostgreSQL persistence + pg_trgm indexing. (`migrations/001_init.js`)
 - Auth via password-protected session cookie. (`src/server/routes/auth.ts`)
 - Encrypted API key storage. (`src/server/services/crypto.ts`, `src/server/routes/settings.ts`)
-- Worker service for sync + scan. (`src/server/worker.ts`)
+- Integrated worker for sync + scan. (`src/server/index.ts`, `src/server/services/syncService.ts`)
 - Health check. (`src/server/index.ts`)
 
 ### UI Fidelity to mock-up.jsx
