@@ -1,6 +1,7 @@
 import axios from "axios";
 import { config } from "../config";
 import { TokenBucket } from "./rateLimiter";
+import { trackApiCall } from "./apiUsageTracker";
 
 const client = axios.create({
   baseURL: "https://api.scrydex.com/pokemon/v1",
@@ -38,6 +39,7 @@ export type ScrydexCard = {
 
 export const fetchExpansions = async (): Promise<ScrydexExpansion[]> => {
   await limiter.take();
+  trackApiCall("scrydex").catch(() => {});
   const { data } = await client.get("/expansions", { params: { language: "en" } });
   return data.expansions.map((exp: any) => ({
     id: exp.id,
@@ -52,6 +54,7 @@ export const fetchExpansions = async (): Promise<ScrydexExpansion[]> => {
 
 export const fetchCardsPage = async (page: number) => {
   await limiter.take();
+  trackApiCall("scrydex").catch(() => {});
   const { data } = await client.get("/cards", {
     params: { page, pageSize: 100, language: "en", include: "prices" }
   });

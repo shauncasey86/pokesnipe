@@ -234,8 +234,34 @@ const Detail = ({ deal, onClose, onReview }: { deal: any; onClose: () => void; o
           <span style={{ fontWeight: 800, fontSize: 30, lineHeight: 1, color: CONF_C(Number(deal.confidence)), textShadow: `0 0 16px ${CONF_C(Number(deal.confidence))}25` }}>{(Number(deal.confidence) * 100).toFixed(0)}%</span>
           <span style={{ fontFamily: "var(--fm)", fontSize: 9, color: "var(--tMut)", letterSpacing: 1.5, lineHeight: 1.8 }}>COMPOSITE<br />CONFIDENCE</span>
         </div>
-        {Object.entries({ Name: cb.name, Number: cb.number, Denom: cb.denom, Expansion: cb.expan } as Record<string, any>).map(([k, v]) => <BarRow key={k} label={k} value={typeof v === "number" ? v : null} />)}
+        {Object.entries({ Name: cb.name, Number: cb.number, Denom: cb.denom, Expansion: cb.expan, Variant: cb.variant, Extract: cb.extract } as Record<string, any>).map(([k, v]) => <BarRow key={k} label={k} value={typeof v === "number" ? v : null} />)}
       </div>
+      {/* Liquidity Breakdown */}
+      {(() => { const lb = detail?.liquidity_breakdown ?? deal.liquidity_breakdown; return lb ? (
+        <div style={sec}>
+          <div style={secT}>LIQUIDITY</div>
+          <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 12, paddingBottom: 10, borderBottom: "1px solid var(--brd)" }}>
+            <LiqPill liq={deal.liquidity ?? "med"} />
+            <span style={{ fontFamily: "var(--fm)", fontSize: 9, color: "var(--tMut)", letterSpacing: 1.5 }}>COMPOSITE</span>
+          </div>
+          {Object.entries(lb as Record<string, any>).map(([k, v]) => <BarRow key={k} label={k} value={typeof v === "number" ? v : null} />)}
+        </div>
+      ) : null; })()}
+      {/* Comps by Condition */}
+      {(() => { const cp = detail?.comps_by_condition ?? deal.comps_by_condition; return cp ? (
+        <div style={sec}>
+          <div style={secT}>COMPS BY CONDITION</div>
+          {Object.entries(cp as Record<string, any>).map(([c, pr]) => {
+            const act = c === (deal.condition ?? "NM");
+            return (
+              <div key={c} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "6px 0", borderBottom: "1px solid var(--brd)" }}>
+                <span style={{ fontFamily: "var(--fm)", fontSize: 12, fontWeight: act ? 700 : 500, color: act ? COND_C[c] || "var(--tMax)" : "var(--tMut)" }}>{c}{act ? " ●" : ""}</span>
+                <span style={{ fontFamily: "var(--fm)", fontSize: 12, fontWeight: 600, color: "var(--tPri)" }}>{pr != null ? `$${Number(pr).toFixed(2)}` : "—"}</span>
+              </div>
+            );
+          })}
+        </div>
+      ) : null; })()}
       {/* Expansion */}
       {detail && <div style={sec}>
         <div style={secT}>EXPANSION</div>
@@ -474,20 +500,23 @@ export default function App() {
       <footer style={{ display: "flex", alignItems: "center", justifyContent: "space-between", height: 42, background: "rgba(7,10,18,0.9)", backdropFilter: "blur(12px)", borderTop: "1px solid var(--brd)", fontFamily: "var(--fm)", fontSize: 11, flexShrink: 0, position: "relative", padding: "0 20px" }}>
         <div style={{ position: "absolute", top: -1, left: 0, right: 0, height: 1, background: GRAD_LINE, opacity: 0.4 }} />
         <div style={{ display: "flex", alignItems: "center", gap: 0, flexShrink: 0 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "0 14px 0 0" }}><div style={{ width: 6, height: 6, borderRadius: "50%", background: "var(--green)", boxShadow: "0 0 8px rgba(52,211,153,0.5)" }} /><span style={{ color: "var(--tSec)", fontWeight: 600 }}>Hunting</span></div>
+          <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "0 14px 0 0" }}><div style={{ width: 6, height: 6, borderRadius: "50%", background: status?.scanner?.status === "stale" ? "var(--red)" : status?.scanner?.status === "running" ? "var(--amber)" : "var(--green)", boxShadow: `0 0 8px ${status?.scanner?.status === "stale" ? "rgba(248,113,113,0.5)" : status?.scanner?.status === "running" ? "rgba(251,191,36,0.5)" : "rgba(52,211,153,0.5)"}` }} /><span style={{ color: "var(--tSec)", fontWeight: 600 }}>{status?.scanner?.status === "running" ? "Scanning" : status?.scanner?.status === "stale" ? "Stale" : "Hunting"}</span>{status?.scanner?.lastRun && <span style={{ fontSize: 10, color: "var(--tMut)", marginLeft: 2 }}>{tsAgo(status.scanner.lastRun)}</span>}</div>
           <div style={{ width: 1, height: 16, background: "var(--brd)" }} />
           <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "0 14px" }}><span style={{ color: "var(--tMut)" }}>Today:</span><span style={{ color: "var(--tMax)", fontWeight: 700 }}>{status?.dealsToday?.total ?? deals.length}</span><span style={{ fontSize: 9, color: TIERS.grail.color, fontWeight: 600 }}>{grailCount}G</span><span style={{ fontSize: 9, color: TIERS.hit.color, fontWeight: 600 }}>{hitCount}H</span></div>
           <div style={{ width: 1, height: 16, background: "var(--brd)" }} />
           <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "0 14px" }}><span style={{ color: "var(--tMut)" }}>Acc:</span><span style={{ color: "var(--green)", fontWeight: 700 }}>{Math.round((status?.accuracy?.rolling7d ?? 0) * 100)}%</span><span style={{ color: "var(--tGho)", fontSize: 10 }}>7d</span></div>
         </div>
         <div className="foot-apis" style={{ display: "flex", alignItems: "center", flexShrink: 0 }}>
-          {[{ label: "eBay", val: status?.apis?.ebay?.used ?? 0, cap: "5K" }, { label: "Scrydex", val: status?.apis?.scrydex?.used ?? 0, cap: "50K" }, { label: "Index", val: status?.apis?.index?.count ?? 0, cap: null as any }].map((a, i) => (
+          {[{ label: "eBay", val: status?.apis?.ebay?.used ?? 0, cap: 5000, capLabel: "5K" }, { label: "Scrydex", val: status?.apis?.scrydex?.used ?? 0, cap: 50000, capLabel: "50K" }, { label: "Index", val: status?.apis?.index?.count ?? 0, cap: 0, capLabel: null as any }].map((a, i) => {
+            const ratio = a.cap > 0 ? a.val / a.cap : 0;
+            const dotColor = ratio > 0.95 ? "var(--red)" : ratio > 0.8 ? "var(--amber)" : "var(--green)";
+            return (
             <div key={i} style={{ display: "flex", alignItems: "center", gap: 5, padding: "0 12px", borderLeft: i > 0 ? "1px solid var(--brd)" : "none" }}>
-              <div style={{ width: 5, height: 5, borderRadius: "50%", background: "var(--green)", boxShadow: "0 0 6px rgba(52,211,153,0.4)" }} />
+              <div style={{ width: 5, height: 5, borderRadius: "50%", background: dotColor, boxShadow: `0 0 6px ${dotColor === "var(--red)" ? "rgba(248,113,113,0.4)" : dotColor === "var(--amber)" ? "rgba(251,191,36,0.4)" : "rgba(52,211,153,0.4)"}` }} />
               <span style={{ color: "var(--tMut)", fontSize: 10 }}>{a.label}</span><span style={{ color: "var(--tSec)", fontWeight: 600, fontSize: 10 }}>{a.val}</span>
-              {a.cap && <span style={{ color: "var(--tGho)", fontSize: 9 }}>/{a.cap}</span>}
+              {a.capLabel && <span style={{ color: "var(--tGho)", fontSize: 9 }}>/{a.capLabel}</span>}
             </div>
-          ))}
+          ); })}
         </div>
       </footer>
 

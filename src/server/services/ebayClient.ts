@@ -1,6 +1,7 @@
 import axios from "axios";
 import { config } from "../config";
 import { TokenBucket } from "./rateLimiter";
+import { trackApiCall } from "./apiUsageTracker";
 
 const authClient = axios.create({
   baseURL: "https://api.ebay.com/identity/v1",
@@ -46,6 +47,7 @@ export type EbayListing = {
 
 export const getItem = async (itemId: string): Promise<EbayListing> => {
   await limiter.take();
+  trackApiCall("ebay").catch(() => {});
   const token = await getAccessToken();
   const { data } = await apiClient.get(`/item/${itemId}`, {
     headers: { Authorization: `Bearer ${token}` }
@@ -68,6 +70,7 @@ export const getItem = async (itemId: string): Promise<EbayListing> => {
 
 export const searchItems = async (query: string, limit = 50): Promise<EbayListing[]> => {
   await limiter.take();
+  trackApiCall("ebay").catch(() => {});
   const token = await getAccessToken();
   const { data } = await apiClient.get("/item_summary/search", {
     headers: { Authorization: `Bearer ${token}` },
