@@ -31,8 +31,8 @@ app.use('/api/catalog', catalogRouter);
 const clientDist = path.join(__dirname, '../client/dist');
 app.use(express.static(clientDist));
 
-// Catch-all: serve index.html for client-side routing
-app.get('*', (_req, res) => {
+// Catch-all: serve index.html for client-side routing (Express 5 syntax)
+app.get('{*path}', (_req, res) => {
   res.sendFile(path.join(clientDist, 'index.html'));
 });
 
