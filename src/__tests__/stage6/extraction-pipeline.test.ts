@@ -16,7 +16,7 @@ describe('extractSignals (full pipeline)', () => {
     const result = extractSignals({
       itemId: '12345',
       title: 'Charizard ex 006/197 Holo Obsidian Flames NM',
-      conditionDescriptors: [{ name: '40001', values: ['400010'] }],
+      conditionDescriptors: [{ name: 'Card Condition', values: [{ content: 'Near Mint or Better' }] }],
       localizedAspects: [
         { name: 'Card Name', value: 'Charizard ex' },
         { name: 'Set', value: 'Obsidian Flames' },

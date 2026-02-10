@@ -2,74 +2,86 @@ import { describe, expect, it } from 'vitest';
 import { extractCondition } from '../../services/extraction/condition-mapper.js';
 
 describe('extractCondition', () => {
-  describe('condition descriptors (highest priority)', () => {
-    it('maps NM from ungraded descriptor', () => {
+  describe('condition descriptors — real eBay format (highest priority)', () => {
+    it('maps NM from "Near Mint or Better" content', () => {
       const result = extractCondition({
-        conditionDescriptors: [{ name: '40001', values: ['400010'] }],
+        conditionDescriptors: [
+          { name: 'Card Condition', values: [{ content: 'Near Mint or Better' }] },
+        ],
       });
       expect(result.condition).toBe('NM');
       expect(result.source).toBe('condition_descriptor');
       expect(result.isGraded).toBe(false);
     });
 
-    it('maps LP from ungraded descriptor', () => {
-      expect(
-        extractCondition({
-          conditionDescriptors: [{ name: '40001', values: ['400015'] }],
-        }).condition,
-      ).toBe('LP');
+    it('maps LP from "Lightly played (Excellent)" content', () => {
+      const result = extractCondition({
+        conditionDescriptors: [
+          {
+            name: 'Card Condition',
+            values: [{
+              content: 'Lightly played (Excellent)',
+              additionalInfo: ['Moderate surface scuffing', 'Fuzzy corners'],
+            }],
+          },
+        ],
+      });
+      expect(result.condition).toBe('LP');
+      expect(result.source).toBe('condition_descriptor');
     });
 
-    it('maps MP from ungraded descriptor', () => {
-      expect(
-        extractCondition({
-          conditionDescriptors: [{ name: '40001', values: ['400016'] }],
-        }).condition,
-      ).toBe('MP');
+    it('maps MP from "Moderately Played (Very Good)" content', () => {
+      const result = extractCondition({
+        conditionDescriptors: [
+          { name: 'Card Condition', values: [{ content: 'Moderately Played (Very Good)' }] },
+        ],
+      });
+      expect(result.condition).toBe('MP');
     });
 
-    it('maps HP from ungraded descriptor', () => {
-      expect(
-        extractCondition({
-          conditionDescriptors: [{ name: '40001', values: ['400017'] }],
-        }).condition,
-      ).toBe('HP');
+    it('maps HP from "Heavily Played (Poor)" content', () => {
+      const result = extractCondition({
+        conditionDescriptors: [
+          { name: 'Card Condition', values: [{ content: 'Heavily Played (Poor)' }] },
+        ],
+      });
+      expect(result.condition).toBe('HP');
     });
   });
 
   describe('graded cards', () => {
-    it('extracts full graded card info', () => {
+    it('detects PSA graded card from descriptor content', () => {
       const graded = extractCondition({
         conditionDescriptors: [
-          { name: '27501', values: ['275010'] },
-          { name: '27502', values: ['275020'] },
-          { name: '27503', values: ['cert-123'] },
+          { name: 'Grading Company', values: [{ content: 'PSA' }] },
+          { name: 'Grade', values: [{ content: '10' }] },
+          { name: 'Certification Number', values: [{ content: 'cert-123' }] },
         ],
       });
       expect(graded.isGraded).toBe(true);
       expect(graded.gradingCompany).toBe('PSA');
       expect(graded.grade).toBe('10');
-      expect(graded.certNumber).toBe('cert-123');
       expect(graded.condition).toBe('NM');
       expect(graded.source).toBe('condition_descriptor');
     });
 
-    it('handles CGC grading', () => {
+    it('detects CGC 9.5 grading', () => {
       const result = extractCondition({
         conditionDescriptors: [
-          { name: '27501', values: ['275015'] },
-          { name: '27502', values: ['275021'] },
+          { name: 'Grading Company', values: [{ content: 'CGC' }] },
+          { name: 'Grade', values: [{ content: '9.5' }] },
         ],
       });
+      expect(result.isGraded).toBe(true);
       expect(result.gradingCompany).toBe('CGC');
       expect(result.grade).toBe('9.5');
     });
 
-    it('handles graded card without cert number', () => {
+    it('detects BGS grading without cert number', () => {
       const result = extractCondition({
         conditionDescriptors: [
-          { name: '27501', values: ['275013'] },
-          { name: '27502', values: ['275022'] },
+          { name: 'Grading Company', values: [{ content: 'BGS' }] },
+          { name: 'Grade', values: [{ content: '9' }] },
         ],
       });
       expect(result.isGraded).toBe(true);

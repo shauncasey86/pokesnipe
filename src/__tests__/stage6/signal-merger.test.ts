@@ -22,7 +22,7 @@ describe('mergeSignals', () => {
         gradingCompany: null,
         grade: null,
         certNumber: null,
-        rawDescriptorIds: ['400010'],
+        rawDescriptors: ['400010'],
       },
       { itemId: '123', title: 'Charizard ex 006/197', cleanedTitle: 'charizard ex 006/197' },
     );
@@ -45,7 +45,7 @@ describe('mergeSignals', () => {
         gradingCompany: null,
         grade: null,
         certNumber: null,
-        rawDescriptorIds: [],
+        rawDescriptors: [],
       },
       { itemId: '456', title: 'Charizard 006/197', cleanedTitle: 'charizard 006/197' },
     );
@@ -68,7 +68,7 @@ describe('mergeSignals', () => {
         gradingCompany: null,
         grade: null,
         certNumber: null,
-        rawDescriptorIds: [],
+        rawDescriptors: [],
       },
       { itemId: '789', title: 'Some Card', cleanedTitle: 'some card' },
     );
@@ -88,7 +88,7 @@ describe('mergeSignals', () => {
         gradingCompany: null,
         grade: null,
         certNumber: null,
-        rawDescriptorIds: [],
+        rawDescriptors: [],
       },
       { itemId: '111', title: 'NM Pikachu', cleanedTitle: 'nm pikachu' },
     );

@@ -43,8 +43,10 @@ debugExtractRouter.get('/api/debug/test-extract', async (req, res) => {
           itemId: summary.itemId,
           title: summary.title,
           price: summary.price,
-          hasLocalizedAspects: !!detail?.localizedAspects?.length,
-          hasConditionDescriptors: !!detail?.conditionDescriptors?.length,
+        },
+        raw: {
+          localizedAspects: detail?.localizedAspects ?? null,
+          conditionDescriptors: detail?.conditionDescriptors ?? null,
         },
         extraction: result,
       });

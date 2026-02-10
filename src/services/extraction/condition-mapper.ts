@@ -5,79 +5,44 @@ export interface ConditionResult {
   gradingCompany: string | null;
   grade: string | null;
   certNumber: string | null;
-  rawDescriptorIds: string[];
+  rawDescriptors: unknown[];
 }
 
-const GRADER_MAP: Record<string, string> = {
-  '275010': 'PSA',
-  '275011': 'BCCG',
-  '275012': 'BVG',
-  '275013': 'BGS',
-  '275014': 'CSG',
-  '275015': 'CGC',
-  '275016': 'SGC',
-  '275017': 'KSA',
-  '275018': 'GMA',
-  '275019': 'HGA',
-  '2750110': 'ISA',
-  '2750111': 'PCA',
-  '2750112': 'GSG',
-  '2750113': 'PGS',
-  '2750114': 'MNT',
-  '2750115': 'TAG',
-  '2750116': 'Rare Edition',
-  '2750117': 'RCG',
-  '2750118': 'PCG',
-  '2750119': 'Ace Grading',
-  '2750120': 'CGA',
-  '2750121': 'TCG',
-  '2750122': 'ARK',
-  '2750123': 'Other',
-};
+// --- Grading company detection from descriptor content ---
+const GRADING_COMPANIES = [
+  'PSA', 'BCCG', 'BVG', 'BGS', 'CSG', 'CGC', 'SGC',
+  'KSA', 'GMA', 'HGA', 'ISA', 'PCA', 'GSG', 'PGS',
+  'MNT', 'TAG', 'RCG', 'PCG', 'CGA', 'TCG', 'ARK',
+  'Ace Grading', 'Rare Edition',
+];
 
-const GRADE_MAP: Record<string, string> = {
-  '275020': '10',
-  '275021': '9.5',
-  '275022': '9',
-  '275023': '8.5',
-  '275024': '8',
-  '275025': '7.5',
-  '275026': '7',
-  '275027': '6.5',
-  '275028': '6',
-  '275029': '5.5',
-  '2750210': '5',
-  '2750211': '4.5',
-  '2750212': '4',
-  '2750213': '3.5',
-  '2750214': '3',
-  '2750215': '2.5',
-  '2750216': '2',
-  '2750217': '1.5',
-  '2750218': '1',
-  '2750219': 'Authentic',
-  '2750220': 'Authentic Altered',
-  '2750221': 'Authentic - Trimmed',
-  '2750222': 'Authentic - Coloured',
-};
-
-const UNGRADED_CONDITION_MAP: Record<string, 'NM' | 'LP' | 'MP' | 'HP'> = {
-  '400010': 'NM',
-  '400015': 'LP',
-  '400016': 'MP',
-  '400017': 'HP',
-};
+// --- Condition text patterns (matched against descriptor content) ---
+const DESCRIPTOR_CONDITION_PATTERNS: [RegExp, 'NM' | 'LP' | 'MP' | 'HP'][] = [
+  [/\bnear mint\b/i, 'NM'],
+  [/\bmint\b/i, 'NM'],
+  [/\blightly played\b/i, 'LP'],
+  [/\bexcellent\b/i, 'LP'],
+  [/\bmoderately played\b/i, 'MP'],
+  [/\bvery good\b/i, 'MP'],
+  [/\bgood\b/i, 'MP'],
+  [/\bheavily played\b/i, 'HP'],
+  [/\bpoor\b/i, 'HP'],
+];
 
 const LOCALIZED_CONDITION_MAP: Record<string, 'NM' | 'LP' | 'MP' | 'HP'> = {
   'near mint': 'NM',
   'mint': 'NM',
+  'near mint or better': 'NM',
   'lightly played': 'LP',
   'excellent': 'LP',
+  'lightly played (excellent)': 'LP',
   'moderately played': 'MP',
   'very good': 'MP',
+  'moderately played (very good)': 'MP',
   'good': 'MP',
   'heavily played': 'HP',
   'poor': 'HP',
+  'heavily played (poor)': 'HP',
 };
 
 const TITLE_CONDITION_PATTERNS: [RegExp, 'NM' | 'LP' | 'MP' | 'HP'][] = [
@@ -91,6 +56,11 @@ const TITLE_CONDITION_PATTERNS: [RegExp, 'NM' | 'LP' | 'MP' | 'HP'][] = [
   [/\bhp\b/, 'HP'],
 ];
 
+interface DescriptorValue {
+  content: string;
+  additionalInfo?: string[];
+}
+
 function makeDefault(): ConditionResult {
   return {
     condition: 'LP',
@@ -99,59 +69,107 @@ function makeDefault(): ConditionResult {
     gradingCompany: null,
     grade: null,
     certNumber: null,
-    rawDescriptorIds: [],
+    rawDescriptors: [],
   };
 }
 
-function findDescriptor(
-  descriptors: Array<{ name: string; values: string[] }>,
-  name: string,
-): { name: string; values: string[] } | undefined {
-  return descriptors.find((d) => d.name === name);
+function parseConditionFromText(text: string): 'NM' | 'LP' | 'MP' | 'HP' | null {
+  const lower = text.toLowerCase();
+  // Check exact match first (handles "Lightly played (Excellent)" etc.)
+  const exact = LOCALIZED_CONDITION_MAP[lower];
+  if (exact) return exact;
+  // Fall back to pattern matching
+  for (const [pattern, condition] of DESCRIPTOR_CONDITION_PATTERNS) {
+    if (pattern.test(text)) return condition;
+  }
+  return null;
+}
+
+function detectGradingCompany(text: string): string | null {
+  for (const company of GRADING_COMPANIES) {
+    if (text.toLowerCase().includes(company.toLowerCase())) return company;
+  }
+  return null;
+}
+
+function extractGradeFromText(text: string): string | null {
+  // Look for numeric grades like "10", "9.5", etc.
+  const match = text.match(/\b(\d{1,2}(?:\.\d)?)\b/);
+  if (match) return match[1]!;
+  // Check for text grades
+  if (/\bauthentic\b/i.test(text)) return 'Authentic';
+  return null;
 }
 
 export function extractCondition(listing: {
-  conditionDescriptors?: Array<{ name: string; values: string[] }>;
+  conditionDescriptors?: Array<{ name: string; values: DescriptorValue[] | string[] }>;
   localizedAspects?: Array<{ name: string; value: string }> | null;
   title?: string;
 }): ConditionResult {
   const descriptors = listing.conditionDescriptors ?? [];
-  const rawDescriptorIds = descriptors.flatMap((d) => d.values);
+  const rawDescriptors = descriptors as unknown[];
 
   // Priority 1: Condition Descriptors
   if (descriptors.length > 0) {
-    // Check for graded card (descriptor name 27501)
-    const graderDescriptor = findDescriptor(descriptors, '27501');
-    if (graderDescriptor) {
-      const gradeDescriptor = findDescriptor(descriptors, '27502');
-      const certDescriptor = findDescriptor(descriptors, '27503');
+    // Collect all content strings from descriptor values
+    let isGraded = false;
+    let gradingCompany: string | null = null;
+    let grade: string | null = null;
+    let certNumber: string | null = null;
+    let detectedCondition: 'NM' | 'LP' | 'MP' | 'HP' | null = null;
 
+    for (const descriptor of descriptors) {
+      for (const val of descriptor.values) {
+        const content = typeof val === 'string' ? val : val.content;
+        if (!content) continue;
+
+        // Check for grading company
+        const company = detectGradingCompany(content);
+        if (company) {
+          isGraded = true;
+          gradingCompany = company;
+          continue;
+        }
+
+        // Check for grade value (numeric like "10", "9.5")
+        if (isGraded && !grade) {
+          const gradeVal = extractGradeFromText(content);
+          if (gradeVal) {
+            grade = gradeVal;
+            continue;
+          }
+        }
+
+        // Check for condition text
+        const cond = parseConditionFromText(content);
+        if (cond) {
+          detectedCondition = cond;
+        }
+      }
+    }
+
+    if (isGraded) {
       return {
         condition: 'NM',
         source: 'condition_descriptor',
         isGraded: true,
-        gradingCompany: GRADER_MAP[graderDescriptor.values[0]!] ?? null,
-        grade: gradeDescriptor ? (GRADE_MAP[gradeDescriptor.values[0]!] ?? null) : null,
-        certNumber: certDescriptor?.values[0] ?? null,
-        rawDescriptorIds,
+        gradingCompany,
+        grade,
+        certNumber,
+        rawDescriptors,
       };
     }
 
-    // Check for ungraded condition (descriptor name 40001)
-    const ungradedDescriptor = findDescriptor(descriptors, '40001');
-    if (ungradedDescriptor) {
-      const condition = UNGRADED_CONDITION_MAP[ungradedDescriptor.values[0]!];
-      if (condition) {
-        return {
-          condition,
-          source: 'condition_descriptor',
-          isGraded: false,
-          gradingCompany: null,
-          grade: null,
-          certNumber: null,
-          rawDescriptorIds,
-        };
-      }
+    if (detectedCondition) {
+      return {
+        condition: detectedCondition,
+        source: 'condition_descriptor',
+        isGraded: false,
+        gradingCompany: null,
+        grade: null,
+        certNumber: null,
+        rawDescriptors,
+      };
     }
   }
 
@@ -161,8 +179,7 @@ export function extractCondition(listing: {
       (a) => a.name === 'Card Condition',
     );
     if (conditionAspect) {
-      const normalized = conditionAspect.value.toLowerCase();
-      const condition = LOCALIZED_CONDITION_MAP[normalized];
+      const condition = parseConditionFromText(conditionAspect.value);
       if (condition) {
         return {
           condition,
@@ -171,7 +188,7 @@ export function extractCondition(listing: {
           gradingCompany: null,
           grade: null,
           certNumber: null,
-          rawDescriptorIds,
+          rawDescriptors,
         };
       }
     }
@@ -189,12 +206,12 @@ export function extractCondition(listing: {
           gradingCompany: null,
           grade: null,
           certNumber: null,
-          rawDescriptorIds,
+          rawDescriptors,
         };
       }
     }
   }
 
   // Priority 4: Default
-  return { ...makeDefault(), rawDescriptorIds };
+  return { ...makeDefault(), rawDescriptors };
 }
