@@ -194,7 +194,7 @@ export function transformCard(apiCard: ScrydexCard, expansionId: string): CardRo
     expansion_id: expansionId,
     expansion_name: apiCard.expansion.name,
     expansion_code: apiCard.expansion.code || '',
-    printed_total: apiCard.expansion.printed_total,
+    printed_total: apiCard.expansion.printed_total ?? 0,
     rarity: apiCard.rarity || null,
     supertype: apiCard.supertype || null,
     subtypes: apiCard.subtypes || [],
