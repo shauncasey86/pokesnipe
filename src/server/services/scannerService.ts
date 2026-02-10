@@ -5,30 +5,38 @@ import { getUsdToGbpRate } from "./exchangeRate.js";
 import { calculateProfit } from "./pricing.js";
 import { v4 as uuidv4 } from "uuid";
 
-// Targeted queries: specific card names, set names, and card types
-// These return actual individual card listings, not "choose your card" junk
-const QUERY_SET = [
-  "pokemon charizard ex",
-  "pokemon pikachu VMAX",
-  "pokemon mewtwo alt art",
-  "pokemon illustration rare",
-  "pokemon special art rare",
-  "pokemon gold star card",
-  "pokemon full art trainer",
-  "pokemon surging sparks",
-  "pokemon prismatic evolutions",
-  "pokemon obsidian flames",
-  "pokemon paldea evolved",
-  "pokemon 151 card",
-  "pokemon scarlet violet ex",
-  "pokemon crown zenith",
-];
-
-// eBay Browse API filter: minimum price £5 + Buy It Now only
-const EBAY_FILTER = "price:[5..],buyingOptions:{FIXED_PRICE}";
+// eBay Browse API filter: minimum price £3 + Buy It Now only
+const EBAY_FILTER = "price:[3..],buyingOptions:{FIXED_PRICE}";
 
 // Reject listings that are clearly lots, bundles, bulk, or multi-variation "pick" listings
 const BULK_PATTERNS = /\b(lot|bundle|collection|choose\s*(your|a|the)?\s*card|pick\s*(your|a)?\s*card|select\s*(your|a)?\s*card|selection|random|mystery|grab bag|bulk|set of|x\d{2,}|\d{2,}\s*cards|\d{2,}\s*card\s*lot|wholesale|mixed|assorted|binder|starter kit|deck\s+(box|cards|list)|my first battle|all\s+cards\s+available|common|uncommon|job\s*lot)\b/i;
+
+// Track which batch of expansions to scan next (persists across scan cycles)
+let expansionScanOffset = 0;
+// How many expansion queries per scan cycle (controls API usage)
+const EXPANSIONS_PER_SCAN = 8;
+
+// Build search queries dynamically from our indexed expansions
+const buildQueries = async (): Promise<string[]> => {
+  const { rows } = await pool.query(
+    `SELECT name FROM expansions ORDER BY release_date DESC NULLS LAST`
+  );
+  if (rows.length === 0) {
+    // Fallback if no expansions synced yet
+    return ["pokemon tcg card"];
+  }
+
+  // Rotate through expansions each scan cycle so we cover them all
+  const start = expansionScanOffset % rows.length;
+  const batch = [];
+  for (let i = 0; i < EXPANSIONS_PER_SCAN && i < rows.length; i++) {
+    const idx = (start + i) % rows.length;
+    batch.push(`pokemon ${rows[idx].name}`);
+  }
+  expansionScanOffset = (start + EXPANSIONS_PER_SCAN) % rows.length;
+
+  return batch;
+};
 
 const toGbp = (value: number, currency: string, fx: number) => {
   if (currency === "GBP") return value;
@@ -82,9 +90,10 @@ const computeLiquidity = (breakdown: Record<string, number | null>): string => {
 
 export const scanEbay = async () => {
   const fx = await getUsdToGbpRate();
-  for (const query of QUERY_SET) {
+  const queries = await buildQueries();
+  for (const query of queries) {
     // 183454 = eBay category "CCG Individual Cards" — excludes lots, sealed, bundles
-    // EBAY_FILTER enforces: min £5 price + Buy It Now only
+    // EBAY_FILTER enforces: min £3 price + Buy It Now only
     const listings = await searchItems(query, 25, "183454", EBAY_FILTER);
     for (const listing of listings) {
       // Skip bulk/lot/bundle listings
