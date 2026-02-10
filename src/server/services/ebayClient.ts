@@ -14,7 +14,11 @@ const authClient = axios.create({
 
 const apiClient = axios.create({
   baseURL: `${ebayBase}/buy/browse/v1`,
-  timeout: 15000
+  timeout: 15000,
+  headers: {
+    // Target eBay UK marketplace for GBP prices and UK listings
+    "X-EBAY-C-MARKETPLACE-ID": "EBAY_GB"
+  }
 });
 
 const limiter = new TokenBucket(5, 1);
@@ -73,13 +77,16 @@ export const getItem = async (itemId: string): Promise<EbayListing> => {
   };
 };
 
-export const searchItems = async (query: string, limit = 50): Promise<EbayListing[]> => {
+export const searchItems = async (query: string, limit = 50, categoryId?: string): Promise<EbayListing[]> => {
   await limiter.take();
   trackApiCall("ebay").catch(() => {});
   const token = await getAccessToken();
+  const params: Record<string, string | number> = { q: query, limit };
+  // 183454 = CCG Individual Cards (filters out lots, bundles, sealed products)
+  if (categoryId) params.category_ids = categoryId;
   const { data } = await apiClient.get("/item_summary/search", {
     headers: { Authorization: `Bearer ${token}` },
-    params: { q: query, limit }
+    params
   });
   return (data.itemSummaries ?? []).map((item: any) => ({
     itemId: item.itemId,
