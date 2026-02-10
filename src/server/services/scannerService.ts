@@ -5,19 +5,30 @@ import { getUsdToGbpRate } from "./exchangeRate.js";
 import { calculateProfit } from "./pricing.js";
 import { v4 as uuidv4 } from "uuid";
 
+// Targeted queries: specific card names, set names, and card types
+// These return actual individual card listings, not "choose your card" junk
 const QUERY_SET = [
-  "pokemon tcg single card holo",
-  "pokemon tcg single card V VMAX",
-  "pokemon tcg single card ex",
-  "pokemon tcg alt art single",
-  "pokemon tcg illustration rare",
-  "pokemon tcg gold card single",
-  "pokemon card charizard single",
-  "pokemon card promo single",
+  "pokemon charizard ex",
+  "pokemon pikachu VMAX",
+  "pokemon mewtwo alt art",
+  "pokemon illustration rare",
+  "pokemon special art rare",
+  "pokemon gold star card",
+  "pokemon full art trainer",
+  "pokemon surging sparks",
+  "pokemon prismatic evolutions",
+  "pokemon obsidian flames",
+  "pokemon paldea evolved",
+  "pokemon 151 card",
+  "pokemon scarlet violet ex",
+  "pokemon crown zenith",
 ];
 
-// Reject listings that are clearly lots, bundles, or bulk
-const BULK_PATTERNS = /\b(lot|bundle|collection|choose|pick|select|random|mystery|grab bag|bulk|set of|x\d{2,}|\d{2,}\s*cards|\d{2,}\s*card\s*lot|wholesale|mixed|assorted|binder|starter kit)\b/i;
+// eBay Browse API filter: minimum price £5 + Buy It Now only
+const EBAY_FILTER = "price:[5..],buyingOptions:{FIXED_PRICE}";
+
+// Reject listings that are clearly lots, bundles, bulk, or multi-variation "pick" listings
+const BULK_PATTERNS = /\b(lot|bundle|collection|choose\s*(your|a|the)?\s*card|pick\s*(your|a)?\s*card|select\s*(your|a)?\s*card|selection|random|mystery|grab bag|bulk|set of|x\d{2,}|\d{2,}\s*cards|\d{2,}\s*card\s*lot|wholesale|mixed|assorted|binder|starter kit|deck\s+(box|cards|list)|my first battle|all\s+cards\s+available|common|uncommon|job\s*lot)\b/i;
 
 const toGbp = (value: number, currency: string, fx: number) => {
   if (currency === "GBP") return value;
@@ -73,7 +84,8 @@ export const scanEbay = async () => {
   const fx = await getUsdToGbpRate();
   for (const query of QUERY_SET) {
     // 183454 = eBay category "CCG Individual Cards" — excludes lots, sealed, bundles
-    const listings = await searchItems(query, 25, "183454");
+    // EBAY_FILTER enforces: min £5 price + Buy It Now only
+    const listings = await searchItems(query, 25, "183454", EBAY_FILTER);
     for (const listing of listings) {
       // Skip bulk/lot/bundle listings
       if (BULK_PATTERNS.test(listing.title)) continue;

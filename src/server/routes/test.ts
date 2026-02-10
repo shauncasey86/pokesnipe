@@ -64,15 +64,20 @@ router.get("/ebay", requireAuth, async (_req, res) => {
   };
   try {
     const start = Date.now();
-    const results = await searchItems("pokemon tcg single card", 3, "183454");
+    const BULK_RE = /\b(lot|bundle|collection|choose\s*(your|a|the)?\s*card|pick\s*(your|a)?\s*card|select\s*(your|a)?\s*card|selection|random|mystery|grab bag|bulk|set of|x\d{2,}|\d{2,}\s*cards|\d{2,}\s*card\s*lot|wholesale|mixed|assorted|binder|starter kit|deck\s+(box|cards|list)|my first battle|all\s+cards\s+available|common|uncommon|job\s*lot)\b/i;
+    const results = await searchItems("pokemon charizard ex", 6, "183454", "price:[5..],buyingOptions:{FIXED_PRICE}");
     const elapsed = Date.now() - start;
+    const filtered = results.filter(r => !BULK_RE.test(r.title));
     res.json({
       ok: true,
       test: "ebay",
       elapsed_ms: elapsed,
       diagnostics,
       results_count: results.length,
-      sample: results.map(r => ({ title: r.title, price: r.price, condition: r.condition, image: r.image }))
+      filtered_count: filtered.length,
+      rejected_count: results.length - filtered.length,
+      sample: filtered.slice(0, 3).map(r => ({ title: r.title, price: r.price, condition: r.condition, image: r.image })),
+      rejected: results.filter(r => BULK_RE.test(r.title)).slice(0, 3).map(r => ({ title: r.title, reason: r.title.match(BULK_RE)?.[0] }))
     });
   } catch (error: any) {
     res.status(502).json({
@@ -215,7 +220,7 @@ router.get("/pipeline", requireAuth, async (_req, res) => {
     const start = Date.now();
 
     // Step 1: Search eBay
-    const listings = await searchItems("pokemon tcg single card holo", 5, "183454");
+    const listings = await searchItems("pokemon charizard ex", 5, "183454", "price:[5..],buyingOptions:{FIXED_PRICE}");
     results.push({ step: "ebay_search", ok: true, count: listings.length, elapsed_ms: Date.now() - start });
 
     // Step 2: Get exchange rate
@@ -392,7 +397,7 @@ router.get("/", requireAuth, async (_req, res) => {
       return { cards_page1: (page.cards ?? []).length, has_more: page.hasMore };
     },
     ebay: async () => {
-      const items = await searchItems("pokemon tcg single card", 1, "183454");
+      const items = await searchItems("pokemon pikachu VMAX", 1, "183454", "price:[5..],buyingOptions:{FIXED_PRICE}");
       return { items: items.length, title: items[0]?.title?.slice(0, 60) };
     },
     match: async () => {
