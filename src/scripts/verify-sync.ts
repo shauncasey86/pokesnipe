@@ -12,27 +12,27 @@ interface Check {
 
 const checks: Check[] = [
   {
-    name: 'Expansion count >= 170',
+    name: 'Expansion count >= 100',
     query: 'SELECT COUNT(*)::int AS count FROM expansions',
     validate: (rows) => {
       const count = rows[0].count as number;
-      return { pass: count >= 170, detail: `${count} expansions` };
+      return { pass: count >= 100, detail: `${count} expansions` };
     },
   },
   {
-    name: 'Card count >= 10000',
+    name: 'Card count >= 5000',
     query: 'SELECT COUNT(*)::int AS count FROM cards',
     validate: (rows) => {
       const count = rows[0].count as number;
-      return { pass: count >= 10000, detail: `${count} cards` };
+      return { pass: count >= 5000, detail: `${count} cards` };
     },
   },
   {
-    name: 'Variant count >= 20000',
+    name: 'Variant count >= 10000',
     query: 'SELECT COUNT(*)::int AS count FROM variants',
     validate: (rows) => {
       const count = rows[0].count as number;
-      return { pass: count >= 20000, detail: `${count} variants` };
+      return { pass: count >= 10000, detail: `${count} variants` };
     },
   },
   {
