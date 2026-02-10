@@ -26,7 +26,12 @@ const app = express();
 app.set("trust proxy", 1);
 app.use(helmet());
 app.use(express.json({ limit: "1mb" }));
-app.use(pinoHttp({ logger }));
+// Skip pinoHttp for SSE endpoint (logs noisy "request failed" for long-lived connections)
+const httpLogger = pinoHttp({ logger });
+app.use((req, res, next) => {
+  if (req.path === "/api/deals/stream") return next();
+  httpLogger(req, res, next);
+});
 
 app.get("/healthz", (_req, res) => res.json({ ok: true }));
 
@@ -39,8 +44,22 @@ app.use("/api/settings", settingsRoutes);
 app.use("/api/notifications", notificationsRoutes);
 app.use("/api/test", testRoutes);
 
-// Manual trigger: POST /api/scan (runs one eBay scan cycle)
+// Scanner pause/resume state
+let scannerPaused = false;
 let scanRunning = false;
+let syncRunning = false;
+
+app.get("/api/scanner/status", requireAuth, (_req, res) => {
+  res.json({ paused: scannerPaused, scanRunning, syncRunning });
+});
+
+app.post("/api/scanner/toggle", requireAuth, (_req, res) => {
+  scannerPaused = !scannerPaused;
+  logger.info({ paused: scannerPaused }, "scanner toggled");
+  res.json({ ok: true, paused: scannerPaused });
+});
+
+// Manual trigger: POST /api/scan (runs one eBay scan cycle)
 app.post("/api/scan", requireAuth, async (_req, res) => {
   if (scanRunning) return res.json({ ok: false, error: "scan already in progress" });
   scanRunning = true;
@@ -66,7 +85,6 @@ app.post("/api/scan", requireAuth, async (_req, res) => {
 });
 
 // Manual trigger: POST /api/sync (runs full Scrydex sync)
-let syncRunning = false;
 app.post("/api/sync", requireAuth, async (_req, res) => {
   if (syncRunning) return res.json({ ok: false, error: "sync already in progress" });
   syncRunning = true;
@@ -86,17 +104,20 @@ const clients = new Set<express.Response>();
 let lastEventId = 0;
 
 const sendEvent = (res: express.Response, event: string, data: any, id?: number) => {
-  if (id != null) res.write(`id: ${id}\n`);
-  res.write(`event: ${event}\n`);
-  res.write(`data: ${JSON.stringify(data)}\n\n`);
+  try {
+    if (id != null) res.write(`id: ${id}\n`);
+    res.write(`event: ${event}\n`);
+    res.write(`data: ${JSON.stringify(data)}\n\n`);
+  } catch {
+    clients.delete(res);
+  }
 };
 
 app.get("/api/deals/stream", requireAuth, async (req, res) => {
   try {
     res.writeHead(200, {
       "Content-Type": "text/event-stream",
-      "Cache-Control": "no-cache",
-      Connection: "keep-alive",
+      "Cache-Control": "no-cache, no-transform",
       "X-Accel-Buffering": "no"
     });
     res.flushHeaders();
@@ -155,6 +176,7 @@ const pollDeals = async () => {
 
 const broadcastStatus = async () => {
   const status = await getStatus();
+  (status as any).scannerPaused = scannerPaused;
   clients.forEach((res) => sendEvent(res, "status", status));
 };
 
@@ -193,9 +215,9 @@ app.listen(config.PORT, () => {
       logger.error({ error }, "initial sync failed (will retry in 24h)");
     }
 
-    // Scan every 5 minutes
+    // Scan every 5 minutes (respects pause)
     setInterval(() => {
-      if (scanRunning) return;
+      if (scannerPaused || scanRunning) return;
       scanRunning = true;
       const doScan = async () => {
         const { rows } = await pool.query("INSERT INTO scanner_runs (status) VALUES ('running') RETURNING id");

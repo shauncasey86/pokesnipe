@@ -37,22 +37,6 @@ export type ScrydexCard = {
   prices: Record<string, number | null>;
 };
 
-export const fetchExpansions = async (): Promise<ScrydexExpansion[]> => {
-  await limiter.take();
-  trackApiCall("scrydex").catch(() => {});
-  const { data } = await client.get("/expansions", { params: { language: "en" } });
-  const items = data.data ?? data.expansions ?? [];
-  return items.map((exp: any) => ({
-    id: exp.id,
-    name: exp.name,
-    code: exp.code,
-    series: exp.series,
-    releaseDate: exp.release_date ?? exp.releaseDate ?? null,
-    printedTotal: exp.printed_total ?? exp.printedTotal ?? null,
-    logoUrl: exp.logo ?? exp.logoUrl ?? null
-  }));
-};
-
 const withRetry = async <T>(fn: () => Promise<T>, retries = 3): Promise<T> => {
   for (let attempt = 1; attempt <= retries; attempt++) {
     try {
@@ -66,14 +50,43 @@ const withRetry = async <T>(fn: () => Promise<T>, retries = 3): Promise<T> => {
   throw new Error("unreachable");
 };
 
+const mapExpansion = (exp: any): ScrydexExpansion => ({
+  id: exp.id,
+  name: exp.name,
+  code: exp.code,
+  series: exp.series,
+  releaseDate: exp.release_date ?? exp.releaseDate ?? null,
+  printedTotal: exp.printed_total ?? exp.printedTotal ?? null,
+  logoUrl: exp.logo ?? exp.logoUrl ?? null
+});
+
+export const fetchExpansions = async (): Promise<ScrydexExpansion[]> => {
+  const all: ScrydexExpansion[] = [];
+  let page = 1;
+  while (true) {
+    await limiter.take();
+    const { data } = await withRetry(() =>
+      client.get("/expansions", { params: { page, page_size: 100, language: "en" } })
+    );
+    trackApiCall("scrydex").catch(() => {});
+    const items = data.data ?? data.expansions ?? [];
+    all.push(...items.map(mapExpansion));
+    const totalCount = data.total_count ?? items.length;
+    const pageSize = data.page_size ?? 100;
+    if (page * pageSize >= totalCount) break;
+    page += 1;
+  }
+  return all;
+};
+
 export const fetchCardsPage = async (page: number) => {
   await limiter.take();
-  trackApiCall("scrydex").catch(() => {});
   const { data } = await withRetry(() =>
     client.get("/cards", {
       params: { page, page_size: 100, language: "en", include: "prices" }
     })
   );
+  trackApiCall("scrydex").catch(() => {});
   const items = data.data ?? data.cards ?? [];
   const totalCount = data.total_count ?? 0;
   const pageSize = data.page_size ?? 100;
@@ -81,33 +94,4 @@ export const fetchCardsPage = async (page: number) => {
     cards: items,
     hasMore: page * pageSize < totalCount
   };
-};
-
-export const fetchAllCards = async (onPage?: (page: number, count: number) => void) => {
-  const cards: ScrydexCard[] = [];
-  let page = 1;
-  while (true) {
-    const data = await fetchCardsPage(page);
-    const batch: ScrydexCard[] = data.cards.map((card: any) => {
-      // Card ID contains expansion prefix: "me2pt5-1" → expansion "me2pt5"
-      const expansionId = card.expansion?.id ?? card.id?.split("-").slice(0, -1).join("-") ?? "";
-      return {
-        id: card.id,
-        name: card.name,
-        number: card.number ?? card.printed_number ?? null,
-        printedTotal: card.printed_total ?? card.printedTotal ?? null,
-        rarity: card.rarity ?? null,
-        supertype: card.supertype ?? null,
-        subtypes: card.subtypes ?? [],
-        images: card.images ?? {},
-        expansionId,
-        prices: card.prices ?? {}
-      };
-    });
-    cards.push(...batch);
-    onPage?.(page, batch.length);
-    if (!data.hasMore) break;
-    page += 1;
-  }
-  return cards;
 };
