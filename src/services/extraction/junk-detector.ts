@@ -44,6 +44,18 @@ const NON_CARD_PATTERNS = [
   /\bdeck box\b/,
   /\bcode card\b/,
   /\bonline code\b/,
+  /\bplaying card\b/,
+  /\bpoker card\b/,
+  /\btopps\b/,
+  /\bcoin\b/,
+];
+
+// Language words indicating non-English cards (our pricing data is English-only)
+const LANGUAGE_WORD_PATTERNS = [
+  /\bjapanese\b/,
+  /\bkorean\b/,
+  /\bchinese\b/,
+  /\bthai\b/,
 ];
 
 export function detectJunk(cleanedTitle: string): { isJunk: boolean; reason?: string } {
@@ -66,6 +78,12 @@ export function detectJunk(cleanedTitle: string): { isJunk: boolean; reason?: st
   }
 
   for (const pattern of NON_ENGLISH_PATTERNS) {
+    if (pattern.test(cleanedTitle)) {
+      return { isJunk: true, reason: 'non_english' };
+    }
+  }
+
+  for (const pattern of LANGUAGE_WORD_PATTERNS) {
     if (pattern.test(cleanedTitle)) {
       return { isJunk: true, reason: 'non_english' };
     }

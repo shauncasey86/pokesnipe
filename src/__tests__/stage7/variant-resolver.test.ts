@@ -71,4 +71,37 @@ describe('resolveVariant', () => {
     expect(result).not.toBeNull();
     expect(result!.method).toBe('default_cheapest');
   });
+
+  it('matches SIR keyword to specialIllustrationRare variant', () => {
+    const variants = [
+      makeVariant('holofoil', 5),
+      makeVariant('specialIllustrationRare', 200),
+    ];
+    const result = resolveVariant('special illustration rare', variants);
+    expect(result).not.toBeNull();
+    expect(result!.method).toBe('keyword_match');
+    expect(result!.variant.name).toBe('specialIllustrationRare');
+  });
+
+  it('matches SAR keyword to specialArtRare variant', () => {
+    const variants = [
+      makeVariant('holofoil', 10),
+      makeVariant('specialArtRare', 150),
+    ];
+    const result = resolveVariant('special art rare', variants);
+    expect(result).not.toBeNull();
+    expect(result!.method).toBe('keyword_match');
+    expect(result!.variant.name).toBe('specialArtRare');
+  });
+
+  it('matches short "sir" abbreviation to specialIllustrationRare', () => {
+    const variants = [
+      makeVariant('holofoil', 5),
+      makeVariant('specialIllustrationRare', 200),
+    ];
+    const result = resolveVariant('sir', variants);
+    expect(result).not.toBeNull();
+    expect(result!.method).toBe('keyword_match');
+    expect(result!.variant.name).toBe('specialIllustrationRare');
+  });
 });

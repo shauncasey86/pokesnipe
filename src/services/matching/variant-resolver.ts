@@ -27,6 +27,13 @@ const VARIANT_KEYWORDS: Record<string, string[]> = {
   unlimitedHolofoil: ['unlimited holo'],
   unlimitedNormal: ['unlimited'],
   holofoil: ['holo', 'holographic', 'holo rare'],
+  // Modern rarity variants (Scrydex may use various naming conventions)
+  specialIllustrationRare: ['special illustration rare', 'sir'],
+  specialArtRare: ['special art rare', 'sar'],
+  illustrationRare: ['illustration rare'],
+  artRare: ['art rare'],
+  characterRare: ['character rare', 'chr'],
+  trainerGallery: ['trainer gallery', 'tg'],
 };
 
 /**
