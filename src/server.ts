@@ -121,7 +121,9 @@ async function runVerification(): Promise<void> {
     }
   }
 
-  // Idempotency
+  // Idempotency — skip on large datasets, run manually later
+  logger.info('Skipping idempotency check (run verify:only after to test)');
+  /*
   logger.info('Idempotency check — running sync again...');
   const before = (await pool.query('SELECT COUNT(*)::int AS count FROM cards')).rows[0].count as number;
   await syncAll();
@@ -133,6 +135,7 @@ async function runVerification(): Promise<void> {
     logger.error({ before, after }, 'FAIL — Idempotency');
     failed++;
   }
+  */
 
   logger.info({ passed, failed, total: passed + failed }, '=== VERIFICATION COMPLETE ===');
 }

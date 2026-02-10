@@ -49,42 +49,30 @@ async function failSyncLog(id: number, errorMessage: string): Promise<void> {
   );
 }
 
-// --- Fetch all pages of expansions ---
-
-function getPageSize(response: { pageSize?: number; page_size?: number }): number {
-  return response.pageSize ?? response.page_size ?? 100;
-}
-
-function getTotalCount(response: { totalCount?: number; total_count?: number }): number | undefined {
-  return response.totalCount ?? response.total_count ?? undefined;
-}
+// --- Fetch all pages ---
+// We request page_size=100. Keep fetching until we get fewer than 100 items.
+const REQUESTED_PAGE_SIZE = 100;
 
 async function fetchAllExpansions(): Promise<scrydex.ScrydexExpansion[]> {
   const all: scrydex.ScrydexExpansion[] = [];
   let page = 1;
-  let hasMore = true;
 
-  while (hasMore) {
+  while (true) {
     const response = await scrydex.getExpansions(page);
-    const pageSize = getPageSize(response);
-    const totalCount = getTotalCount(response);
+    const items = response.data ?? [];
 
     if (page === 1) {
-      log(`Expansion API page 1: ${response.data.length} items, pageSize=${pageSize}, totalCount=${totalCount}, raw keys=${Object.keys(response).join(',')}`);
+      log(`Expansion API page 1: ${items.length} items, raw keys: ${JSON.stringify(Object.keys(response))}`);
     }
 
-    all.push(...response.data);
+    all.push(...items);
+    log(`Expansion page ${page}: got ${items.length} items (total so far: ${all.length})`);
 
-    // Use totalCount if available, otherwise keep going while we get full pages
-    if (totalCount != null) {
-      hasMore = page * pageSize < totalCount;
-    } else {
-      hasMore = response.data.length >= pageSize;
-    }
+    if (items.length < REQUESTED_PAGE_SIZE) break;
     page++;
   }
 
-  log(`Fetched all expansions: ${all.length} total (${page - 1} pages)`);
+  log(`Fetched all expansions: ${all.length} total (${page} pages)`);
   return all;
 }
 
@@ -140,13 +128,7 @@ export async function syncAll(): Promise<SyncResult> {
           expansionCards += cardsUpserted;
           expansionVariants += variantsUpserted;
 
-          const cardTotalCount = getTotalCount(response);
-          const cardPageSize = getPageSize(response);
-          if (cardTotalCount != null) {
-            hasMore = page * cardPageSize < cardTotalCount;
-          } else {
-            hasMore = response.data.length >= cardPageSize;
-          }
+          hasMore = (response.data?.length ?? 0) >= REQUESTED_PAGE_SIZE;
           page++;
         }
       } catch (err) {
