@@ -52,8 +52,10 @@ export const getItem = async (itemId: string): Promise<EbayListing> => {
   await limiter.take();
   trackApiCall("ebay").catch(() => {});
   const token = await getAccessToken();
-  const { data } = await apiClient.get(`/item/${itemId}`, {
-    headers: { Authorization: `Bearer ${token}` }
+  // Use legacy_item_id endpoint since eBay URLs contain numeric legacy IDs
+  const { data } = await apiClient.get("/item/get_item_by_legacy_id", {
+    headers: { Authorization: `Bearer ${token}` },
+    params: { legacy_item_id: itemId }
   });
   const specifics: Record<string, string> = {};
   for (const aspect of data.localizedAspects ?? []) {
