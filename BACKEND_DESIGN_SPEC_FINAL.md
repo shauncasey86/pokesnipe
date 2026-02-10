@@ -381,44 +381,86 @@ function buildFilterString(): string {
 }
 ```
 
-**Budget impact:** With 200 results per query × 8 queries per cycle = 1,600 listings per scan cycle. At 5-min intervals = 288 cycles/day = 2,304 API calls/day, well within eBay's 5,000/day limit.
-
 ### 3.2 Two-Phase eBay Evaluation
 
-**Critical finding:** The eBay Browse API `item_summary/search` endpoint does NOT return `localizedAspects` (item specifics). Those only come from the individual `getItem()` endpoint. The previous redesign spec incorrectly assumed `fieldgroups=EXTENDED,PRODUCT` would provide item specifics in search results — it does not.
+**Critical finding:** The eBay Browse API `item_summary/search` endpoint does NOT return `localizedAspects` (item specifics) or full `conditionDescriptors`. Those only come from the individual `getItem()` endpoint. The previous redesign spec incorrectly assumed `fieldgroups=EXTENDED,PRODUCT` would provide item specifics in search results — it does not.
+
+We **need** `getItem()` enrichment to get:
+- `localizedAspects`: Card Name, Set, Card Number, Rarity (seller-provided structured fields)
+- `conditionDescriptors`: The numeric condition descriptor IDs that tell us exact card condition (NM/LP/MP/HP) and grading details (company, grade, cert number)
+
+Without enrichment, we only have the title to work with — no structured condition data, no item specifics.
 
 **Solution: Two-phase evaluation pipeline.**
 
 ```
-Phase 1: BROAD SEARCH (cheap, 200 results per call)
+Phase 1: BROAD SEARCH (1 API call per cycle, 200 results)
   - Search with sort=newlyListed, price/condition filters
-  - Get: title, price, shipping, condition, conditionDescriptors, images
-  - Do NOT get: localizedAspects / itemSpecifics (empty in search)
+  - Get: title, price, shipping, condition text, images
+  - Do NOT get: localizedAspects, conditionDescriptors (empty in search)
   - Run title-only matching against local index
   - Filter: reject bulk/junk, deduplicate, match to card
+  - Quick profit estimate using title-parsed condition (or default LP)
 
-Phase 2: TARGETED ENRICHMENT (selective, individual getItem calls)
-  - Only for listings that passed Phase 1 matching with confidence ≥ 0.45
+Phase 2: TARGETED ENRICHMENT (selective getItem calls)
+  - Only for listings that show potential profit after Phase 1
   - Call getItem(itemId) to get full localizedAspects + conditionDescriptors
+  - Extract real condition from conditionDescriptors (see §3.4)
   - Re-run matching with enriched structured signals
+  - Recalculate profit with correct condition-specific price
   - Confidence typically increases (structured data confirms title parse)
-  - Budget: ~50-100 getItem calls per cycle (top matches only)
 ```
 
+#### eBay API Budget — The Critical Calculation
+
+```
+Daily eBay limit: 5,000 API calls
+
+SEARCH CALLS:
+  1 search call per cycle (returns 200 results)
+  288 cycles/day (every 5 minutes)
+  = 288 search calls/day
+
+getItem ENRICHMENT CALLS:
+  Per cycle (200 search results):
+    ~50% rejected immediately (bulk, junk, dupes, non-cards) = 100 skipped
+    ~30% no match against local index                        = 60 skipped
+    ~20% matched to a card                                   = 40 matches
+
+  Of those ~40 matches, only enrich listings with profit potential:
+    ~25% show potential profit ≥15% after title-only estimate = 10 enrichments
+
+  10 getItem calls × 288 cycles/day = 2,880 calls/day
+
+TOTAL: 288 (search) + 2,880 (getItem) = 3,168 calls/day
+
+HEADROOM: 5,000 - 3,168 = 1,832 calls remaining (37% buffer)
+  - Manual lookups: ~50/day
+  - Deal status checks: ~100/day
+  - Still ~1,682 spare capacity
+```
+
+**Budget control — enrichment gate:**
+
 ```typescript
-// Phase 2 enrichment criteria:
-function shouldEnrich(match: MatchResult): boolean {
+function shouldEnrich(match: PhaseOneMatch): boolean {
+  // Only spend a getItem call if this listing looks profitable
+  // Title-only profit estimate uses default LP condition (conservative)
   return (
-    match.confidence.composite >= 0.45 &&   // Worth investigating
-    match.confidence.composite < 0.90 &&    // Could benefit from more data
-    match.arbitrage.profitPercent >= 10      // Enough margin to justify the call
+    match.titleOnlyProfitPercent >= 15 &&   // Must show clear profit potential
+    match.confidence.composite >= 0.50 &&   // Reasonable match quality
+    !match.isDuplicate                       // Not already enriched
   );
 }
 ```
 
+If the daily budget drops below 500 remaining calls, enrichment threshold tightens to ≥25% profit to preserve budget for search calls. The system always prioritises search calls over enrichment.
+
+**Scan interval adjustment:** If budget is running low, the scan interval can stretch from 5 minutes to 10 or 15 minutes, reducing both search and enrichment calls proportionally.
+
 **getItem returns:**
 - `localizedAspects`: Structured seller-provided fields ("Card Name", "Set", "Card Number", "Rarity", "Professional Grader", "Grade")
-- `conditionDescriptors`: Structured condition with numeric IDs (2750=Graded, 4000=Ungraded)
+- `conditionDescriptors`: Structured condition with numeric descriptor IDs (see §3.4 for full mapping)
 - `description`: Full listing description (can extract additional signals)
 
 ### 3.3 eBay Rate Limiting
@@ -437,7 +479,175 @@ const ebayBudget = {
 };
 ```
 
-### 3.4 EbayListing Interface
+### 3.4 Condition Descriptor Mapping (from getItem enrichment)
+
+eBay uses numeric descriptor IDs for trading card conditions in category 183454. These come from the `conditionDescriptors` array in the `getItem()` response.
+
+**Descriptor structure:** Each descriptor has a `name` (descriptor type ID) and `values` (array of value IDs).
+
+#### Ungraded Cards (conditionId: 4000 / USED_VERY_GOOD)
+
+Descriptor name: `40001` (Card Condition)
+
+| Card Condition | Value ID |
+|----------------|----------|
+| Near Mint or Better | `400010` |
+| Lightly Played (Excellent) | `400015` |
+| Moderately Played (Very Good) | `400016` |
+| Heavily Played (Poor) | `400017` |
+
+**Mapping to Scrydex conditions:**
+
+```typescript
+const UNGRADED_CONDITION_MAP: Record<string, ScrydexCondition> = {
+  '400010': 'NM',   // Near Mint or Better
+  '400015': 'LP',   // Lightly Played (Excellent)
+  '400016': 'MP',   // Moderately Played (Very Good)
+  '400017': 'HP',   // Heavily Played (Poor)
+};
+```
+
+#### Graded Cards (conditionId: 2750 / LIKE_NEW)
+
+Three descriptors for graded cards:
+
+**Descriptor name: `27501` (Professional Grader)**
+
+| Grading Company | Value ID |
+|-----------------|----------|
+| PSA | `275010` |
+| BCCG | `275011` |
+| BVG | `275012` |
+| BGS | `275013` |
+| CSG | `275014` |
+| CGC | `275015` |
+| SGC | `275016` |
+| KSA | `275017` |
+| GMA | `275018` |
+| HGA | `275019` |
+| ISA | `2750110` |
+| PCA | `2750111` |
+| GSG | `2750112` |
+| PGS | `2750113` |
+| MNT | `2750114` |
+| TAG | `2750115` |
+| Rare Edition | `2750116` |
+| RCG | `2750117` |
+| PCG | `2750118` |
+| Ace Grading | `2750119` |
+| CGA | `2750120` |
+| TCG | `2750121` |
+| ARK | `2750122` |
+| Other | `2750123` |
+
+**Descriptor name: `27502` (Grade)**
+
+| Grade | Value ID |
+|-------|----------|
+| 10 | `275020` |
+| 9.5 | `275021` |
+| 9 | `275022` |
+| 8.5 | `275023` |
+| 8 | `275024` |
+| 7.5 | `275025` |
+| 7 | `275026` |
+| 6.5 | `275027` |
+| 6 | `275028` |
+| 5.5 | `275029` |
+| 5 | `2750210` |
+| 4.5 | `2750211` |
+| 4 | `2750212` |
+| 3.5 | `2750213` |
+| 3 | `2750214` |
+| 2.5 | `2750215` |
+| 2 | `2750216` |
+| 1.5 | `2750217` |
+| 1 | `2750218` |
+| Authentic | `2750219` |
+| Authentic Altered | `2750220` |
+| Authentic - Trimmed | `2750221` |
+| Authentic - Coloured | `2750222` |
+
+**Descriptor name: `27503` (Certification Number)** — free text field, the slab serial number.
+
+#### Condition Extraction Logic
+
+```typescript
+interface ConditionResult {
+  condition: 'NM' | 'LP' | 'MP' | 'HP';
+  source: 'condition_descriptor' | 'localized_aspects' | 'title' | 'default';
+  isGraded: boolean;
+  gradingCompany: string | null;     // "PSA", "CGC", "BGS", etc.
+  grade: string | null;              // "10", "9.5", "9", etc.
+  certNumber: string | null;         // Slab serial number
+  rawDescriptorIds: string[];        // For audit trail
+}
+
+function extractCondition(listing: EnrichedEbayListing): ConditionResult {
+  const descriptors = listing.conditionDescriptors || [];
+
+  // Check if graded (conditionId 2750 or descriptor 27501 present)
+  const graderDescriptor = descriptors.find(d => d.name === '27501');
+  const gradeDescriptor = descriptors.find(d => d.name === '27502');
+  const certDescriptor = descriptors.find(d => d.name === '27503');
+
+  if (graderDescriptor) {
+    // GRADED CARD
+    const companyId = graderDescriptor.values?.[0];
+    const gradeId = gradeDescriptor?.values?.[0];
+    return {
+      condition: 'NM',  // Graded cards are priced separately, not by raw condition
+      source: 'condition_descriptor',
+      isGraded: true,
+      gradingCompany: GRADER_MAP[companyId] || 'Unknown',
+      grade: GRADE_MAP[gradeId] || null,
+      certNumber: certDescriptor?.values?.[0] || null,
+      rawDescriptorIds: [companyId, gradeId, certDescriptor?.values?.[0]].filter(Boolean),
+    };
+  }
+
+  // Check for ungraded condition descriptor (name 40001)
+  const conditionDescriptor = descriptors.find(d => d.name === '40001');
+  if (conditionDescriptor) {
+    const conditionId = conditionDescriptor.values?.[0];
+    const mapped = UNGRADED_CONDITION_MAP[conditionId];
+    if (mapped) {
+      return {
+        condition: mapped,
+        source: 'condition_descriptor',
+        isGraded: false,
+        gradingCompany: null, grade: null, certNumber: null,
+        rawDescriptorIds: [conditionId],
+      };
+    }
+  }
+
+  // Fallback: localizedAspects (from getItem enrichment)
+  const aspects = listing.localizedAspects;
+  if (aspects?.['Card Condition']) {
+    const mapped = mapAspectToCondition(aspects['Card Condition']);
+    if (mapped) {
+      return { condition: mapped, source: 'localized_aspects', isGraded: false,
+               gradingCompany: null, grade: null, certNumber: null, rawDescriptorIds: [] };
+    }
+  }
+
+  // Fallback: title parsing (least reliable)
+  const titleCondition = parseConditionFromTitle(listing.title);
+  if (titleCondition) {
+    return { condition: titleCondition, source: 'title', isGraded: false,
+             gradingCompany: null, grade: null, certNumber: null, rawDescriptorIds: [] };
+  }
+
+  // Default: LP (conservative — slightly undervalues) with confidence penalty
+  return { condition: 'LP', source: 'default', isGraded: false,
+           gradingCompany: null, grade: null, certNumber: null, rawDescriptorIds: [] };
+}
+```
+
+**Priority order:** Condition descriptors (most reliable, numeric IDs from eBay) → localizedAspects (seller-filled dropdowns) → title parsing (regex, least reliable) → default LP.
+
+### 3.5 EbayListing Interface
 
 ```typescript
 interface EbayListing {
@@ -445,19 +655,24 @@ interface EbayListing {
   title: string;
   price: { value: number; currency: string };
   shipping: { value: number; currency: string } | null;
-  condition: string | null;
-  conditionId: string | null;
-  conditionDescriptors: ConditionDescriptor[];
+  condition: string | null;              // Text: "Used", "Like New", etc.
+  conditionId: string | null;            // "2750" (Graded) or "4000" (Ungraded)
+  conditionDescriptors: ConditionDescriptor[];  // Only populated after getItem()
   image: string | null;
   itemWebUrl: string;
   seller: { username: string; feedbackScore: number; feedbackPercentage: number };
-  listingDate: string;                           // itemCreationDate
-  quantitySold: number;                          // copies sold from this listing
-  buyingOptions: string[];                       // ['FIXED_PRICE']
+  listingDate: string;                   // itemCreationDate
+  quantitySold: number;                  // Copies sold from this listing
+  buyingOptions: string[];               // ['FIXED_PRICE']
 
-  // Phase 2 enrichment (null until getItem called):
+  // Phase 2 enrichment (null until getItem() called):
   localizedAspects: Record<string, string> | null;
   enriched: boolean;
+}
+
+interface ConditionDescriptor {
+  name: string;       // "40001" | "27501" | "27502" | "27503"
+  values: string[];   // ["400010"] | ["275010"] | ["275020"] | ["cert-number"]
 }
 ```
 
@@ -544,27 +759,85 @@ Weighted geometric mean with these weights:
 | 0.45–0.64 | Low | Log for training only, do not display |
 | < 0.45 | Reject | Skip entirely |
 
-### 4.6 Graded Card Detection
+### 4.6 Variant Resolution — Getting the Right Card Version
 
-Graded cards are now first-class citizens, not ignored:
+Many Pokemon cards exist in multiple variants within the same expansion. For example, Base Set Charizard #4/102 exists as:
+- `holofoil` (the standard holo) — NM ~$350
+- `firstEditionHolofoil` (1st Edition stamp) — NM ~$5,000
+
+Getting the wrong variant means comparing against the wrong price — a 14x difference in this case.
+
+**Variant signals come from three sources (in priority order):**
+
+1. **eBay conditionDescriptors / localizedAspects** (Phase 2 enrichment) — most reliable
+2. **Title keywords** — "holo", "reverse holo", "1st edition", "shadowless", "full art", "alt art"
+3. **Card data inference** — if the card only has one variant, use it automatically
 
 ```typescript
-interface GradedSignals {
-  isGraded: boolean;
-  company: 'PSA' | 'CGC' | 'BGS' | 'ACE' | null;
-  grade: string | null;          // "10", "9.5", "9"
-  isPerfect: boolean;            // PSA 10, CGC 10 Pristine, BGS 10 Black Label
-  label: string | null;          // "GEM MINT", "PRISTINE"
+// Variant keyword mapping (title → Scrydex variant names)
+const VARIANT_KEYWORDS: Record<string, string[]> = {
+  'holofoil':              ['holo', 'holographic', 'holo rare'],
+  'reverseHolofoil':       ['reverse holo', 'reverse', 'rev holo', 'reverse holographic'],
+  'firstEditionHolofoil':  ['1st edition holo', '1st ed holo', 'first edition holo'],
+  'firstEditionNormal':    ['1st edition', '1st ed', 'first edition'],  // no "holo" keyword
+  'unlimitedHolofoil':     ['unlimited holo'],
+  'unlimitedNormal':       ['unlimited'],
+  'normal':                [],  // Default if no variant keywords found
+};
+
+function resolveVariant(
+  listing: NormalizedListing,
+  cardVariants: LocalVariant[]
+): { variant: LocalVariant; method: string; confidence: number } {
+  // 1. If only one variant exists with prices → use it (common for modern singles)
+  const pricedVariants = cardVariants.filter(v =>
+    Object.values(v.prices.raw || {}).some(c => c?.market != null)
+  );
+  if (pricedVariants.length === 1) {
+    return { variant: pricedVariants[0], method: 'single_variant', confidence: 0.95 };
+  }
+
+  // 2. Match variant keywords from title/structured data against card's available variants
+  const detected = detectVariantFromSignals(listing);
+  if (detected) {
+    const match = cardVariants.find(v =>
+      VARIANT_KEYWORDS[v.name]?.some(kw => detected.includes(kw)) || v.name === detected
+    );
+    if (match) {
+      return { variant: match, method: 'keyword_match', confidence: 0.85 };
+    }
+  }
+
+  // 3. Default to the LOWEST-PRICED variant (conservative — underestimates profit)
+  const cheapest = pricedVariants.sort((a, b) =>
+    (a.prices.raw?.NM?.market || 0) - (b.prices.raw?.NM?.market || 0)
+  )[0];
+  if (cheapest) {
+    return { variant: cheapest, method: 'default_cheapest', confidence: 0.50 };
+  }
+
+  return null; // No variant with pricing data
 }
 ```
 
-When a graded card is detected:
-1. Match to card as normal (the underlying card is the same)
-2. Use graded pricing from `variants.prices.graded` instead of raw pricing
-3. Compare eBay price against the correct graded tier price (e.g., PSA 10 market)
-4. Flag as `isGraded: true` in the deal — separate filter in the UI
+**Why default to cheapest variant:** If we can't determine the variant, using the cheapest price means we'll underestimate profit rather than overestimate it. A deal that's still profitable at the cheapest variant price is safe to show. The alternative (guessing the expensive variant) would create false positives.
 
-**Grading opportunity detection:** If a listing appears to be a raw card priced well below the PSA 10 value for that card, flag it as a potential grading opportunity. This requires the card to have graded pricing data from Scrydex.
+### 4.7 Graded Card Handling
+
+Graded card detection now uses the real eBay condition descriptor IDs from §3.4 rather than title parsing alone.
+
+**Detection priority:**
+1. `conditionId: '2750'` (LIKE_NEW) + descriptor `27501` (Professional Grader) — definitive
+2. Title keywords: "PSA 10", "CGC 9.5", "BGS 10 Black Label", etc. — fallback before enrichment
+
+**When a graded card is detected:**
+1. Match to the underlying card as normal (the card identity is the same)
+2. Extract grading company + grade from descriptors (§3.4)
+3. Look up graded pricing from `variants.graded_prices` (e.g., `PSA_10`, `CGC_9.5`)
+4. Compare eBay price against the correct graded tier price
+5. Flag as `isGraded: true` in the deal — separate filter in the UI
+
+**Grading opportunity detection:** If a listing appears to be an ungraded raw card priced well below the PSA 10 value for that card, flag it as a potential grading opportunity. This is a separate signal shown in the deal detail panel — "Grading upside: PSA 10 value is £XXX".
 
 ---
 
