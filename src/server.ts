@@ -4,6 +4,7 @@ import { pool } from './db/pool.js';
 import { runMigrations } from './db/migrate.js';
 import app from './app.js';
 import { syncAll } from './services/sync/sync-service.js';
+import { refreshRate } from './services/exchange-rate/exchange-rate-service.js';
 
 const logger = pino({ name: 'server' });
 
@@ -157,7 +158,18 @@ async function boot(): Promise<void> {
     await runVerification();
   }
 
-  // Step 4: Start Express
+  // Step 4: Fetch initial exchange rate
+  try {
+    const rate = await refreshRate();
+    logger.info({ rate }, 'Exchange rate fetched on boot');
+  } catch (err) {
+    logger.warn(
+      { error: err instanceof Error ? err.message : String(err) },
+      'Failed to fetch exchange rate on boot — scanner will not work until a rate is available',
+    );
+  }
+
+  // Step 5: Start Express
   app.listen(config.PORT, () => {
     logger.info(`Server ready on port ${config.PORT}`);
   });
