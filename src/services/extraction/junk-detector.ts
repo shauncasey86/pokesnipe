@@ -25,6 +25,13 @@ const FAKE_PATTERNS = [
   /\baltered art\b/,
 ];
 
+const NON_ENGLISH_PATTERNS = [
+  /[\u3040-\u309F]/, // Hiragana
+  /[\u30A0-\u30FF]/, // Katakana
+  /[\u4E00-\u9FFF]/, // CJK Unified Ideographs (Chinese/Japanese)
+  /[\uAC00-\uD7AF]/, // Korean Hangul
+];
+
 const NON_CARD_PATTERNS = [
   /\bbooster box\b/,
   /\bbooster\b/,
@@ -55,6 +62,12 @@ export function detectJunk(cleanedTitle: string): { isJunk: boolean; reason?: st
   for (const pattern of NON_CARD_PATTERNS) {
     if (pattern.test(cleanedTitle)) {
       return { isJunk: true, reason: 'non_card' };
+    }
+  }
+
+  for (const pattern of NON_ENGLISH_PATTERNS) {
+    if (pattern.test(cleanedTitle)) {
+      return { isJunk: true, reason: 'non_english' };
     }
   }
 

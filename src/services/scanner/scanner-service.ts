@@ -20,6 +20,31 @@ import { getValidRate } from '../exchange-rate/exchange-rate-service.js';
 
 const log = pino({ name: 'scanner' });
 
+type Condition = 'NM' | 'LP' | 'MP' | 'HP';
+
+/**
+ * Build a condition comps snapshot for all conditions (not just the matched one).
+ * Converts USD prices to GBP for the deal record.
+ */
+function buildConditionComps(
+  prices: Partial<Record<Condition, { low: number; market: number }>>,
+  exchangeRate: number,
+): Record<string, unknown> {
+  const comps: Record<string, unknown> = {};
+  for (const condition of ['NM', 'LP', 'MP', 'HP'] as Condition[]) {
+    const price = prices[condition];
+    if (price) {
+      comps[condition] = {
+        lowUSD: price.low,
+        marketUSD: price.market,
+        lowGBP: Math.round(price.low * exchangeRate * 100) / 100,
+        marketGBP: Math.round(price.market * exchangeRate * 100) / 100,
+      };
+    }
+  }
+  return comps;
+}
+
 export interface ScanResult {
   dealsCreated: number;
   listingsProcessed: number;
@@ -234,6 +259,9 @@ export async function runScanCycle(): Promise<ScanResult> {
       // Skip if not profitable after enrichment
       if (realProfit.profitPercent < 5) continue;
 
+      // Confidence gate: spec requires >= 0.65 to create a deal
+      if (enrichedMatch.confidence.composite < 0.65) continue;
+
       // 3g. Classify tier and create deal
       const tier = classifyTier(
         realProfit.profitPercent,
@@ -283,6 +311,7 @@ export async function runScanCycle(): Promise<ScanResult> {
           phaseTwoProfit: realProfit,
           enrichmentUsed: true,
         },
+        conditionComps: buildConditionComps(enrichedMatch.variant.prices, exchangeRate),
       });
 
       if (deal) {

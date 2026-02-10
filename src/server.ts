@@ -7,6 +7,9 @@ import { syncAll } from './services/sync/sync-service.js';
 import { refreshRate } from './services/exchange-rate/exchange-rate-service.js';
 import { startScanLoop } from './services/scanner/index.js';
 
+const ONE_HOUR_MS = 60 * 60 * 1000;
+const STALE_SYNC_HOURS = 48;
+
 const logger = pino({ name: 'server' });
 
 // Catch kills/OOM before pino can flush
@@ -170,13 +173,70 @@ async function boot(): Promise<void> {
     );
   }
 
-  // Step 5: Start Express
+  // Step 5: Check card index freshness — trigger sync if stale (>48h)
+  try {
+    const { rows } = await pool.query<{ last_synced: Date }>(
+      `SELECT MAX(last_synced_at) AS last_synced FROM cards`,
+    );
+    const lastSynced = rows[0]?.last_synced;
+    if (!lastSynced) {
+      logger.info('No cards in database — triggering initial sync');
+      syncAll().catch((err: unknown) =>
+        logger.error({ error: err instanceof Error ? err.message : String(err) }, 'Initial sync failed'),
+      );
+    } else {
+      const ageHours = (Date.now() - new Date(lastSynced).getTime()) / (1000 * 60 * 60);
+      if (ageHours > STALE_SYNC_HOURS) {
+        logger.info({ ageHours: Math.round(ageHours) }, 'Card index is stale — triggering sync');
+        syncAll().catch((err: unknown) =>
+          logger.error({ error: err instanceof Error ? err.message : String(err) }, 'Stale sync failed'),
+        );
+      } else {
+        logger.info({ ageHours: Math.round(ageHours) }, 'Card index is fresh');
+      }
+    }
+  } catch (err) {
+    logger.warn({ error: err instanceof Error ? err.message : String(err) }, 'Failed to check card freshness');
+  }
+
+  // Step 6: Start Express
   app.listen(config.PORT, () => {
     logger.info(`Server ready on port ${config.PORT}`);
 
-    // Step 6: Start scanner loop (after server is listening and exchange rate is available)
+    // Step 7: Start scanner loop (after server is listening and exchange rate is available)
     startScanLoop();
     logger.info('Scanner loop started');
+
+    // Step 8: Schedule hourly exchange rate refresh
+    setInterval(async () => {
+      try {
+        const rate = await refreshRate();
+        logger.info({ rate }, 'Hourly exchange rate refresh');
+      } catch (err) {
+        logger.error({ error: err instanceof Error ? err.message : String(err) }, 'Hourly exchange rate refresh failed');
+      }
+    }, ONE_HOUR_MS);
+    logger.info('Exchange rate hourly refresh scheduled');
+
+    // Step 9: Schedule hourly deal cleanup (mark expired, delete old)
+    setInterval(async () => {
+      try {
+        // Mark expired deals
+        const { rowCount: expired } = await pool.query(
+          `UPDATE deals SET status = 'expired' WHERE status = 'active' AND expires_at < NOW()`,
+        );
+        // Delete deals older than 30 days that aren't reviewed
+        const { rowCount: deleted } = await pool.query(
+          `DELETE FROM deals WHERE status IN ('expired', 'sold') AND created_at < NOW() - INTERVAL '30 days'`,
+        );
+        if ((expired ?? 0) > 0 || (deleted ?? 0) > 0) {
+          logger.info({ expired, deleted }, 'Deal cleanup complete');
+        }
+      } catch (err) {
+        logger.error({ error: err instanceof Error ? err.message : String(err) }, 'Deal cleanup failed');
+      }
+    }, ONE_HOUR_MS);
+    logger.info('Deal cleanup hourly job scheduled');
   });
 }
 

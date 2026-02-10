@@ -14,7 +14,8 @@ const HTML_ENTITY_REGEX = /&amp;|&#39;|&lt;|&gt;|&quot;/g;
 export function cleanTitle(raw: string): { cleaned: string; original: string } {
   const original = raw;
 
-  let cleaned = raw.replace(EMOJI_REGEX, '');
+  let cleaned = raw.normalize('NFC');
+  cleaned = cleaned.replace(EMOJI_REGEX, '');
   cleaned = cleaned.replace(HTML_ENTITY_REGEX, (match) => HTML_ENTITIES[match]!);
   cleaned = cleaned.replace(/\s+/g, ' ');
   cleaned = cleaned.trim();
