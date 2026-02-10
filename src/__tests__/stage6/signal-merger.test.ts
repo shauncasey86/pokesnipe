@@ -132,6 +132,34 @@ describe('mergeSignals', () => {
     expect(result.cardNumber).toEqual({ number: 125, prefix: null, denominator: 94 });
   });
 
+  it('parses structured promo cardNumber (sm60)', () => {
+    const result = mergeSignals(
+      { cardNumber: { number: 60, prefix: 'SM', denominator: null }, variant: null },
+      {
+        cardName: 'Charizard GX',
+        setName: 'Hidden Fates: Shiny Vault',
+        cardNumber: 'sm60',
+        rarity: null,
+        language: null,
+        gradingCompany: null,
+        grade: null,
+        year: null,
+      },
+      {
+        condition: 'NM',
+        source: 'condition_descriptor',
+        isGraded: false,
+        gradingCompany: null,
+        grade: null,
+        certNumber: null,
+        rawDescriptors: [],
+      },
+      { itemId: 'z', title: 'Charizard GX SM60', cleanedTitle: 'charizard gx sm60' },
+    );
+    expect(result.cardNumber).toEqual({ number: 60, prefix: 'SM', denominator: null });
+    expect(result.signalSources['cardNumber']).toBe('structured');
+  });
+
   it('tracks condition source', () => {
     const result = mergeSignals(
       { cardNumber: null, variant: null },

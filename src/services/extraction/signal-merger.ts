@@ -50,10 +50,21 @@ export function mergeSignals(
       };
       signalSources['cardNumber'] = 'structured';
     } else {
-      const parsed = parseInt(structured.cardNumber, 10);
-      if (!isNaN(parsed)) {
-        cardNumber = { number: parsed, prefix: null, denominator: null };
+      // Try promo format: "sm60", "SWSH050", etc.
+      const promoMatch = structured.cardNumber.match(/^(SV|TG|GG|SWSH|SM|XY)0*(\d+)$/i);
+      if (promoMatch) {
+        cardNumber = {
+          number: parseInt(promoMatch[2]!, 10),
+          prefix: promoMatch[1]!.toUpperCase(),
+          denominator: null,
+        };
         signalSources['cardNumber'] = 'structured';
+      } else {
+        const parsed = parseInt(structured.cardNumber, 10);
+        if (!isNaN(parsed)) {
+          cardNumber = { number: parsed, prefix: null, denominator: null };
+          signalSources['cardNumber'] = 'structured';
+        }
       }
     }
   }

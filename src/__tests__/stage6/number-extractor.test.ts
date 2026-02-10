@@ -69,4 +69,37 @@ describe('extractCardNumber', () => {
       denominator: 202,
     });
   });
+
+  it('extracts standalone promo SM60', () => {
+    expect(extractCardNumber('charizard gx sm60')).toEqual({
+      number: 60,
+      prefix: 'SM',
+      denominator: null,
+    });
+  });
+
+  it('extracts standalone promo SWSH050', () => {
+    expect(extractCardNumber('pikachu v swsh050 promo')).toEqual({
+      number: 50,
+      prefix: 'SWSH',
+      denominator: null,
+    });
+  });
+
+  it('extracts standalone promo XY17', () => {
+    expect(extractCardNumber('charizard ex xy17')).toEqual({
+      number: 17,
+      prefix: 'XY',
+      denominator: null,
+    });
+  });
+
+  it('prefers fraction over promo when both present', () => {
+    // "sv065/198" should match fraction, not promo
+    expect(extractCardNumber('sv065/198')).toEqual({
+      number: 65,
+      prefix: 'SV',
+      denominator: 198,
+    });
+  });
 });
