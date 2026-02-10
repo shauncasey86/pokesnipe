@@ -2,18 +2,17 @@
  * eBay Buyer Protection fee calculator (UK tiered bands).
  *
  * Tiers:
- *   First  £10.00:           3%
- *   £10.01 – £50.00:         5%
- *   £50.01 – £500.00:        4%
- *   £500.01+:                2%
- *   Plus flat fee:           £0.10 per transaction
+ *   Up to £20:               7%
+ *   £20.01 – £300:           4%
+ *   £300.01 – £4,000:        2%
+ *   Over £4,000:             0% (no additional fee)
+ *   Plus flat fee:           £0.10 per item
  */
 
 const BANDS: { ceiling: number; rate: number }[] = [
-  { ceiling: 10, rate: 0.03 },
-  { ceiling: 50, rate: 0.05 },
-  { ceiling: 500, rate: 0.04 },
-  { ceiling: Infinity, rate: 0.02 },
+  { ceiling: 20, rate: 0.07 },
+  { ceiling: 300, rate: 0.04 },
+  { ceiling: 4000, rate: 0.02 },
 ];
 
 const FLAT_FEE = 0.1;
