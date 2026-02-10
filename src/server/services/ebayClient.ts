@@ -3,13 +3,17 @@ import { config } from "../config.js";
 import { TokenBucket } from "./rateLimiter.js";
 import { trackApiCall } from "./apiUsageTracker.js";
 
+// Auto-detect sandbox vs production based on credential prefix
+const isSandbox = config.EBAY_CLIENT_SECRET.trim().startsWith("SBX-");
+const ebayBase = isSandbox ? "https://api.sandbox.ebay.com" : "https://api.ebay.com";
+
 const authClient = axios.create({
-  baseURL: "https://api.ebay.com/identity/v1",
+  baseURL: `${ebayBase}/identity/v1`,
   timeout: 15000
 });
 
 const apiClient = axios.create({
-  baseURL: "https://api.ebay.com/buy/browse/v1",
+  baseURL: `${ebayBase}/buy/browse/v1`,
   timeout: 15000
 });
 
