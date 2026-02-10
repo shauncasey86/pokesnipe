@@ -3,6 +3,15 @@ import type { ExpansionRow, CardRow, VariantRow } from './transformers.js';
 
 const CHUNK_SIZE = 100;
 
+/** Deduplicate an array by a key function. Last occurrence wins. */
+function dedup<T>(arr: T[], keyFn: (item: T) => string): T[] {
+  const map = new Map<string, T>();
+  for (const item of arr) {
+    map.set(keyFn(item), item);
+  }
+  return Array.from(map.values());
+}
+
 function chunk<T>(arr: T[], size: number): T[][] {
   const chunks: T[][] = [];
   for (let i = 0; i < arr.length; i += size) {
@@ -63,8 +72,9 @@ export async function batchUpsertExpansions(expansions: ExpansionRow[]): Promise
 
 export async function batchUpsertCards(cards: CardRow[]): Promise<number> {
   let total = 0;
+  const dedupedCards = dedup(cards, (c) => c.scrydex_card_id);
 
-  for (const batch of chunk(cards, CHUNK_SIZE)) {
+  for (const batch of chunk(dedupedCards, CHUNK_SIZE)) {
     const values: unknown[] = [];
     const rows: string[] = [];
 
@@ -124,8 +134,9 @@ export async function batchUpsertCards(cards: CardRow[]): Promise<number> {
 
 export async function batchUpsertVariants(variants: VariantRow[]): Promise<number> {
   let total = 0;
+  const dedupedVariants = dedup(variants, (v) => `${v.card_id}:${v.name}`);
 
-  for (const batch of chunk(variants, CHUNK_SIZE)) {
+  for (const batch of chunk(dedupedVariants, CHUNK_SIZE)) {
     const values: unknown[] = [];
     const rows: string[] = [];
 
