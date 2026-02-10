@@ -16,7 +16,7 @@ export interface ExtractionResult {
 export function extractSignals(listing: {
   itemId: string;
   title: string;
-  conditionDescriptors?: Array<{ name: string; values: Array<{ content: string; additionalInfo?: string[] }> | string[] }>;
+  conditionDescriptors?: Array<{ name: string; values: string[] }>;
   localizedAspects?: Array<{ name: string; value: string }> | null;
 }): ExtractionResult {
   // 1. Clean the title
