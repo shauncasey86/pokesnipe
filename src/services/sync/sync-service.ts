@@ -97,33 +97,54 @@ export async function syncAll(): Promise<SyncResult> {
     let totalCards = 0;
     let totalVariants = 0;
 
-    for (const expansion of englishExpansions) {
+    for (let ei = 0; ei < englishExpansions.length; ei++) {
+      const expansion = englishExpansions[ei];
       let page = 1;
       let hasMore = true;
       let expansionCards = 0;
       let expansionVariants = 0;
 
-      while (hasMore) {
-        const response = await scrydex.getExpansionCards(expansion.id, page);
+      try {
+        while (hasMore) {
+          const response = await scrydex.getExpansionCards(expansion.id, page);
 
-        // Transform cards and variants
-        const cardRows = response.data.map((c) => transformCard(c, expansion.id));
-        const variantRows = response.data.flatMap((c) =>
-          (c.variants || []).map((v) => transformVariant(v, c.id)),
-        );
+          // Transform cards and variants
+          const cardRows = response.data.map((c) => {
+            try {
+              return transformCard(c, expansion.id);
+            } catch (err) {
+              logger.error(`Card transform failed: card=${c.id} expansion=${expansion.id} error=${err}`);
+              throw err;
+            }
+          });
+          const variantRows = response.data.flatMap((c) =>
+            (c.variants || []).map((v) => {
+              try {
+                return transformVariant(v, c.id);
+              } catch (err) {
+                logger.error(`Variant transform failed: card=${c.id} variant=${v.name} error=${err}`);
+                throw err;
+              }
+            }),
+          );
 
-        // Batch upsert
-        const cardsUpserted = await batchUpsertCards(cardRows);
-        const variantsUpserted = await batchUpsertVariants(variantRows);
+          // Batch upsert
+          const cardsUpserted = await batchUpsertCards(cardRows);
+          const variantsUpserted = await batchUpsertVariants(variantRows);
 
-        totalCards += cardsUpserted;
-        totalVariants += variantsUpserted;
-        expansionCards += cardsUpserted;
-        expansionVariants += variantsUpserted;
+          totalCards += cardsUpserted;
+          totalVariants += variantsUpserted;
+          expansionCards += cardsUpserted;
+          expansionVariants += variantsUpserted;
 
-        // Check if more pages
-        hasMore = page * 100 < response.totalCount;
-        page++;
+          // Check if more pages
+          hasMore = page * 100 < response.totalCount;
+          page++;
+        }
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        logger.error(`Expansion failed [${ei + 1}/${englishExpansions.length}]: ${expansion.name} (${expansion.id}) page=${page} error=${msg}`);
+        throw err;
       }
 
       logger.info(
@@ -148,7 +169,8 @@ export async function syncAll(): Promise<SyncResult> {
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     const stack = error instanceof Error ? error.stack : '';
-    logger.error({ errorMessage: message, stack }, 'syncAll failed');
+    logger.error(`syncAll failed: ${message}`);
+    logger.error(`Stack: ${stack}`);
     await failSyncLog(logId, message).catch(() => {});
     throw error;
   }
