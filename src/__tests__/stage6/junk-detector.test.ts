@@ -15,8 +15,8 @@ describe('detectJunk', () => {
       expect(detectJunk('pokemon bundle 20 cards')).toEqual({ isJunk: true, reason: 'bulk_lot' });
     });
 
-    it('detects collection', () => {
-      expect(detectJunk('pokemon collection box')).toEqual({ isJunk: true, reason: 'bulk_lot' });
+    it('does not false positive on collection (appears in product names)', () => {
+      expect(detectJunk('espeon ex premium figure collection promo card')).toEqual({ isJunk: false });
     });
 
     it('does not false positive on lot inside words', () => {
