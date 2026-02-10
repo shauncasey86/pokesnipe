@@ -356,7 +356,9 @@ export default function App() {
   const [toast, setToast] = useState<any>(null);
   const [saved, setSaved] = useState(false);
   const [sseStatus, setSseStatus] = useState<string>("connected");
+  const [showHelp, setShowHelp] = useState(false);
   const feedRef = useRef<HTMLDivElement>(null);
+  const sseRef = useRef<EventSource | null>(null);
   const selDeal = deals.find(d => d.id === selId) || null;
   const tog = (k: string, v: string) => setF((prev: any) => { const s = new Set(prev[k]); s.has(v) ? s.delete(v) : s.add(v); return { ...prev, [k]: s }; });
 
@@ -367,29 +369,62 @@ export default function App() {
         const r = await fetch("/api/status");
         if (r.status === 401) return;
         setLoggedIn(true);
-        const [dr, sr] = await Promise.all([fetch("/api/deals?limit=50"), fetch("/api/status")]);
+        const [dr, sr, pr] = await Promise.all([fetch("/api/deals?limit=50"), fetch("/api/status"), fetch("/api/preferences")]);
         if (dr.ok) setDeals((await dr.json()).deals || []);
         if (sr.ok) setStatus(await sr.json());
+        if (pr.ok) {
+          const saved = await pr.json();
+          if (saved && Object.keys(saved).length > 0) {
+            setF(prev => ({
+              ...prev,
+              tiers: saved.tiers ? new Set(saved.tiers) : prev.tiers,
+              conds: saved.conds ? new Set(saved.conds) : prev.conds,
+              confs: saved.confs ? new Set(saved.confs) : prev.confs,
+              liqs: saved.liqs ? new Set(saved.liqs) : prev.liqs,
+              minP: saved.minP ?? prev.minP,
+              time: saved.time ?? prev.time,
+              graded: saved.graded ?? prev.graded
+            }));
+          }
+        }
       } catch { /* offline */ }
     })();
   }, []);
 
-  // SSE
+  // SSE with auto-reconnect
   useEffect(() => {
     if (!loggedIn) return;
-    let lostTimer: any;
-    const source = new EventSource("/api/deals/stream");
-    source.addEventListener("deal", (e: any) => {
-      const d = JSON.parse(e.data);
-      setDeals(prev => [d, ...prev]);
-      if (d.tier === "grail") { setToast(d); setTimeout(() => setToast(null), 5000); }
-      if (feedRef.current && feedRef.current.scrollTop > 100) setPill(true);
-    });
-    source.addEventListener("status", (e: any) => setStatus(JSON.parse(e.data)));
-    source.addEventListener("ping", () => setSseStatus("connected"));
-    source.onopen = () => setSseStatus("connected");
-    source.onerror = () => { setSseStatus("reconnecting"); lostTimer = setTimeout(() => { if (source.readyState === 2) setSseStatus("lost"); }, 15000); };
-    return () => { source.close(); clearTimeout(lostTimer); };
+    let retryTimer: any;
+    let retryCount = 0;
+    let dead = false;
+
+    const connect = () => {
+      if (dead) return;
+      const source = new EventSource("/api/deals/stream");
+      sseRef.current = source;
+
+      source.addEventListener("deal", (e: any) => {
+        const d = JSON.parse(e.data);
+        setDeals(prev => [d, ...prev]);
+        if (d.tier === "grail") { setToast(d); setTimeout(() => setToast(null), 5000); }
+        if (feedRef.current && feedRef.current.scrollTop > 100) setPill(true);
+      });
+      source.addEventListener("status", (e: any) => setStatus(JSON.parse(e.data)));
+      source.addEventListener("ping", () => { retryCount = 0; setSseStatus("connected"); });
+      source.onopen = () => { retryCount = 0; setSseStatus("connected"); };
+      source.onerror = () => {
+        source.close();
+        sseRef.current = null;
+        if (dead) return;
+        retryCount++;
+        const delay = Math.min(retryCount * 3000, 30000);
+        setSseStatus("reconnecting");
+        retryTimer = setTimeout(connect, delay);
+      };
+    };
+
+    connect();
+    return () => { dead = true; clearTimeout(retryTimer); sseRef.current?.close(); sseRef.current = null; };
   }, [loggedIn]);
 
   // Filter
@@ -430,7 +465,35 @@ export default function App() {
     setSaved(true); setTimeout(() => setSaved(false), 2000);
   };
 
-  if (!loggedIn) return <Login onLogin={() => { setLoggedIn(true); fetch("/api/deals?limit=50").then(r => r.json()).then(d => setDeals(d.deals || [])).catch(() => {}); fetch("/api/status").then(r => r.json()).then(setStatus).catch(() => {}); }} />;
+  const toggleScanner = async () => {
+    try {
+      const r = await fetch("/api/scanner/toggle", { method: "POST" });
+      if (r.ok) {
+        const d = await r.json();
+        setStatus((prev: any) => prev ? { ...prev, scannerPaused: d.paused } : prev);
+      }
+    } catch { /* ignore */ }
+  };
+
+  if (!loggedIn) return <Login onLogin={() => {
+    setLoggedIn(true);
+    fetch("/api/deals?limit=50").then(r => r.json()).then(d => setDeals(d.deals || [])).catch(() => {});
+    fetch("/api/status").then(r => r.json()).then(setStatus).catch(() => {});
+    fetch("/api/preferences").then(r => r.ok ? r.json() : null).then(saved => {
+      if (saved && Object.keys(saved).length > 0) {
+        setF(prev => ({
+          ...prev,
+          tiers: saved.tiers ? new Set(saved.tiers) : prev.tiers,
+          conds: saved.conds ? new Set(saved.conds) : prev.conds,
+          confs: saved.confs ? new Set(saved.confs) : prev.confs,
+          liqs: saved.liqs ? new Set(saved.liqs) : prev.liqs,
+          minP: saved.minP ?? prev.minP,
+          time: saved.time ?? prev.time,
+          graded: saved.graded ?? prev.graded
+        }));
+      }
+    }).catch(() => {});
+  }} />;
 
   const grailCount = deals.filter(d => d.tier === "grail").length;
   const hitCount = deals.filter(d => d.tier === "hit").length;
@@ -456,10 +519,11 @@ export default function App() {
             </button>
           </GradBorder>
           <button onClick={() => { setShowSettings(true); setSettingsTab("general"); }} style={{ width: 34, height: 34, display: "flex", alignItems: "center", justifyContent: "center", borderRadius: "var(--r-pill)", background: "var(--glass)", border: "1px solid var(--brd)", color: "var(--tMut)", fontSize: 14 }}>⚙</button>
-          <div style={{ display: "flex", alignItems: "center", gap: 5, padding: "0 10px", height: 34, borderRadius: "var(--r-pill)", background: "var(--glass)", border: "1px solid var(--brd)" }}>
-            <div style={{ width: 6, height: 6, borderRadius: "50%", background: sseStatus === "connected" ? "var(--green)" : sseStatus === "reconnecting" ? "var(--amber)" : "var(--red)", boxShadow: "0 0 6px rgba(52,211,153,0.5)", animation: "pulse 3s ease infinite" }} />
-            <span className="fl-label" style={{ fontFamily: "var(--fm)", fontSize: 9, color: "var(--tMut)", letterSpacing: 1 }}>LIVE</span>
-          </div>
+          <button onClick={() => setShowHelp(true)} style={{ width: 34, height: 34, display: "flex", alignItems: "center", justifyContent: "center", borderRadius: "var(--r-pill)", background: "var(--glass)", border: "1px solid var(--brd)", color: "var(--tMut)", fontSize: 14, fontWeight: 700 }}>?</button>
+          <button onClick={toggleScanner} title={status?.scannerPaused ? "Scanner paused - click to resume" : "Scanner active - click to pause"} style={{ display: "flex", alignItems: "center", gap: 5, padding: "0 10px", height: 34, borderRadius: "var(--r-pill)", background: status?.scannerPaused ? "rgba(248,113,113,0.06)" : "var(--glass)", border: `1px solid ${status?.scannerPaused ? "rgba(248,113,113,0.2)" : "var(--brd)"}`, cursor: "pointer" }}>
+            <div style={{ width: 6, height: 6, borderRadius: "50%", background: status?.scannerPaused ? "var(--red)" : sseStatus === "connected" ? "var(--green)" : sseStatus === "reconnecting" ? "var(--amber)" : "var(--red)", boxShadow: `0 0 6px ${status?.scannerPaused ? "rgba(248,113,113,0.5)" : "rgba(52,211,153,0.5)"}`, animation: status?.scannerPaused ? "none" : "pulse 3s ease infinite" }} />
+            <span className="fl-label" style={{ fontFamily: "var(--fm)", fontSize: 9, color: status?.scannerPaused ? "var(--red)" : "var(--tMut)", letterSpacing: 1 }}>{status?.scannerPaused ? "PAUSED" : "LIVE"}</span>
+          </button>
         </div>
       </header>
 
@@ -477,10 +541,9 @@ export default function App() {
 
       {/* SSE BANNER */}
       {sseStatus !== "connected" && (
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 10, padding: "8px 24px", background: sseStatus === "lost" ? "rgba(248,113,113,0.1)" : "rgba(251,191,36,0.08)", borderBottom: `1px solid ${sseStatus === "lost" ? "rgba(248,113,113,0.2)" : "rgba(251,191,36,0.15)"}`, flexShrink: 0 }}>
-          <div style={{ width: 6, height: 6, borderRadius: "50%", background: sseStatus === "lost" ? "var(--red)" : "var(--amber)", animation: "pulse 1.5s ease infinite" }} />
-          <span style={{ fontFamily: "var(--fm)", fontSize: 11, fontWeight: 600, color: sseStatus === "lost" ? "var(--red)" : "var(--amber)" }}>{sseStatus === "lost" ? "Connection lost" : "Reconnecting..."}</span>
-          {sseStatus === "lost" && <button onClick={() => window.location.reload()} style={{ fontFamily: "var(--fm)", fontSize: 10, fontWeight: 600, color: "var(--blue)", padding: "3px 12px", borderRadius: "var(--r-pill)", border: "1px solid rgba(96,165,250,0.3)", background: "rgba(96,165,250,0.06)" }}>Retry</button>}
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 10, padding: "8px 24px", background: "rgba(251,191,36,0.08)", borderBottom: "1px solid rgba(251,191,36,0.15)", flexShrink: 0 }}>
+          <div style={{ width: 6, height: 6, borderRadius: "50%", background: "var(--amber)", animation: "pulse 1.5s ease infinite" }} />
+          <span style={{ fontFamily: "var(--fm)", fontSize: 11, fontWeight: 600, color: "var(--amber)" }}>Reconnecting...</span>
         </div>
       )}
 
@@ -607,6 +670,81 @@ export default function App() {
                 {[["GRAIL deals", "Instant push", "var(--green)"], ["HIT deals", "Instant push", "var(--green)"], ["FLIP deals", "OFF", "var(--tMut)"], ["System warnings", "Push on error", "var(--amber)"]].map(([l, v, c], i) => <div key={i} style={{ display: "flex", justifyContent: "space-between", padding: "7px 0", fontSize: 13 }}><span style={{ fontWeight: 600, color: "var(--tPri)" }}>{l}</span><span style={{ fontFamily: "var(--fm)", fontSize: 10, fontWeight: 600, color: c }}>{v}</span></div>)}
               </div>
             </>}
+          </div>
+        </div>
+      </div>}
+
+      {/* HELP GUIDE */}
+      {showHelp && <div onClick={(e: any) => { if (e.target === e.currentTarget) setShowHelp(false); }} style={{ position: "fixed", inset: 0, zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(7,10,18,0.85)", backdropFilter: "blur(16px)" }}>
+        <div style={{ width: 620, maxWidth: "94vw", maxHeight: "85vh", borderRadius: "var(--r-xl)", background: "rgba(12,16,25,0.96)", border: "1px solid var(--brd2)", display: "flex", flexDirection: "column", overflow: "hidden" }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 22px", borderBottom: "1px solid var(--brd)", flexShrink: 0 }}>
+            <span style={{ fontWeight: 300, fontSize: 12, letterSpacing: 3, color: "var(--tMut)", textTransform: "uppercase" as const }}>Help Guide</span>
+            <button onClick={() => setShowHelp(false)} style={{ width: 30, height: 30, borderRadius: "var(--r-pill)", background: "var(--glass)", border: "1px solid var(--brd)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, color: "var(--tMut)" }}>✕</button>
+          </div>
+          <div style={{ flex: 1, overflowY: "auto", padding: "0 22px 22px" }}>
+            {([
+              { title: "HOW IT WORKS", items: [
+                ["Scrydex Sync", "On startup, PokeSnipe indexes all Pokemon TCG cards and market prices from Scrydex. This refreshes every 24 hours."],
+                ["eBay Scanner", "Every 5 minutes, the scanner searches eBay for Pokemon card listings and compares them against Scrydex market prices."],
+                ["Deal Detection", "When a listing is found below market value (after shipping + eBay buyer protection fees), it appears as a deal in the feed."],
+                ["Live Updates", "New deals stream in real-time via SSE. Grail-tier deals trigger a toast notification."]
+              ]},
+              { title: "DEAL TIERS", items: [
+                ["GRAIL", ">40% profit with high confidence and high liquidity. Chase-tier heavy hitters."],
+                ["HIT", "25-40% profit with high confidence. Solid bangers worth snagging."],
+                ["FLIP", "15-25% profit with medium+ confidence. Quick, reliable flips."],
+                ["SLEEPER", "5-15% profit. Binder flips, lower priority but still profitable."]
+              ]},
+              { title: "FILTER BAR", items: [
+                ["Tier", "Toggle which deal tiers to show (GRAIL / HIT / FLIP / SLEEP). Hover for tooltips."],
+                ["Cond (Condition)", "Filter by card condition: NM (Near Mint), LP (Lightly Played), MP (Moderately Played), HP (Heavily Played)."],
+                ["Liq (Liquidity)", "How easy to resell. HI = lots of buyers, MD = moderate demand, LO = niche."],
+                ["Conf (Confidence)", "Match confidence. HI (>85%) = very sure. MD (65-85%) = probable match."],
+                ["Time", "Show deals from the last 1h, 6h, 24h, or All time."],
+                ["Min%", "Minimum profit percentage. Use +/- to adjust in 5% steps."],
+                ["Graded", "Toggle to show only PSA/BGS/CGC graded cards."],
+                ["SAVE", "Persists your filter settings. They reload automatically on next visit."]
+              ]},
+              { title: "HEADER CONTROLS", items: [
+                ["Search", "Filter deals by card name, number, or expansion. Instant client-side filter."],
+                ["Lookup", "Paste any eBay URL to instantly see profit calculation and card match."],
+                ["Settings", "API keys, Telegram notifications, tier thresholds."],
+                ["? (Help)", "Opens this guide."],
+                ["LIVE / PAUSED", "Click to toggle the scanner. Green = scanning every 5 min. Red = paused."]
+              ]},
+              { title: "DEAL DETAIL PANEL", items: [
+                ["Card Images", "Scrydex reference vs eBay listing side-by-side for visual verification."],
+                ["No BS Pricing", "Full breakdown: eBay price + shipping + buyer protection (flat + tiered bands). USD market price with live FX."],
+                ["Match Confidence", "Composite from 6 signals: Name (30%), Number (20%), Denom (15%), Expansion (15%), Variant (10%), Extract (10%)."],
+                ["Liquidity", "Resale potential: Trend, Prices, Spread, Supply, Sold, Velocity."],
+                ["Comps by Condition", "Market price at NM/LP/MP/HP grades. Current condition highlighted."],
+                ["SNAG ON EBAY", "Direct buy link to the eBay listing."],
+                ["Review", "Rate match accuracy. Feeds the 7-day rolling accuracy in the footer."]
+              ]},
+              { title: "FOOTER METRICS", items: [
+                ["Scanner Status", "Green 'Hunting' = ready. Amber 'Scanning' = scan running. Red 'Stale' = no scan in 30+ min."],
+                ["Today", "Deals found today with Grail (G) and Hit (H) counts."],
+                ["Acc", "7-day rolling accuracy from your Correct/Wrong reviews."],
+                ["eBay", "API calls today / 5K cap. Green <80%, Amber 80-95%, Red >95%."],
+                ["Scrydex", "API calls today / 50K cap. Includes sync page fetches."],
+                ["Index", "Total cards indexed from the last Scrydex sync."]
+              ]},
+              { title: "SETTINGS", items: [
+                ["General", "Tier thresholds, display settings, sign out."],
+                ["API Keys", "eBay and Scrydex credentials with test buttons."],
+                ["Notifications", "Telegram bot setup for GRAIL/HIT push alerts."]
+              ]}
+            ] as any).map((section: any, si: number) => (
+              <div key={si} style={{ marginTop: si === 0 ? 18 : 24 }}>
+                <div style={{ fontFamily: "var(--fm)", fontSize: 9, letterSpacing: 2.5, color: "var(--tGho)", marginBottom: 10, paddingBottom: 6, borderBottom: "1px solid var(--brd)", textTransform: "uppercase" as const }}>{section.title}</div>
+                {section.items.map(([label, desc]: any, i: number) => (
+                  <div key={i} style={{ display: "flex", gap: 12, padding: "8px 0", borderBottom: "1px solid var(--brd)" }}>
+                    <span style={{ fontWeight: 600, fontSize: 12, color: "var(--tMax)", minWidth: 120, flexShrink: 0 }}>{label}</span>
+                    <span style={{ fontSize: 12, color: "var(--tSec)", lineHeight: 1.5 }}>{desc}</span>
+                  </div>
+                ))}
+              </div>
+            ))}
           </div>
         </div>
       </div>}
