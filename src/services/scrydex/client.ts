@@ -24,8 +24,10 @@ export interface ScrydexExpansion {
 export interface ExpansionResponse {
   data: ScrydexExpansion[];
   page: number;
-  pageSize: number;
-  totalCount: number;
+  pageSize?: number;
+  page_size?: number;
+  totalCount?: number;
+  total_count?: number;
 }
 
 export interface ScrydexImage {
@@ -95,8 +97,10 @@ export interface ScrydexCard {
 export interface CardResponse {
   data: ScrydexCard[];
   page: number;
-  pageSize: number;
-  totalCount: number;
+  pageSize?: number;
+  page_size?: number;
+  totalCount?: number;
+  total_count?: number;
 }
 
 export interface UsageResponse {

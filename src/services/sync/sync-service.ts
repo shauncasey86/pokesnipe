@@ -49,21 +49,30 @@ async function failSyncLog(id: number, errorMessage: string): Promise<void> {
   );
 }
 
-// --- Fetch all pages of expansions ---
+// --- Fetch all pages ---
+// We request page_size=100. Keep fetching until we get fewer than 100 items.
+const REQUESTED_PAGE_SIZE = 100;
 
 async function fetchAllExpansions(): Promise<scrydex.ScrydexExpansion[]> {
   const all: scrydex.ScrydexExpansion[] = [];
   let page = 1;
-  let hasMore = true;
 
-  while (hasMore) {
+  while (true) {
     const response = await scrydex.getExpansions(page);
-    all.push(...response.data);
-    hasMore = page * response.pageSize < response.totalCount;
+    const items = response.data ?? [];
+
+    if (page === 1) {
+      log(`Expansion API page 1: ${items.length} items, raw keys: ${JSON.stringify(Object.keys(response))}`);
+    }
+
+    all.push(...items);
+    log(`Expansion page ${page}: got ${items.length} items (total so far: ${all.length})`);
+
+    if (items.length < REQUESTED_PAGE_SIZE) break;
     page++;
   }
 
-  log(`Fetched all expansions: ${all.length} total`);
+  log(`Fetched all expansions: ${all.length} total (${page} pages)`);
   return all;
 }
 
@@ -119,7 +128,7 @@ export async function syncAll(): Promise<SyncResult> {
           expansionCards += cardsUpserted;
           expansionVariants += variantsUpserted;
 
-          hasMore = page * 100 < response.totalCount;
+          hasMore = (response.data?.length ?? 0) >= REQUESTED_PAGE_SIZE;
           page++;
         }
       } catch (err) {
