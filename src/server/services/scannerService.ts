@@ -4,58 +4,49 @@ import { matchListing } from "./matcher.js";
 import { getUsdToGbpRate } from "./exchangeRate.js";
 import { calculateProfit } from "./pricing.js";
 import { v4 as uuidv4 } from "uuid";
+import { pino } from "pino";
 
-// eBay Browse API filter: minimum price £3 + Buy It Now only
-const EBAY_FILTER = "price:[3..],buyingOptions:{FIXED_PRICE}";
+const logger = pino({ name: "scanner" });
 
-// Reject listings that are clearly lots, bundles, bulk, or multi-variation "pick" listings
-const BULK_PATTERNS = /\b(lot|bundle|collection|choose\s*(your|a|the)?\s*card|pick\s*(your|a)?\s*card|select\s*(your|a)?\s*card|selection|random|mystery|grab bag|bulk|set of|x\d{2,}|\d{2,}\s*cards|\d{2,}\s*card\s*lot|wholesale|mixed|assorted|binder|starter kit|deck\s+(box|cards|list)|my first battle|all\s+cards\s+available|common|uncommon|job\s*lot)\b/i;
+// ─── STRATEGY ───────────────────────────────────────────────────────
+// Instead of searching for specific cards/sets (which misses deals),
+// we monitor the STREAM of all newly listed Pokemon individual cards.
+//
+// One broad query: "pokemon card" in category 183454 (Individual Cards),
+// sorted by newlyListed, with price floor + Buy It Now filter.
+//
+// Each scan picks up the latest listings. The matcher + price DB decides
+// if any are underpriced. This catches ANY card from ANY set.
+//
+// API budget: ~1 call per scan × 288 scans/day = 288 eBay calls/day
+// vs old approach: 8-14 calls per scan = 2000-4000/day
+// ─────────────────────────────────────────────────────────────────────
 
-// Track which batch of expansions to scan next (persists across scan cycles)
-let expansionScanOffset = 0;
-// How many expansion queries per scan cycle (controls API usage)
-const EXPANSIONS_PER_SCAN = 8;
-
-// Build search queries dynamically from our indexed expansions
-const buildQueries = async (): Promise<string[]> => {
-  const { rows } = await pool.query(
-    `SELECT name FROM expansions ORDER BY release_date DESC NULLS LAST`
-  );
-  if (rows.length === 0) {
-    // Fallback if no expansions synced yet
-    return ["pokemon tcg card"];
-  }
-
-  // Rotate through expansions each scan cycle so we cover them all
-  const start = expansionScanOffset % rows.length;
-  const batch = [];
-  for (let i = 0; i < EXPANSIONS_PER_SCAN && i < rows.length; i++) {
-    const idx = (start + i) % rows.length;
-    batch.push(`pokemon ${rows[idx].name}`);
-  }
-  expansionScanOffset = (start + EXPANSIONS_PER_SCAN) % rows.length;
-
-  return batch;
+const SEARCH_OPTS = {
+  categoryId: "183454",                                    // CCG Individual Cards
+  filter: "price:[3..],buyingOptions:{FIXED_PRICE}",       // Min £3, BIN only
+  sort: "newlyListed",                                     // Newest first
 };
+
+// Reject listings that are lots, bundles, multi-variation "pick" listings, etc.
+const BULK_PATTERNS = /\b(lot|bundle|collection|choose\s*(your|a|the)?\s*card|pick\s*(your|a)?\s*card|select\s*(your|a)?\s*card|selection|random|mystery|grab bag|bulk|set of|x\d{2,}|\d{2,}\s*cards|\d{2,}\s*card\s*lot|wholesale|mixed|assorted|binder|starter kit|deck\s+(box|cards|list)|my first battle|all\s+cards\s+available|job\s*lot|singles\s*-|complete\s*(set|your)|custom|any\s*\d+\s*for)\b/i;
 
 const toGbp = (value: number, currency: string, fx: number) => {
   if (currency === "GBP") return value;
   if (currency === "USD") return value * fx;
-  throw new Error(`Unsupported currency: ${currency}`);
+  return value; // best effort for other currencies
 };
 
 // Derive comps from card prices JSONB (synced from Scrydex)
 const deriveComps = (prices: Record<string, number | null> | null): Record<string, number | null> | null => {
   if (!prices) return null;
-  // Scrydex price keys: normal.market, reverseHolofoil.market, holofoil.market, etc.
-  // Map to condition grades using available price data
   const market = prices.market ?? prices["normal.market"] ?? null;
   if (market == null) return null;
   return {
     NM: market,
-    LP: market != null ? Math.round(market * 0.85 * 100) / 100 : null,
-    MP: market != null ? Math.round(market * 0.62 * 100) / 100 : null,
-    HP: market != null ? Math.round(market * 0.40 * 100) / 100 : null
+    LP: Math.round(market * 0.85 * 100) / 100,
+    MP: Math.round(market * 0.62 * 100) / 100,
+    HP: Math.round(market * 0.40 * 100) / 100
   };
 };
 
@@ -66,21 +57,14 @@ const deriveLiquidityBreakdown = (
   confidence: number,
   prices: Record<string, number | null> | null
 ) => {
-  // Trend: higher market price suggests more liquid
   const trend = Math.min(1, marketPriceUsd / 100);
-  // Prices: do we have price data available
   const pricesSignal = prices && Object.values(prices).filter(v => v != null).length > 0 ? 0.9 : 0.3;
-  // Spread: inverse of profit spread (higher margins can mean wider spread)
   const spread = Math.max(0, Math.min(1, 1 - profitPct / 100));
-  // Supply: heuristic from market price (higher price = generally less supply)
   const supply = Math.min(1, Math.max(0.2, 1 - marketPriceUsd / 200));
-  // Sold: proxy from confidence (well-matched cards = more recognizable = more sold)
   const sold = Math.min(1, confidence * 1.1);
-  // Velocity: null by default (fetched async from Scrydex on demand)
   return { Trend: trend, Prices: pricesSignal, Spread: spread, Supply: supply, Sold: sold, Velocity: null as number | null };
 };
 
-// Compute scalar liquidity from breakdown
 const computeLiquidity = (breakdown: Record<string, number | null>): string => {
   const values = Object.values(breakdown).filter((v): v is number => v != null);
   if (values.length === 0) return "low";
@@ -90,74 +74,100 @@ const computeLiquidity = (breakdown: Record<string, number | null>): string => {
 
 export const scanEbay = async () => {
   const fx = await getUsdToGbpRate();
-  const queries = await buildQueries();
-  for (const query of queries) {
-    // 183454 = eBay category "CCG Individual Cards" — excludes lots, sealed, bundles
-    // EBAY_FILTER enforces: min £3 price + Buy It Now only
-    const listings = await searchItems(query, 25, "183454", EBAY_FILTER);
-    for (const listing of listings) {
-      // Skip bulk/lot/bundle listings
-      if (BULK_PATTERNS.test(listing.title)) continue;
-      const existing = await pool.query("SELECT 1 FROM deals WHERE ebay_item_id=$1", [listing.itemId]);
-      if (existing.rows.length > 0) continue;
-      const match = await matchListing(listing.title, listing.itemSpecifics);
-      if (!match) continue;
-      const card = await pool.query(
-        `SELECT c.id, c.name, c.card_number, c.printed_total, c.image_url, c.market_price_usd, c.prices,
-                e.name as expansion_name, e.code
-         FROM cards c
-         JOIN expansions e ON c.expansion_id = e.id
-         WHERE c.id=$1`,
-        [match.cardId]
-      );
-      if (card.rows.length === 0) continue;
-      const c = card.rows[0];
-      if (!c.market_price_usd) continue;
-      const price = toGbp(Number(listing.price.value), listing.price.currency ?? "GBP", fx);
-      const shipping = listing.shipping ? toGbp(Number(listing.shipping.value), listing.shipping.currency ?? "GBP", fx) : 0;
-      const marketGbp = Number(c.market_price_usd) * fx;
-      const pricing = calculateProfit(price, shipping, marketGbp);
 
-      // Compute liquidity breakdown instead of simple scalar
-      const liqBreakdown = deriveLiquidityBreakdown(pricing.profitPct, Number(c.market_price_usd), match.confidence, c.prices);
-      const liquidity = computeLiquidity(liqBreakdown);
+  // One broad sweep: newest 200 individual Pokemon cards on eBay UK
+  const listings = await searchItems("pokemon card", 200, SEARCH_OPTS);
 
-      // Derive comps by condition from card prices
-      const comps = deriveComps(c.prices);
+  let skippedBulk = 0;
+  let skippedDupe = 0;
+  let skippedNoMatch = 0;
+  let skippedNoPrice = 0;
+  let skippedNoProfit = 0;
+  let saved = 0;
 
-      const tier = pricing.profitPct >= 40 && liquidity === "high" ? "grail"
-        : pricing.profitPct >= 25 ? "hit"
-        : pricing.profitPct >= 15 ? "flip"
-        : "sleeper";
-      const dealId = uuidv4();
-      await pool.query(
-        `INSERT INTO deals (id, event_id, card_id, ebay_item_id, ebay_url, ebay_title, ebay_image, ebay_price_gbp, ebay_shipping_gbp,
-         market_price_usd, fx_rate, profit_gbp, profit_pct, confidence, liquidity, condition, tier,
-         pricing_breakdown, match_details, comps_by_condition, liquidity_breakdown, created_at)
-         VALUES ($1, nextval('deal_event_id_seq'), $2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20, now())`,
-        [
-          dealId,
-          c.id,
-          listing.itemId,
-          listing.itemWebUrl,
-          listing.title,
-          listing.image,
-          price,
-          shipping,
-          c.market_price_usd,
-          fx,
-          pricing.profit,
-          pricing.profitPct,
-          match.confidence,
-          liquidity,
-          listing.condition ?? "NM",
-          tier,
-          pricing,
-          { confidence: match.confidence, breakdown: match.confidenceBreakdown, extracted: match.extracted },
-          comps,
-          liqBreakdown
-        ]
-      );
-    }
+  for (const listing of listings) {
+    // 1. Reject bulk/lot/multi-variation listings
+    if (BULK_PATTERNS.test(listing.title)) { skippedBulk++; continue; }
+
+    // 2. Skip already-seen listings
+    const existing = await pool.query("SELECT 1 FROM deals WHERE ebay_item_id=$1", [listing.itemId]);
+    if (existing.rows.length > 0) { skippedDupe++; continue; }
+
+    // 3. Try to match against our card database
+    const match = await matchListing(listing.title, listing.itemSpecifics);
+    if (!match) { skippedNoMatch++; continue; }
+
+    // 4. Look up the matched card
+    const card = await pool.query(
+      `SELECT c.id, c.name, c.card_number, c.printed_total, c.image_url, c.market_price_usd, c.prices,
+              e.name as expansion_name, e.code
+       FROM cards c
+       JOIN expansions e ON c.expansion_id = e.id
+       WHERE c.id=$1`,
+      [match.cardId]
+    );
+    if (card.rows.length === 0) continue;
+    const c = card.rows[0];
+    if (!c.market_price_usd) { skippedNoPrice++; continue; }
+
+    // 5. Calculate profit
+    const price = toGbp(Number(listing.price.value), listing.price.currency ?? "GBP", fx);
+    const shipping = listing.shipping ? toGbp(Number(listing.shipping.value), listing.shipping.currency ?? "GBP", fx) : 0;
+    const marketGbp = Number(c.market_price_usd) * fx;
+    const pricing = calculateProfit(price, shipping, marketGbp);
+
+    // 6. Only save if there's actual profit (>5%)
+    if (pricing.profitPct < 5) { skippedNoProfit++; continue; }
+
+    // 7. Compute signals
+    const liqBreakdown = deriveLiquidityBreakdown(pricing.profitPct, Number(c.market_price_usd), match.confidence, c.prices);
+    const liquidity = computeLiquidity(liqBreakdown);
+    const comps = deriveComps(c.prices);
+
+    const tier = pricing.profitPct >= 40 && liquidity === "high" ? "grail"
+      : pricing.profitPct >= 25 ? "hit"
+      : pricing.profitPct >= 15 ? "flip"
+      : "sleeper";
+
+    const dealId = uuidv4();
+    await pool.query(
+      `INSERT INTO deals (id, event_id, card_id, ebay_item_id, ebay_url, ebay_title, ebay_image, ebay_price_gbp, ebay_shipping_gbp,
+       market_price_usd, fx_rate, profit_gbp, profit_pct, confidence, liquidity, condition, tier,
+       pricing_breakdown, match_details, comps_by_condition, liquidity_breakdown, created_at)
+       VALUES ($1, nextval('deal_event_id_seq'), $2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20, now())`,
+      [
+        dealId,
+        c.id,
+        listing.itemId,
+        listing.itemWebUrl,
+        listing.title,
+        listing.image,
+        price,
+        shipping,
+        c.market_price_usd,
+        fx,
+        pricing.profit,
+        pricing.profitPct,
+        match.confidence,
+        liquidity,
+        listing.condition ?? "NM",
+        tier,
+        pricing,
+        { confidence: match.confidence, breakdown: match.confidenceBreakdown, extracted: match.extracted },
+        comps,
+        liqBreakdown
+      ]
+    );
+    saved++;
   }
+
+  logger.info({
+    fetched: listings.length,
+    saved,
+    skippedBulk,
+    skippedDupe,
+    skippedNoMatch,
+    skippedNoPrice,
+    skippedNoProfit
+  }, "scan cycle complete");
 };

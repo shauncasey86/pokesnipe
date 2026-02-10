@@ -93,14 +93,20 @@ export const getItem = async (itemId: string): Promise<EbayListing> => {
   };
 };
 
-export const searchItems = async (query: string, limit = 50, categoryId?: string, filter?: string): Promise<EbayListing[]> => {
+export type SearchOptions = {
+  categoryId?: string;
+  filter?: string;
+  sort?: string;
+};
+
+export const searchItems = async (query: string, limit = 50, opts?: SearchOptions): Promise<EbayListing[]> => {
   await limiter.take();
   trackApiCall("ebay").catch(() => {});
   const token = await getAccessToken();
   const params: Record<string, string | number> = { q: query, limit };
-  // 183454 = CCG Individual Cards (filters out lots, bundles, sealed products)
-  if (categoryId) params.category_ids = categoryId;
-  if (filter) params.filter = filter;
+  if (opts?.categoryId) params.category_ids = opts.categoryId;
+  if (opts?.filter) params.filter = opts.filter;
+  if (opts?.sort) params.sort = opts.sort;
   const resp = await apiClient.get("/item_summary/search", {
     headers: { Authorization: `Bearer ${token}` },
     params
