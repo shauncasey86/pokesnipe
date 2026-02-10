@@ -2,7 +2,6 @@ const BULK_PATTERNS = [
   /\blot\b/,
   /\bbundle\b/,
   /\bbulk\b/,
-  /\bcollection\b/,
   /\bx10\b/,
   /\bx20\b/,
   /\bx50\b/,
