@@ -1577,15 +1577,17 @@ Each stage is built, tested, and verified before moving to the next. No stage de
 
 **Principle:** Build the data foundation first (card database + catalog), then layer the scanner on top. No point building the matching engine if there's nothing to match against.
 
-**Build workflow:** All code is written in Claude Code, pushed to GitHub, and auto-deployed to Railway.
+**Build workflow:** Claude Code builds each stage. Each stage prompt includes the user's real API credentials (Scrydex, eBay, exchange rate, Railway PostgreSQL). Claude writes the code, creates the `.env` with real credentials, starts the server to verify it works, runs live verification checks, then commits and pushes to GitHub. Railway auto-deploys from GitHub.
+
+**Credentials needed:** Each stage prompt must include the user's real values for: `DATABASE_URL`, `ACCESS_PASSWORD`, `SESSION_SECRET`, `SCRYDEX_API_KEY`, `SCRYDEX_TEAM_ID`, `EBAY_CLIENT_ID`, `EBAY_CLIENT_SECRET`, `EXCHANGE_RATE_API_KEY`, and optionally `TELEGRAM_BOT_TOKEN` + `TELEGRAM_CHAT_ID`.
 
 **Testing approach:** All tests use **live data** — real APIs, real database, real eBay listings. No mocks, no fixtures, no simulated responses. Each stage lists:
 
 1. **Vitest (pure functions only):** For math and logic that has no external dependencies (buyer protection calc, tier classifier, condition mapping). These are the only automated tests.
-2. **Live API tests:** Run real API calls against Scrydex, eBay, exchange rate services. Verify real responses parse correctly and real data flows into the database.
-3. **Live smoke tests:** After deploying to Railway, verify with `curl` and `psql $DATABASE_URL` against real production data.
+2. **Live API tests:** Run real API calls against Scrydex, eBay, exchange rate services using the real credentials. Verify real responses parse correctly and real data flows into the database.
+3. **Live smoke tests:** After building, Claude starts the server and verifies with `curl` and `psql $DATABASE_URL` against the real Railway database.
 
-The goal: if it works with real data on Railway, it works. Period.
+The goal: if it works with real data, it works. Period.
 
 ---
 
