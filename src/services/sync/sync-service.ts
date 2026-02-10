@@ -1,10 +1,20 @@
-import pino from 'pino';
 import { pool } from '../../db/pool.js';
 import * as scrydex from '../scrydex/client.js';
 import { transformExpansion, transformCard, transformVariant } from './transformers.js';
 import { batchUpsertExpansions, batchUpsertCards, batchUpsertVariants } from './batch-insert.js';
 
-const logger = pino({ name: 'sync' });
+function log(msg: string): void {
+  console.log(`[sync] ${msg}`);
+}
+
+function logError(msg: string): void {
+  console.error(`[sync] ${msg}`);
+}
+
+function memUsage(): string {
+  const mem = process.memoryUsage();
+  return `rss=${Math.round(mem.rss / 1024 / 1024)}MB heap=${Math.round(mem.heapUsed / 1024 / 1024)}/${Math.round(mem.heapTotal / 1024 / 1024)}MB`;
+}
 
 export interface SyncResult {
   expansions: number;
@@ -53,7 +63,7 @@ async function fetchAllExpansions(): Promise<scrydex.ScrydexExpansion[]> {
     page++;
   }
 
-  logger.info({ total: all.length }, 'Fetched all expansions');
+  log(`Fetched all expansions: ${all.length} total`);
   return all;
 }
 
@@ -65,7 +75,7 @@ export async function syncAll(): Promise<SyncResult> {
   try {
     // Step 1: Check credits
     const usage = await scrydex.getAccountUsage();
-    logger.info({ remainingCredits: usage.remaining_credits }, 'Scrydex credits check');
+    log(`Scrydex credits: ${usage.remaining_credits} remaining of ${usage.total_credits}`);
 
     // Step 2: Fetch all expansions (paginated)
     const allExpansions = await fetchAllExpansions();
@@ -74,24 +84,12 @@ export async function syncAll(): Promise<SyncResult> {
     const englishExpansions = allExpansions.filter(
       (e) => e.language_code === 'EN' && !e.is_online_only,
     );
-    logger.info(
-      { total: allExpansions.length, english: englishExpansions.length },
-      'Filtered expansions',
-    );
+    log(`Filtered: ${allExpansions.length} total → ${englishExpansions.length} English non-online`);
 
     // Step 3: Upsert expansions
-    logger.info('Transforming expansions...');
-    const expansionRows = englishExpansions.map((e) => {
-      try {
-        return transformExpansion(e);
-      } catch (err) {
-        logger.error({ expansionId: e.id, name: e.name, error: String(err) }, 'Failed to transform expansion');
-        throw err;
-      }
-    });
-    logger.info({ count: expansionRows.length }, 'Upserting expansions...');
+    const expansionRows = englishExpansions.map((e) => transformExpansion(e));
     const expansionsUpserted = await batchUpsertExpansions(expansionRows);
-    logger.info({ expansionsUpserted }, 'Expansions upserted');
+    log(`Expansions upserted: ${expansionsUpserted} | ${memUsage()}`);
 
     // Step 4: For each expansion, fetch all card pages
     let totalCards = 0;
@@ -108,27 +106,11 @@ export async function syncAll(): Promise<SyncResult> {
         while (hasMore) {
           const response = await scrydex.getExpansionCards(expansion.id, page);
 
-          // Transform cards and variants
-          const cardRows = response.data.map((c) => {
-            try {
-              return transformCard(c, expansion.id);
-            } catch (err) {
-              logger.error(`Card transform failed: card=${c.id} expansion=${expansion.id} error=${err}`);
-              throw err;
-            }
-          });
+          const cardRows = response.data.map((c) => transformCard(c, expansion.id));
           const variantRows = response.data.flatMap((c) =>
-            (c.variants || []).map((v) => {
-              try {
-                return transformVariant(v, c.id);
-              } catch (err) {
-                logger.error(`Variant transform failed: card=${c.id} variant=${v.name} error=${err}`);
-                throw err;
-              }
-            }),
+            (c.variants || []).map((v) => transformVariant(v, c.id)),
           );
 
-          // Batch upsert
           const cardsUpserted = await batchUpsertCards(cardRows);
           const variantsUpserted = await batchUpsertVariants(variantRows);
 
@@ -137,20 +119,19 @@ export async function syncAll(): Promise<SyncResult> {
           expansionCards += cardsUpserted;
           expansionVariants += variantsUpserted;
 
-          // Check if more pages
           hasMore = page * 100 < response.totalCount;
           page++;
         }
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
-        logger.error(`Expansion failed [${ei + 1}/${englishExpansions.length}]: ${expansion.name} (${expansion.id}) page=${page} error=${msg}`);
+        const stack = err instanceof Error ? err.stack : '';
+        logError(`EXPANSION FAILED [${ei + 1}/${englishExpansions.length}]: ${expansion.name} (${expansion.id}) page=${page}`);
+        logError(`ERROR: ${msg}`);
+        logError(`STACK: ${stack}`);
         throw err;
       }
 
-      logger.info(
-        { expansion: expansion.name, cards: expansionCards, variants: expansionVariants },
-        'Expansion synced',
-      );
+      log(`[${ei + 1}/${englishExpansions.length}] ${expansion.name}: ${expansionCards} cards, ${expansionVariants} variants | ${memUsage()}`);
     }
 
     // Step 5: Update sync_log
@@ -160,17 +141,14 @@ export async function syncAll(): Promise<SyncResult> {
       variants_upserted: totalVariants,
     });
 
-    logger.info(
-      { expansions: expansionsUpserted, cards: totalCards, variants: totalVariants },
-      'Sync completed',
-    );
+    log(`SYNC COMPLETE: ${expansionsUpserted} expansions, ${totalCards} cards, ${totalVariants} variants`);
 
     return { expansions: expansionsUpserted, cards: totalCards, variants: totalVariants };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     const stack = error instanceof Error ? error.stack : '';
-    logger.error(`syncAll failed: ${message}`);
-    logger.error(`Stack: ${stack}`);
+    logError(`syncAll FAILED: ${message}`);
+    logError(`Stack: ${stack}`);
     await failSyncLog(logId, message).catch(() => {});
     throw error;
   }

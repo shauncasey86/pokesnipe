@@ -7,6 +7,17 @@ import { syncAll } from './services/sync/sync-service.js';
 
 const logger = pino({ name: 'server' });
 
+// Catch kills/OOM before pino can flush
+process.on('uncaughtException', (err) => {
+  console.error(`UNCAUGHT EXCEPTION: ${err.message}`);
+  console.error(err.stack);
+  process.exit(1);
+});
+process.on('unhandledRejection', (reason) => {
+  console.error(`UNHANDLED REJECTION: ${reason}`);
+  process.exit(1);
+});
+
 async function runVerification(): Promise<void> {
   logger.info('=== SYNC + VERIFY MODE ===');
 
@@ -152,7 +163,7 @@ async function boot(): Promise<void> {
 boot().catch((err) => {
   const message = err instanceof Error ? err.message : String(err);
   const stack = err instanceof Error ? err.stack : '';
-  logger.error(`Boot failed: ${message}`);
-  logger.error(`Stack: ${stack}`);
+  console.error(`BOOT FAILED: ${message}`);
+  console.error(`Stack: ${stack}`);
   process.exit(1);
 });
