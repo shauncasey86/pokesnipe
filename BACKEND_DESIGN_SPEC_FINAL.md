@@ -1578,26 +1578,155 @@ Each stage is built, tested, and verified before moving to the next. No stage de
 
 **Principle:** Build the data foundation first (card database + catalog), then layer the scanner on top. No point building the matching engine if there's nothing to match against.
 
+**Build workflow:** All code is written in Claude Code, pushed to GitHub, and auto-deployed to Railway. There is no local development environment. Testing happens in two ways:
+
+1. **Automated tests (Vitest):** Run `npm test` in Claude Code before pushing. These use mocked externals and a test database — no live API calls.
+2. **Smoke tests on Railway:** After each push/deploy, manually verify against the live Railway URL using `curl` or the browser. Database checks use `psql $DATABASE_URL` against the Railway PostgreSQL instance.
+
+Each stage lists both types of tests. Write the automated tests first, then verify on Railway after deploy.
+
 ---
 
 ### Stage 1: Foundation — Database, Config, Boot Sequence
 
-**Build:**
-- Project scaffold: TypeScript, Express, Vitest, Pino logger
-- Zod-validated `AppConfig` from environment variables
-- PostgreSQL connection pool + migration runner (`node-pg-migrate`)
-- Database schema: all tables from §9 (expansions, cards, variants, deals, exchange_rates, preferences, api_credentials, sync_log, sales_velocity_cache)
-- Health endpoint: `GET /healthz`
-- Boot sequence: validate config → connect DB → run migrations → start server
+**Install these packages:**
+```bash
+npm init -y
+npm install express pg node-pg-migrate pino pino-pretty zod dotenv helmet cookie-parser
+npm install -D typescript @types/express @types/node @types/pg vitest @types/cookie-parser tsx
+npx tsc --init  # Generate tsconfig.json
+```
 
-**Test before moving on:**
-- [ ] `npm run dev` starts the server without errors
-- [ ] Missing env vars → clear Zod error at boot, process exits
-- [ ] `GET /healthz` returns 200
-- [ ] Migrations run on empty DB without errors
-- [ ] Migrations are idempotent (run twice = no errors)
-- [ ] All tables created with correct columns, indexes, constraints
-- [ ] Connection pool handles DB restart gracefully
+**Step-by-step:**
+
+1. **Create project folder structure:**
+   ```
+   src/
+   ├── config/
+   │   └── index.ts          ← Zod-validated AppConfig
+   ├── db/
+   │   ├── pool.ts           ← PostgreSQL connection pool
+   │   └── migrate.ts        ← Migration runner wrapper
+   ├── routes/
+   │   └── health.ts         ← GET /healthz
+   ├── middleware/            ← (empty for now, used later)
+   ├── services/             ← (empty for now, used later)
+   ├── app.ts                ← Express app setup (middleware, routes)
+   └── server.ts             ← Boot sequence entry point
+   migrations/
+   ├── 001_create_extensions.sql    ← pg_trgm, uuid-ossp
+   ├── 002_create_expansions.sql
+   ├── 003_create_cards.sql
+   ├── 004_create_variants.sql
+   ├── 005_create_deals.sql
+   ├── 006_create_velocity_cache.sql
+   ├── 007_create_exchange_rates.sql
+   ├── 008_create_preferences.sql
+   ├── 009_create_api_credentials.sql
+   └── 010_create_sync_log.sql
+   ```
+
+2. **Create `src/config/index.ts`** — Define a Zod schema for every env var the app needs. Parse `process.env` through it at import time. If any required var is missing, Zod throws a clear error with the field name. Export the validated config object.
+   ```typescript
+   // Key fields:
+   // DATABASE_URL (required), ACCESS_PASSWORD (required, min 8 chars),
+   // SESSION_SECRET (required, min 32 chars), SCRYDEX_API_KEY (required),
+   // SCRYDEX_TEAM_ID (required), EBAY_CLIENT_ID (required),
+   // EBAY_CLIENT_SECRET (required), EXCHANGE_RATE_API_KEY (required),
+   // TELEGRAM_BOT_TOKEN (optional), TELEGRAM_CHAT_ID (optional),
+   // NODE_ENV (default: 'development'), PORT (default: 3000)
+   ```
+
+3. **Create `src/db/pool.ts`** — Create and export a `pg.Pool` using `config.DATABASE_URL`. Set `max: 10` connections. Add an error handler on the pool (`pool.on('error', ...)`) that logs but doesn't crash the process.
+
+4. **Create `src/db/migrate.ts`** — A function that runs `node-pg-migrate` programmatically using the pool's connection string. Direction: `'up'`. Migrations directory: `./migrations`. Log output to Pino logger.
+
+5. **Create migration SQL files** — One file per table, using the exact schemas from §9 of this spec. Include all indexes, constraints, `pg_trgm` extension, and `uuid-ossp` extension. Each migration must be idempotent (`CREATE TABLE IF NOT EXISTS`, `CREATE INDEX IF NOT EXISTS`).
+
+6. **Create `src/routes/health.ts`** — A simple Express router with `GET /healthz` that queries `SELECT 1` against the pool. Returns `{ status: 'ok', timestamp: new Date().toISOString() }` with 200 if DB responds, or `{ status: 'error' }` with 503 if the query fails.
+
+7. **Create `src/app.ts`** — Set up Express app with `helmet()`, `express.json()`, `cookie-parser()`, Pino HTTP logger. Mount health route. Export the app (don't listen here — that happens in server.ts).
+
+8. **Create `src/server.ts`** — The boot sequence:
+   ```
+   Step 1: Import config (Zod validates env vars — crashes here if invalid)
+   Step 2: Connect to DB pool (test with SELECT 1)
+   Step 3: Run migrations
+   Step 4: Start Express on config.PORT
+   Step 5: Log "Server ready on port XXXX"
+   ```
+   Wrap everything in a try/catch. If any step fails, log the error and `process.exit(1)`.
+
+9. **Add npm scripts to `package.json`:**
+   ```json
+   {
+     "scripts": {
+       "dev": "tsx watch src/server.ts",
+       "build": "tsc",
+       "start": "node dist/server.js",
+       "test": "vitest run",
+       "test:watch": "vitest",
+       "migrate": "tsx src/db/migrate.ts"
+     }
+   }
+   ```
+
+10. **Create `.env` file** (gitignored) with all required env vars pointing at your local PostgreSQL.
+
+**How to test — do each of these manually:**
+
+1. **Start the server:**
+   ```bash
+   npm run dev
+   ```
+   ✅ Should see "Server ready on port 3000" in the terminal. No errors.
+
+2. **Test missing env vars:** Temporarily remove `DATABASE_URL` from `.env`, restart. ✅ Should see a clear Zod error like `"DATABASE_URL: Required"` and the process should exit with code 1. Restore the var after.
+
+3. **Test health endpoint:**
+   ```bash
+   curl http://localhost:3000/healthz
+   ```
+   ✅ Should return `{"status":"ok","timestamp":"..."}` with HTTP 200.
+
+4. **Verify migrations ran — check all tables exist:**
+   ```bash
+   psql $DATABASE_URL -c "\dt"
+   ```
+   ✅ Should list: `expansions`, `cards`, `variants`, `deals`, `sales_velocity_cache`, `exchange_rates`, `preferences`, `api_credentials`, `sync_log`, `pgmigrations`.
+
+5. **Verify migrations are idempotent — run them again:**
+   ```bash
+   npm run migrate
+   ```
+   ✅ Should complete with no errors and no changes (all migrations already applied).
+
+6. **Spot-check table schemas:**
+   ```bash
+   psql $DATABASE_URL -c "\d expansions"
+   psql $DATABASE_URL -c "\d cards"
+   psql $DATABASE_URL -c "\d variants"
+   psql $DATABASE_URL -c "\d deals"
+   ```
+   ✅ Columns, types, constraints, and indexes should match §9 exactly.
+
+7. **Verify pg_trgm extension:**
+   ```bash
+   psql $DATABASE_URL -c "SELECT 'charizard' % 'charzard';"
+   ```
+   ✅ Should return `t` (true) — proves the extension is active.
+
+8. **Test DB connection resilience:** Stop PostgreSQL, then hit the health endpoint:
+   ```bash
+   curl http://localhost:3000/healthz
+   ```
+   ✅ Should return HTTP 503 with `{"status":"error"}`. Start PostgreSQL again, retry — should return 200. The server itself should NOT have crashed.
+
+**Write automated tests (`src/__tests__/stage1/`):**
+
+- `config.test.ts` — Mock `process.env` with missing vars, verify Zod throws. Mock with valid vars, verify config object has correct types and values.
+- `health.test.ts` — Use `supertest` against the Express app. Test 200 response with valid DB, test 503 when pool query fails (mock pool.query to throw).
+- `migrate.test.ts` — Run migrations against a test database, verify tables exist with `SELECT table_name FROM information_schema.tables`.
 
 **Deliverable:** A running Express server with an empty database, ready to receive data.
 
@@ -1605,31 +1734,145 @@ Each stage is built, tested, and verified before moving to the next. No stage de
 
 ### Stage 2: Scrydex Client & Card Sync
 
-**Build:**
-- Scrydex API client with token bucket rate limiter (80 req/sec)
-- URL path language scoping (`/pokemon/v1/en/...`)
-- Retry logic (3 retries, exponential backoff)
-- Sync service: fetch expansions, fetch cards with `?include=prices`
-- Store ALL price entries per variant (all conditions: NM, LP, MP, HP)
-- Store trend data per condition (1d, 7d, 14d, 30d, 90d, 180d)
-- Store graded prices
-- Batch inserts (100 rows per statement)
-- Sync log tracking (progress, credits used, status)
-- Credit usage tracking via Scrydex account API
+**Install these packages:**
+```bash
+npm install bottleneck   # Rate limiter (simpler than writing our own token bucket)
+```
 
-**Test before moving on:**
-- [ ] Full sync completes against live Scrydex API
-- [ ] Expansions table populated (~350 rows) with logos, codes, release dates
-- [ ] Cards table populated (~35,000 rows) with images, rarity, subtypes
-- [ ] Variants table populated (~70,000 rows) with correct card_id references
-- [ ] Variant prices JSONB contains NM, LP, MP, HP entries (not just first price)
-- [ ] Variant trends JSONB contains per-condition trend windows
-- [ ] Graded prices populated where available
-- [ ] Sync log records completion, credits used, cards upserted
-- [ ] Re-running sync is idempotent (upsert, no duplicates)
-- [ ] Rate limiter stays within 100 req/sec
-- [ ] Batch inserts work correctly (spot-check 10 random cards against Scrydex API)
-- [ ] `pg_trgm` name search works: `SELECT * FROM cards WHERE name % 'charzard'` returns Charizard cards
+**Step-by-step:**
+
+1. **Create `src/services/scrydex/client.ts`** — The API client. Every request goes through this file.
+   - Base URL: `https://api.scrydex.com/pokemon/v1/en` (language in path, not query param)
+   - Headers: `Authorization: Bearer <SCRYDEX_API_KEY>`, `X-Team-Id: <SCRYDEX_TEAM_ID>`
+   - Rate limiter: Use `bottleneck` with `maxConcurrent: 10`, `minTime: 13` (≈80 req/sec, stays under 100/sec limit)
+   - Retry: On 429 or 5xx, retry up to 3 times with exponential backoff (1s, 2s, 4s)
+   - Methods to create:
+     - `getExpansions()` → `GET /expansions` — returns all expansions
+     - `getExpansionCards(expansionId, page)` → `GET /expansions/{id}/cards?include=prices&page={page}` — returns cards with pricing
+     - `getAccountCredits()` → `GET /account` — returns remaining Scrydex credits
+   - Every response should log the credits remaining (from response headers or account endpoint)
+
+2. **Create `src/services/scrydex/rate-limiter.ts`** — Wrap Bottleneck instance. Export a `schedule(fn)` method that queues API calls. Log when approaching rate limit.
+
+3. **Create `src/services/sync/sync-service.ts`** — The main sync orchestrator.
+   - `syncAll()` method — the full sync flow:
+     ```
+     Step 1: Create sync_log entry (status: 'running')
+     Step 2: Fetch all expansions → upsert into expansions table
+     Step 3: For each expansion, fetch all pages of cards
+     Step 4: For each card, extract ALL variants with ALL prices
+     Step 5: Batch insert cards (100 per INSERT)
+     Step 6: Batch insert variants (100 per INSERT)
+     Step 7: Update sync_log (status: 'completed', counts)
+     ```
+   - **Critical: Extract ALL price data per variant, not just the first price.** Each variant from Scrydex has a `prices` object with conditions (NM, LP, MP, HP). Each condition has `low` and `market`. Store the entire prices object as JSONB.
+   - **Store trend data:** Each variant has trend data per condition per time window (1d, 7d, 14d, 30d, 90d, 180d). Store as JSONB in the `trends` column.
+   - **Store graded prices:** If the variant has graded pricing (PSA 10, CGC 9.5, etc.), store in `graded_prices` JSONB column.
+
+4. **Create `src/services/sync/batch-insert.ts`** — Helper for efficient database writes.
+   - Takes an array of rows + table name + column definitions
+   - Splits into chunks of 100 rows
+   - Builds a single `INSERT INTO ... VALUES ($1,$2,...),($3,$4,...) ON CONFLICT ... DO UPDATE SET ...` statement per chunk
+   - Uses parameterized queries (never string interpolation)
+   - Returns count of rows upserted
+
+5. **Create `src/services/sync/transformers.ts`** — Functions to transform Scrydex API responses into database rows.
+   - `transformExpansion(apiExpansion)` → `{ scrydex_expansion_id, name, code, series, ... }`
+   - `transformCard(apiCard, expansionId)` → `{ scrydex_card_id, expansion_id, name, number, ... }`
+   - `transformVariant(apiVariant, cardId)` → `{ card_id, name, prices: {...}, trends: {...}, graded_prices: {...} }`
+   - Log warnings when expected data is missing (e.g., a variant with no prices)
+
+6. **Add a sync trigger** — For now, add a temporary route or npm script to trigger sync manually:
+   ```json
+   "scripts": {
+     "sync": "tsx src/scripts/run-sync.ts"
+   }
+   ```
+   Create `src/scripts/run-sync.ts` that imports the sync service and runs `syncAll()`.
+
+**How to test:**
+
+**Automated tests (`src/__tests__/stage2/`):**
+
+- `scrydex-client.test.ts` — Mock HTTP responses using `msw` (Mock Service Worker) or `nock`. Test:
+  - Correct URL construction (`/pokemon/v1/en/expansions`)
+  - Auth headers sent correctly
+  - Rate limiter queues concurrent calls (fire 100 calls, verify they don't all hit at once)
+  - Retry on 429 (mock a 429 then 200, verify it retries and succeeds)
+  - Retry on 500 with backoff
+  - Gives up after 3 retries (mock 4x 500, verify it throws)
+
+- `batch-insert.test.ts` — Use a test database. Test:
+  - Insert 1 row → row exists in table
+  - Insert 250 rows → all 250 exist (tests chunking at 100)
+  - Insert same rows twice → no duplicates (upsert works, count stays same)
+  - Verify JSONB columns stored correctly (query back and parse)
+
+- `transformers.test.ts` — Pure function tests, no DB needed. Test:
+  - Expansion transform: all fields mapped correctly
+  - Card transform: image URLs, rarity, subtypes all preserved
+  - Variant transform: prices JSONB contains all conditions (NM, LP, MP, HP), not just first
+  - Variant transform: trends JSONB contains all time windows
+  - Variant transform: graded prices preserved when present, null when absent
+  - Missing data: graceful handling (null, not crash)
+
+- `sync-service.test.ts` — Integration test with test DB + mocked Scrydex. Test:
+  - Full sync flow: mock 3 expansions with 5 cards each → verify all rows in DB
+  - Sync log created and updated correctly
+  - Re-run sync → no duplicate rows (upsert)
+  - Credits tracked in sync log
+
+```bash
+npm test -- --run src/__tests__/stage2/
+```
+
+**Smoke tests on Railway (after deploy + running sync):**
+
+```bash
+# Trigger sync (via npm script or temporary API route)
+npm run sync
+
+# Check expansion count
+psql $DATABASE_URL -c "SELECT COUNT(*) FROM expansions;"
+# ✅ Should be ~350+
+
+# Check card count
+psql $DATABASE_URL -c "SELECT COUNT(*) FROM cards;"
+# ✅ Should be ~35,000+
+
+# Check variant count
+psql $DATABASE_URL -c "SELECT COUNT(*) FROM variants;"
+# ✅ Should be ~70,000+
+
+# Spot-check a known card — Charizard from Base Set
+psql $DATABASE_URL -c "SELECT c.name, c.number, v.name as variant, v.prices FROM cards c JOIN variants v ON v.card_id = c.scrydex_card_id WHERE c.name ILIKE '%charizard%' AND c.number = '4' LIMIT 5;"
+# ✅ Should show Charizard with holofoil variant, prices JSONB should contain NM, LP, MP, HP with low/market values
+
+# Verify prices have ALL conditions, not just first
+psql $DATABASE_URL -c "SELECT v.prices FROM variants v LIMIT 1;"
+# ✅ JSONB should look like: {"raw": {"NM": {"low": 45.00, "market": 52.00}, "LP": {"low": 30.00, "market": 38.00}, ...}}
+
+# Verify trends stored
+psql $DATABASE_URL -c "SELECT v.trends FROM variants v WHERE v.trends IS NOT NULL LIMIT 1;"
+# ✅ Should contain per-condition trend windows: {"NM": {"1d": ..., "7d": ..., "30d": ...}, ...}
+
+# Verify graded prices where available
+psql $DATABASE_URL -c "SELECT v.graded_prices FROM variants v WHERE v.graded_prices IS NOT NULL LIMIT 1;"
+# ✅ Should contain PSA/CGC/BGS prices
+
+# Check sync log
+psql $DATABASE_URL -c "SELECT * FROM sync_log ORDER BY started_at DESC LIMIT 1;"
+# ✅ status should be 'completed', expansions_synced/cards_upserted/variants_upserted should be > 0
+
+# Verify pg_trgm fuzzy search works
+psql $DATABASE_URL -c "SELECT name FROM cards WHERE name % 'charzard' LIMIT 5;"
+# ✅ Should return Charizard cards despite the misspelling
+
+# Verify idempotency — run sync again
+npm run sync
+psql $DATABASE_URL -c "SELECT COUNT(*) FROM cards;"
+# ✅ Same count as before (no duplicates)
+```
 
 **Deliverable:** A populated card database with real pricing, trends, and images for every English Pokemon card.
 
@@ -1637,26 +1880,209 @@ Each stage is built, tested, and verified before moving to the next. No stage de
 
 ### Stage 3: Card Catalog API & Frontend
 
-**Build:**
-- Public catalog API endpoints (no auth): expansions list, expansion detail, card search, card detail, trending
-- Pagination, sorting, filtering on all list endpoints
-- pg_trgm-powered search
-- Trending cards endpoint (biggest price movers by period)
-- Frontend: catalog navigation, expansion browser, card grid, card detail page, search, trending
-- Public access (no auth required for catalog)
+**Install these packages:**
+```bash
+# Backend (already have express, pg from Stage 1)
+# No new backend packages needed
 
-**Test before moving on:**
-- [ ] `GET /api/catalog/expansions` returns all expansions with logos
-- [ ] `GET /api/catalog/expansions/:id` returns cards in the set with images and prices
-- [ ] `GET /api/catalog/cards/search?q=charizard` returns relevant results
-- [ ] `GET /api/catalog/cards/search?q=charzard` (misspelled) still works via pg_trgm
-- [ ] `GET /api/catalog/cards/:id` returns full card detail with all variants, conditions, trends, graded prices
-- [ ] `GET /api/catalog/trending?period=7d` returns cards with real price movements
-- [ ] Sorting, filtering, pagination all work
-- [ ] Frontend: expansion browser renders grid with logos
-- [ ] Frontend: card detail shows all condition prices, trends, graded prices, variant selector
-- [ ] Frontend: search works
-- [ ] All accessible without authentication
+# Frontend — create Vite React project
+cd client   # or wherever frontend lives
+npm create vite@latest . -- --template react-ts
+npm install react-router-dom
+npm install -D @types/react @types/react-dom
+```
+
+**Step-by-step — Backend API:**
+
+1. **Create `src/routes/catalog.ts`** — Express router with all public catalog endpoints. No auth middleware on any of these routes.
+
+2. **Create `src/services/catalog/queries.ts`** — Database query functions for the catalog. Each function takes query params and returns structured data. All queries use parameterized `$1, $2` syntax (no string interpolation).
+
+   **Endpoints to build:**
+
+   a. **`GET /api/catalog/expansions`** — List all expansions.
+      - Query params: `?sort=release_date|name|card_count` (default: `-release_date`), `?series=Scarlet & Violet` (optional filter), `?page=1&limit=24`
+      - SQL: `SELECT * FROM expansions ORDER BY release_date DESC LIMIT $1 OFFSET $2`
+      - Response: `{ data: [...], total: 350, page: 1, limit: 24 }`
+      - Each expansion object: `{ id, name, code, series, logo, cardCount, releaseDate }`
+
+   b. **`GET /api/catalog/expansions/:id`** — Expansion detail with card list.
+      - URL param: expansion `scrydex_expansion_id`
+      - Query params: `?sort=number|name|price` (default: `number`), `?rarity=...`, `?page=1&limit=50`
+      - SQL: Join `cards` and `variants` for this expansion. For each card, include the default variant's NM market price for the list view.
+      - Response: `{ expansion: {...}, cards: { data: [...], total: 180, page: 1 } }`
+
+   c. **`GET /api/catalog/cards/search`** — Full-text card search using pg_trgm.
+      - Query params: `?q=charizard` (required), `?page=1&limit=24`
+      - SQL: `SELECT * FROM cards WHERE name % $1 ORDER BY similarity(name, $1) DESC LIMIT $2 OFFSET $3`
+      - This handles misspellings automatically (pg_trgm fuzzy matching)
+      - Response: `{ data: [...], total: 42, page: 1, query: "charizard" }`
+
+   d. **`GET /api/catalog/cards/:id`** — Full card detail with all variants, prices, trends.
+      - URL param: card `scrydex_card_id`
+      - SQL: Fetch card + JOIN all variants. Include expansion info.
+      - Response shape:
+        ```json
+        {
+          "card": { "id", "name", "number", "image", "rarity", "supertype", "subtypes", "artist" },
+          "expansion": { "id", "name", "code", "series", "logo" },
+          "variants": [
+            {
+              "name": "holofoil",
+              "image": "...",
+              "prices": { "NM": {"low": 45, "market": 52}, "LP": {...}, "MP": {...}, "HP": {...} },
+              "trends": { "NM": {"1d": {...}, "7d": {...}, "30d": {...}, "90d": {...}, "180d": {...}}, ... },
+              "gradedPrices": { "PSA_10": {"low": 200, "market": 280}, ... } | null
+            }
+          ]
+        }
+        ```
+
+   e. **`GET /api/catalog/trending`** — Biggest price movers.
+      - Query params: `?period=1d|7d|14d|30d|90d` (default: `7d`), `?direction=up|down|both` (default: `both`), `?minPrice=5` (default: 5, filters bulk), `?condition=NM|LP|MP|HP` (default: `NM`), `?limit=50`
+      - SQL: Query variants JSONB trends column, extract the percentage change for the requested period and condition, sort by absolute change descending.
+      - Response: `{ data: [{ card, variant, currentPrice, priceChange, percentChange, period }], total: 50 }`
+
+3. **Mount the catalog router** in `src/app.ts`:
+   ```typescript
+   app.use('/api/catalog', catalogRouter);  // No auth middleware
+   ```
+
+4. **Add pagination helper** — `src/utils/pagination.ts`. Takes `page` and `limit` query params, returns `{ offset, limit, page }`. Validates: page ≥ 1, limit between 1-100, defaults: page=1, limit=24.
+
+**Step-by-step — Frontend:**
+
+5. **Create the Vite React project** in a `client/` directory at the project root. Use React + TypeScript template.
+
+6. **Set up React Router** in `client/src/App.tsx` with routes:
+   ```
+   /catalog                → ExpansionBrowser
+   /catalog/expansions/:id → ExpansionDetail
+   /catalog/cards/:id      → CardDetail
+   /catalog/search         → SearchResults
+   /catalog/trending       → TrendingCards
+   ```
+
+7. **Create shared components** in `client/src/components/`:
+   - `Header.tsx` — Top nav with logo "PokeSnipe", nav tabs (Dashboard, Catalog), search bar. Use the glass morphism design from §12 of the frontend spec.
+   - `CardGrid.tsx` — Responsive grid that renders card thumbnails. Props: cards array, columns (4/3/2 responsive). Each card shows: image, name, number, NM price.
+   - `PriceTable.tsx` — Tabular display of per-condition prices (NM/LP/MP/HP with low/market columns). Uses DM Mono font for alignment.
+   - `TrendDisplay.tsx` — Shows trend arrows and percentages for each time window. Green for positive, red for negative, grey for <1%.
+   - `Pagination.tsx` — Page controls (prev/next, page numbers).
+   - `SearchBar.tsx` — Text input with search icon. On submit, navigates to `/catalog/search?q=...`.
+
+8. **Create page components** in `client/src/pages/catalog/`:
+   - `ExpansionBrowser.tsx` — Fetches `GET /api/catalog/expansions`, renders grid of expansion cards grouped by series. Each card shows logo, name, code, card count, release date. Click navigates to expansion detail.
+   - `ExpansionDetail.tsx` — Fetches `GET /api/catalog/expansions/:id`, shows expansion header (large logo, name, stats) + card grid. Sort and filter controls. Click card navigates to card detail.
+   - `CardDetail.tsx` — Fetches `GET /api/catalog/cards/:id`, shows large card image, variant selector tabs, price table per condition, graded prices, trend chart, expansion info. This is the most complex page — refer to §7.5 of the frontend spec.
+   - `SearchResults.tsx` — Reads `?q=` from URL, fetches `GET /api/catalog/cards/search?q=...`, renders results as card grid.
+   - `TrendingCards.tsx` — Fetches `GET /api/catalog/trending`, shows filter controls (period, direction, min price, condition) and results list with price movement data.
+
+9. **Set up API fetching** — Create `client/src/api/catalog.ts` with typed fetch functions:
+   ```typescript
+   export async function getExpansions(params): Promise<ExpansionListResponse> { ... }
+   export async function getExpansionDetail(id): Promise<ExpansionDetailResponse> { ... }
+   export async function getCard(id): Promise<CardDetailResponse> { ... }
+   export async function searchCards(query, params): Promise<SearchResponse> { ... }
+   export async function getTrending(params): Promise<TrendingResponse> { ... }
+   ```
+
+10. **Configure Vite proxy** — In `vite.config.ts`, proxy `/api` to the Express backend so frontend dev server can call the API without CORS issues. For production, Express serves the built static files from `client/dist/`.
+
+11. **Add build integration** — Update the backend to serve frontend static files:
+    ```typescript
+    // In src/app.ts (production only):
+    app.use(express.static(path.join(__dirname, '../client/dist')));
+    app.get('*', (req, res) => res.sendFile(path.join(__dirname, '../client/dist/index.html')));
+    ```
+
+**How to test:**
+
+**Automated tests (`src/__tests__/stage3/`):**
+
+- `catalog-expansions.test.ts` — Using `supertest` against the Express app with a seeded test DB:
+  - `GET /api/catalog/expansions` returns 200 with data array and total count
+  - Default sort is by release date descending
+  - `?sort=name` returns alphabetical order
+  - `?series=Scarlet & Violet` filters correctly
+  - `?page=2&limit=10` returns correct offset
+  - Response shape matches expected (id, name, code, series, logo, cardCount, releaseDate)
+
+- `catalog-cards.test.ts` — Seed test DB with 3 expansions, 10 cards, 15 variants:
+  - `GET /api/catalog/expansions/:id` returns expansion + cards
+  - `GET /api/catalog/cards/:id` returns full card with all variants, prices, trends, graded prices
+  - `GET /api/catalog/cards/search?q=charizard` returns matches
+  - `GET /api/catalog/cards/search?q=charzard` (misspelled) still returns Charizard
+  - `GET /api/catalog/trending?period=7d` returns cards sorted by price change
+
+- `catalog-no-auth.test.ts` — Verify NO auth is required:
+  - All catalog endpoints return 200 WITHOUT any session cookie
+  - This is the key difference from deal endpoints (which will need auth later)
+
+```bash
+npm test -- --run src/__tests__/stage3/
+```
+
+**Smoke tests on Railway (after deploy):**
+
+```bash
+RAILWAY_URL="https://your-app.railway.app"
+
+# Test expansion list
+curl "$RAILWAY_URL/api/catalog/expansions?limit=5" | jq '.data | length'
+# ✅ Should return 5
+
+curl "$RAILWAY_URL/api/catalog/expansions" | jq '.total'
+# ✅ Should be ~350+
+
+# Test expansion detail — get first expansion ID, then fetch its cards
+EXPANSION_ID=$(curl -s "$RAILWAY_URL/api/catalog/expansions?limit=1" | jq -r '.data[0].id')
+curl "$RAILWAY_URL/api/catalog/expansions/$EXPANSION_ID" | jq '.cards.data | length'
+# ✅ Should return cards for that expansion
+
+# Test card search
+curl "$RAILWAY_URL/api/catalog/cards/search?q=charizard" | jq '.data[0].name'
+# ✅ Should return "Charizard" or "Charizard ex" etc.
+
+# Test misspelled search
+curl "$RAILWAY_URL/api/catalog/cards/search?q=charzard" | jq '.data | length'
+# ✅ Should return results (pg_trgm fuzzy match)
+
+# Test card detail — get a card ID from search
+CARD_ID=$(curl -s "$RAILWAY_URL/api/catalog/cards/search?q=charizard&limit=1" | jq -r '.data[0].id')
+curl "$RAILWAY_URL/api/catalog/cards/$CARD_ID" | jq '.'
+# ✅ Should show: card info, expansion info, variants array
+# ✅ Each variant should have prices with NM/LP/MP/HP, trends, optional gradedPrices
+
+# Test trending
+curl "$RAILWAY_URL/api/catalog/trending?period=7d&limit=10" | jq '.data | length'
+# ✅ Should return up to 10 trending cards with price change data
+
+# Test sorting
+curl "$RAILWAY_URL/api/catalog/expansions?sort=name&limit=3" | jq '[.data[].name]'
+# ✅ Should be in alphabetical order
+
+# Test pagination
+PAGE1=$(curl -s "$RAILWAY_URL/api/catalog/expansions?page=1&limit=5" | jq '[.data[].id]')
+PAGE2=$(curl -s "$RAILWAY_URL/api/catalog/expansions?page=2&limit=5" | jq '[.data[].id]')
+# ✅ PAGE1 and PAGE2 should have different IDs (no overlap)
+
+# Test frontend loads
+curl -s "$RAILWAY_URL/catalog" | grep -c "<!DOCTYPE html"
+# ✅ Should return 1 (HTML page served)
+
+# Test no auth required (no cookie, no token)
+curl -s -o /dev/null -w "%{http_code}" "$RAILWAY_URL/api/catalog/expansions"
+# ✅ Should return 200 (not 401)
+```
+
+**Frontend manual testing (in browser):**
+- Open `https://your-app.railway.app/catalog` — expansion grid should load with logos
+- Click an expansion — should show card grid with images and prices
+- Click a card — should show full detail: image, variant selector, all condition prices, trends, graded prices
+- Type in search bar — results should appear, misspellings should work
+- Click "Trending" — should show price movers with real data
+- Test on mobile width (Chrome DevTools) — grid should reflow to fewer columns
 
 **Deliverable:** A working, browsable card catalog — useful on its own before any arbitrage scanning exists.
 
@@ -1664,24 +2090,142 @@ Each stage is built, tested, and verified before moving to the next. No stage de
 
 ### Stage 4: Exchange Rate & Pricing Engine
 
-**Build:**
-- Exchange rate service: fetch USD/GBP, store in DB, 1-hour refresh
-- Staleness hard gate: refuse to create deals if rate > 6 hours old
-- Buyer Protection fee calculator (pure function, tiered bands)
-- Pricing engine: condition-specific Scrydex price → GBP conversion → profit calc
-- No hardcoded exchange rate fallback — ever
+**Install these packages:**
+```bash
+npm install node-fetch   # Or use built-in fetch if Node 18+
+```
 
-**Test before moving on:**
-- [ ] Exchange rate fetched and stored in DB
-- [ ] Rate refresh works on schedule
-- [ ] Stale rate (>6h) blocks deal creation with clear error
-- [ ] Buyer Protection fee examples match spec:
-  - £10 item → £0.80 fee
-  - £50 item → £2.70 fee
-  - £500 item → £16.70 fee
-- [ ] Profit calculation correct for known card + known eBay price
-- [ ] Condition-specific pricing used (NM price for NM listing, LP price for LP listing)
-- [ ] Profit is negative when eBay price > market price (no false positives)
+**Step-by-step:**
+
+1. **Create `src/services/exchange-rate/exchange-rate-service.ts`** — Fetches USD→GBP rate from an exchange rate API (e.g., exchangerate-api.com or similar service using `EXCHANGE_RATE_API_KEY`).
+   - `fetchRate()` — Makes the API call, returns `{ rate: number, fetchedAt: Date }`
+   - `saveRate(rate)` — Inserts into `exchange_rates` table
+   - `getLatestRate()` — Queries the most recent rate: `SELECT rate, fetched_at FROM exchange_rates WHERE from_currency='USD' AND to_currency='GBP' ORDER BY fetched_at DESC LIMIT 1`
+   - `isStale()` — Returns `true` if the latest rate is older than 6 hours
+   - **Hard gate:** Export a `getValidRate()` function that calls `getLatestRate()` and throws `ExchangeRateStaleError` if the rate is >6 hours old. This is called by the pricing engine — no stale rates ever reach a deal.
+   - **No hardcoded fallback.** If there's no rate in the DB (first boot), throw an error. The sync must run before deals can be created.
+
+2. **Create `src/services/pricing/buyer-protection.ts`** — Pure function, zero dependencies. Calculates eBay Buyer Protection fee using tiered bands.
+   ```typescript
+   // eBay Buyer Protection fee tiers (UK):
+   // First £10.00 of total: 3%
+   // £10.01 – £50.00: 5%
+   // £50.01 – £500.00: 4%
+   // £500.01+: 2%
+   // Plus flat fee of £0.10 per transaction
+   //
+   // Example: £50 item
+   //   £10.00 × 3% = £0.30
+   //   £40.00 × 5% = £2.00
+   //   + £0.10 flat = £2.40
+   //   Total fee: £2.40
+
+   export function calculateBuyerProtection(itemPriceGBP: number): number { ... }
+   ```
+   **Important:** This is a pure function — it takes a number (item price in GBP) and returns a number (the fee). No DB calls, no side effects. Easy to test.
+
+3. **Create `src/services/pricing/pricing-engine.ts`** — The core profit calculator.
+   - `calculateProfit(input)` takes:
+     ```typescript
+     interface ProfitInput {
+       ebayPriceGBP: number;        // eBay listing price in GBP
+       shippingGBP: number;         // Shipping cost in GBP
+       condition: 'NM' | 'LP' | 'MP' | 'HP';
+       variantPrices: {             // From Scrydex variant.prices
+         NM?: { low: number; market: number };
+         LP?: { low: number; market: number };
+         MP?: { low: number; market: number };
+         HP?: { low: number; market: number };
+       };
+       exchangeRate: number;        // USD → GBP
+     }
+     ```
+   - Returns:
+     ```typescript
+     interface ProfitResult {
+       totalCostGBP: number;      // eBay price + shipping + buyer protection fee
+       marketValueUSD: number;    // Scrydex market price for this condition
+       marketValueGBP: number;    // marketValueUSD × exchangeRate
+       profitGBP: number;         // marketValueGBP - totalCostGBP
+       profitPercent: number;     // (profitGBP / totalCostGBP) × 100
+       buyerProtectionFee: number;
+       breakdown: { ebay, shipping, fee, totalCost, marketUSD, fxRate, marketGBP, profit };
+     }
+     ```
+   - **Key rule:** Use the condition-specific price from Scrydex. If the listing is LP condition, use the LP market price, not NM. If the condition price is missing, fall back to LP price (conservative).
+
+4. **Wire the exchange rate fetching into the boot sequence** — After DB connection and migration, fetch the initial exchange rate. Log a warning if it fails (scanner won't work until a rate exists, but the server can still serve the catalog).
+
+**How to test:**
+
+**Automated tests (`src/__tests__/stage4/`):**
+
+- `buyer-protection.test.ts` — Pure function tests (no DB, no mocks needed):
+  ```typescript
+  // Test exact fee calculations:
+  expect(calculateBuyerProtection(10)).toBeCloseTo(0.40);    // £10 × 3% + £0.10 flat = £0.40
+  expect(calculateBuyerProtection(50)).toBeCloseTo(2.40);    // (£10×3%) + (£40×5%) + £0.10 = £2.40
+  expect(calculateBuyerProtection(500)).toBeCloseTo(20.40);  // (£10×3%) + (£40×5%) + (£450×4%) + £0.10 = £20.40
+  expect(calculateBuyerProtection(1000)).toBeCloseTo(30.40); // + (£500×2%)
+  expect(calculateBuyerProtection(0)).toBe(0);               // Edge case
+  ```
+
+- `pricing-engine.test.ts` — Pure function tests:
+  ```typescript
+  // Known profitable deal:
+  const result = calculateProfit({
+    ebayPriceGBP: 12.50, shippingGBP: 1.99,
+    condition: 'NM',
+    variantPrices: { NM: { low: 45, market: 52 } },
+    exchangeRate: 0.789
+  });
+  expect(result.profitGBP).toBeGreaterThan(0);
+  expect(result.profitPercent).toBeGreaterThan(100);  // Big profit
+  expect(result.totalCostGBP).toBeCloseTo(12.50 + 1.99 + calculateBuyerProtection(12.50));
+
+  // Known loss — eBay price higher than market:
+  const loss = calculateProfit({
+    ebayPriceGBP: 100, shippingGBP: 5,
+    condition: 'NM',
+    variantPrices: { NM: { low: 45, market: 52 } },
+    exchangeRate: 0.789
+  });
+  expect(loss.profitGBP).toBeLessThan(0);  // Negative profit = loss
+
+  // Condition-specific: LP listing should use LP price, not NM
+  const lpResult = calculateProfit({
+    ebayPriceGBP: 12.50, shippingGBP: 1.99,
+    condition: 'LP',
+    variantPrices: { NM: { low: 45, market: 52 }, LP: { low: 30, market: 38 } },
+    exchangeRate: 0.789
+  });
+  expect(lpResult.marketValueUSD).toBe(38);  // Used LP market, not NM
+  ```
+
+- `exchange-rate-service.test.ts` — Integration test with test DB + mocked HTTP:
+  - Mock the exchange rate API response
+  - `fetchRate()` returns correct rate
+  - `saveRate()` inserts into DB
+  - `getLatestRate()` returns the saved rate
+  - `isStale()` returns false for fresh rate
+  - `isStale()` returns true for rate >6 hours old (manually update `fetched_at` in test)
+  - `getValidRate()` throws `ExchangeRateStaleError` when stale
+
+```bash
+npm test -- --run src/__tests__/stage4/
+```
+
+**Smoke tests on Railway:**
+
+```bash
+# Check exchange rate was fetched on boot
+psql $DATABASE_URL -c "SELECT rate, fetched_at FROM exchange_rates ORDER BY fetched_at DESC LIMIT 1;"
+# ✅ Should show a USD→GBP rate (around 0.78-0.82) with recent timestamp
+
+# Test the health endpoint still works
+curl "$RAILWAY_URL/healthz"
+# ✅ Should return 200
+```
 
 **Deliverable:** A pricing engine that produces correct profit calculations for any card + condition + eBay price combination.
 
@@ -1689,25 +2233,140 @@ Each stage is built, tested, and verified before moving to the next. No stage de
 
 ### Stage 5: eBay Client & Search
 
-**Build:**
-- eBay OAuth2 client credentials flow (token caching, auto-refresh)
-- `searchItems()`: 200 results, `sort=newlyListed`, price/condition/buying option filters
-- `getItem()`: full listing detail with localizedAspects + conditionDescriptors
-- Token bucket rate limiter (5 req/sec)
-- Daily budget tracker (5,000 calls/day)
-- Rate limit header parsing
+**No new packages needed** (uses `bottleneck` from Stage 2, built-in `fetch` or `node-fetch`).
 
-**Test before moving on:**
-- [ ] OAuth token obtained and cached
-- [ ] Token auto-refreshes before expiry
-- [ ] `searchItems('pokemon', 200, ...)` returns ~200 results from category 183454
-- [ ] Results are sorted newest first (verify `itemCreationDate` ordering)
-- [ ] Results are Buy It Now only (no auctions)
-- [ ] Results are £10+ only
-- [ ] `getItem(itemId)` returns `localizedAspects` with card-specific fields
-- [ ] `getItem(itemId)` returns `conditionDescriptors` with descriptor IDs
-- [ ] Daily budget counter increments correctly
-- [ ] Rate limiter prevents burst beyond 5 req/sec
+**Step-by-step:**
+
+1. **Create `src/services/ebay/auth.ts`** — eBay OAuth2 client credentials flow.
+   - eBay uses OAuth2 "client credentials" grant — you POST to the token endpoint with your app ID and secret to get an access token.
+   - Token endpoint: `https://api.ebay.com/identity/v1/oauth2/token`
+   - Request: `POST` with `Content-Type: application/x-www-form-urlencoded`, body: `grant_type=client_credentials&scope=https://api.ebay.com/oauth/api_scope`
+   - Auth header: `Basic <base64(CLIENT_ID:CLIENT_SECRET)>`
+   - Response: `{ access_token: "v^1.1#i...", expires_in: 7200, token_type: "Application Access Token" }`
+   - **Cache the token in memory.** Store `{ token, expiresAt }`. Before any API call, check if the token is expired or will expire in <5 minutes. If so, fetch a new one.
+   - Export `getAccessToken()` that returns a valid token (auto-refreshes if needed).
+
+2. **Create `src/services/ebay/client.ts`** — The eBay Browse API client.
+   - Base URL: `https://api.ebay.com/buy/browse/v1`
+   - All requests include: `Authorization: Bearer <token>`, `X-EBAY-C-MARKETPLACE-ID: EBAY_GB`, `Content-Type: application/json`
+
+   **Method 1: `searchItems(query, limit, options)`**
+   ```typescript
+   // Endpoint: GET /item_summary/search
+   // Query params:
+   //   q: 'pokemon'
+   //   limit: 200
+   //   category_ids: '183454'  (Individual Trading Cards)
+   //   sort: 'newlyListed'
+   //   filter: 'price:[10..],priceCurrency:GBP,buyingOptions:{FIXED_PRICE},conditionIds:{2750|4000|1000|1500|2000|2500|3000},deliveryCountry:GB'
+   //
+   // Returns: { itemSummaries: [...], total: number, next: string | null }
+   ```
+
+   **Method 2: `getItem(itemId)`**
+   ```typescript
+   // Endpoint: GET /item/{itemId}
+   // Returns the FULL listing including:
+   //   - localizedAspects: [{ type, name, value }]  ← Card Name, Set, Card Number, etc.
+   //   - conditionDescriptors: [{ name, values }]   ← Condition IDs from §3.4
+   //   - description: string                         ← Full listing description
+   //   - All the fields from search (price, shipping, images, seller, etc.)
+   ```
+
+3. **Create `src/services/ebay/rate-limiter.ts`** — eBay rate limiter using Bottleneck.
+   - `maxConcurrent: 5`, `minTime: 200` (5 req/sec — conservative for eBay)
+   - Parse rate limit headers from responses: `X-RateLimit-Limit`, `X-RateLimit-Remaining`, `X-RateLimit-Reset`
+   - If `X-RateLimit-Remaining` drops below 10, slow down automatically
+
+4. **Create `src/services/ebay/budget.ts`** — Daily API call budget tracker.
+   ```typescript
+   // In-memory counter (resets at midnight UTC)
+   const budget = {
+     dailyLimit: 5000,
+     used: 0,
+     resetAt: nextMidnightUTC(),
+   };
+
+   export function trackCall(): void { ... }         // Increment counter
+   export function getRemainingBudget(): number { ... } // dailyLimit - used
+   export function canMakeCall(): boolean { ... }     // used < dailyLimit
+   export function getBudgetStatus(): BudgetStatus { ... } // For /api/status
+   ```
+   - Every API call (search or getItem) calls `trackCall()` after executing
+   - `canMakeCall()` is checked BEFORE making any API call
+   - If budget exhausted, log a warning and skip until reset
+
+5. **Create `src/services/ebay/types.ts`** — TypeScript interfaces for eBay API responses.
+   - `EbaySearchResponse` — the full search response shape
+   - `EbayItemSummary` — a single item from search results
+   - `EbayItemDetail` — the full getItem response
+   - `EbayConditionDescriptor` — `{ name: string, values: string[] }`
+   - `EbayLocalizedAspect` — `{ type: string, name: string, value: string }`
+
+**How to test:**
+
+**Automated tests (`src/__tests__/stage5/`):**
+
+- `ebay-auth.test.ts` — Mock the token endpoint with `msw`/`nock`:
+  - Valid credentials → returns token
+  - Token is cached (second call doesn't hit the endpoint)
+  - Expired token → auto-refreshes (mock expired timestamp, verify new token request)
+  - Invalid credentials → throws clear error
+
+- `ebay-client.test.ts` — Mock the Browse API endpoints:
+  - `searchItems('pokemon', 200, ...)` constructs correct URL with all query params
+  - Filter string includes all expected filters (price, condition, buying options, delivery country)
+  - `getItem(itemId)` constructs correct URL
+  - Response is parsed into typed objects
+  - Auth header is included in every request
+
+- `ebay-budget.test.ts` — Pure in-memory tests:
+  ```typescript
+  // Start with fresh budget
+  expect(getRemainingBudget()).toBe(5000);
+  trackCall();
+  expect(getRemainingBudget()).toBe(4999);
+
+  // Exhaust budget
+  for (let i = 0; i < 4999; i++) trackCall();
+  expect(canMakeCall()).toBe(false);
+
+  // Reset at midnight
+  resetBudget();
+  expect(canMakeCall()).toBe(true);
+  ```
+
+```bash
+npm test -- --run src/__tests__/stage5/
+```
+
+**Smoke tests on Railway (one-time live API validation):**
+
+Create a temporary test script `src/scripts/test-ebay.ts`:
+```bash
+# Run the test script
+npx tsx src/scripts/test-ebay.ts
+```
+The script should:
+1. Get an OAuth token → print "Token obtained: v^1.1#i..."
+2. Call `searchItems('pokemon', 10, ...)` (limit 10 to save budget) → print item count
+3. Verify results are Buy It Now, £10+, from category 183454
+4. Pick one item, call `getItem(itemId)` → print whether `localizedAspects` and `conditionDescriptors` are present
+5. Print budget: "API calls used: 2/5000"
+
+```bash
+# After running the test script, verify budget tracking
+# Check the console output for:
+# ✅ "Token obtained" (OAuth works)
+# ✅ "Search returned N items" (search works)
+# ✅ "All items are FIXED_PRICE" (filter works)
+# ✅ "All items are £10+" (price filter works)
+# ✅ "getItem returned localizedAspects: true" (enrichment data available)
+# ✅ "getItem returned conditionDescriptors: true" (condition data available)
+# ✅ "Budget: 2/5000" (tracking works)
+```
+
+**Delete the test script after verification** — don't leave it in production.
 
 **Deliverable:** Working eBay API client that can search listings and fetch individual item details.
 
@@ -1715,35 +2374,201 @@ Each stage is built, tested, and verified before moving to the next. No stage de
 
 ### Stage 6: Signal Extraction & Condition Mapping
 
-**Build:**
-- Title parser: 5-phase pipeline (clean → classify → extract → identify → assemble)
-- Junk/bulk/fake detection (early exit)
-- Card number extraction (prioritized pattern array)
-- Variant keyword detection (holo, reverse, 1st edition, etc.)
-- Condition descriptor extraction using full eBay descriptor ID mapping (§3.4)
-- Condition priority: descriptors → localizedAspects → title → default LP
-- Grading detection (company, grade, cert number from descriptors)
-- Structured data extractor (from localizedAspects)
-- Signal merger (title signals + structured signals → NormalizedListing)
+**No new packages needed.** All signal extraction is pure TypeScript string processing and mapping.
 
-**Test before moving on:**
-- [ ] Title cleaning: emojis stripped, HTML decoded, whitespace collapsed
-- [ ] Junk detection: "Pokemon Card Lot Bundle x50" → rejected
-- [ ] Fake detection: "Custom Proxy Charizard" → rejected
-- [ ] Card number extraction from 10+ title formats:
-  - `"123/456"` → number: 123, denominator: 456
-  - `"SV065/198"` → number: 65, prefix: SV, denominator: 198
-  - `"#123"` → number: 123
-- [ ] Condition descriptors mapped correctly:
-  - Descriptor `40001` value `400010` → NM
-  - Descriptor `40001` value `400015` → LP
-  - Descriptor `27501` value `275010` + `27502` value `275020` → PSA 10
-- [ ] Variant detection:
-  - Title "Holo" → holofoil
-  - Title "Reverse Holo" → reverseHolofoil
-  - Title "1st Edition Holo" → firstEditionHolofoil
-- [ ] Signal merger: structured data overrides title when both present
-- [ ] Signal merger: conflicting signals flagged in warnings
+**Step-by-step:**
+
+1. **Create `src/services/extraction/title-cleaner.ts`** — Phase 1: Clean raw eBay titles.
+   - Strip emojis (regex: `[\u{1F600}-\u{1F64F}\u{1F300}-\u{1F5FF}...]/gu`)
+   - Decode HTML entities (`&amp;` → `&`, `&#39;` → `'`, etc.)
+   - Collapse multiple spaces to single space
+   - Trim whitespace
+   - Lowercase for matching (keep original for display)
+   - Export: `cleanTitle(raw: string): { cleaned: string; original: string }`
+
+2. **Create `src/services/extraction/junk-detector.ts`** — Phase 2: Classify listing as junk/bulk/fake and reject early.
+   - **Bulk patterns** (reject these): `lot`, `bundle`, `bulk`, `collection`, `x10`, `x20`, `x50`, `x100`, `set of`, `mystery`, `random`, `grab bag`, `job lot`
+   - **Fake patterns** (reject these): `custom`, `proxy`, `orica`, `replica`, `fake`, `unofficial`, `fan made`, `altered art` (when clearly custom)
+   - **Non-card patterns** (reject these): `booster`, `booster box`, `etb`, `elite trainer`, `tin`, `binder`, `sleeve`, `playmat`, `deck box`, `code card`, `online code`
+   - Check against the cleaned lowercase title. If any pattern matches, return `{ isJunk: true, reason: 'bulk_lot' | 'fake' | 'non_card' }`
+   - Export: `detectJunk(title: string): { isJunk: boolean; reason?: string }`
+
+3. **Create `src/services/extraction/number-extractor.ts`** — Phase 3: Extract card number from title.
+   - Try patterns in priority order (first match wins):
+     ```
+     1. "SV065/198" → { number: 65, prefix: 'SV', denominator: 198 }
+     2. "TG15/TG30"  → { number: 15, prefix: 'TG', denominator: 30 }
+     3. "123/456"    → { number: 123, prefix: null, denominator: 456 }
+     4. "#123"       → { number: 123, prefix: null, denominator: null }
+     5. "No. 123"    → { number: 123, prefix: null, denominator: null }
+     ```
+   - Regex patterns: `/(SV|TG|GG|SWSH|SM|XY)?0*(\d{1,4})\s*\/\s*0*(\d{1,4})/i`, `/#0*(\d{1,4})/`, `/\bNo\.?\s*0*(\d{1,4})\b/i`
+   - Strip leading zeros (065 → 65)
+   - Export: `extractCardNumber(title: string): CardNumber | null`
+
+4. **Create `src/services/extraction/variant-detector.ts`** — Phase 3b: Detect variant from title keywords.
+   - Uses the keyword map from §4.6:
+     ```
+     'reverseHolofoil': ['reverse holo', 'reverse', 'rev holo']  ← check BEFORE 'holofoil'
+     'firstEditionHolofoil': ['1st edition holo', '1st ed holo'] ← check BEFORE 'firstEditionNormal'
+     'holofoil': ['holo', 'holographic', 'holo rare']
+     'firstEditionNormal': ['1st edition', '1st ed', 'first edition']
+     'unlimitedHolofoil': ['unlimited holo']
+     'normal': [] (default)
+     ```
+   - **Order matters:** Check longer patterns first ("reverse holo" before "holo", "1st edition holo" before "1st edition")
+   - Also detect: `'full art'`, `'alt art'`, `'alternate art'`, `'secret rare'`, `'gold'`, `'rainbow'`, `'shadowless'`
+   - Export: `detectVariant(title: string): string | null` — returns Scrydex variant name or null
+
+5. **Create `src/services/extraction/condition-mapper.ts`** — Map eBay condition descriptors to Scrydex conditions.
+   - Import the full descriptor ID maps from §3.4 of this spec
+   - `extractCondition(listing)` — the priority chain:
+     ```
+     Priority 1: conditionDescriptors (most reliable)
+       - Check for graded: descriptor name '27501' present → graded card
+       - Check for ungraded: descriptor name '40001' → map value to NM/LP/MP/HP
+     Priority 2: localizedAspects
+       - Look for aspect named 'Card Condition' → map text to NM/LP/MP/HP
+     Priority 3: Title parsing
+       - Look for 'near mint', 'nm', 'lightly played', 'lp', 'moderately played', 'mp', 'heavily played', 'hp'
+     Priority 4: Default LP (conservative)
+     ```
+   - For graded cards, also extract: grading company (from `27501`), grade (from `27502`), cert number (from `27503`)
+   - Export: `extractCondition(listing): ConditionResult` (interface from §3.4)
+
+6. **Create `src/services/extraction/structured-extractor.ts`** — Extract signals from `localizedAspects` (the structured fields from getItem enrichment).
+   - Look for these aspect names: `'Card Name'`, `'Set'`, `'Card Number'`, `'Rarity'`, `'Professional Grader'`, `'Grade'`, `'Language'`, `'Year Manufactured'`
+   - Map them to our normalized structure
+   - Export: `extractStructuredData(aspects: LocalizedAspect[]): StructuredSignals`
+
+7. **Create `src/services/extraction/signal-merger.ts`** — Phase 5: Merge all signals into a `NormalizedListing`.
+   - Takes: title signals (number, variant, condition from title) + structured signals (from localizedAspects) + condition descriptor signals
+   - **Rule: Structured data wins over title data when both exist.** If the title says "Holo" but localizedAspects says the card name, use localizedAspects for the name.
+   - **Rule: Condition descriptors win over everything** for condition.
+   - If signals conflict (title says NM but descriptor says LP), log a warning and use the higher-priority source.
+   - Export: `mergeSignals(titleSignals, structuredSignals, conditionResult): NormalizedListing`
+
+8. **Create `src/services/extraction/index.ts`** — The main extraction pipeline that ties it all together:
+   ```typescript
+   export function extractSignals(listing: EbayListing): ExtractionResult {
+     const cleaned = cleanTitle(listing.title);
+     const junk = detectJunk(cleaned.cleaned);
+     if (junk.isJunk) return { rejected: true, reason: junk.reason };
+
+     const cardNumber = extractCardNumber(cleaned.cleaned);
+     const variant = detectVariant(cleaned.cleaned);
+     const condition = extractCondition(listing);  // Uses descriptors if enriched
+     const structured = listing.localizedAspects
+       ? extractStructuredData(listing.localizedAspects) : null;
+
+     return mergeSignals({ cardNumber, variant, titleCondition: condition }, structured, condition);
+   }
+   ```
+
+**How to test:**
+
+**Automated tests (`src/__tests__/stage6/`)** — All pure function tests, no DB or API needed:
+
+- `title-cleaner.test.ts`:
+  ```typescript
+  expect(cleanTitle('🔥 Charizard  ex  &amp; Friends!! 🔥').cleaned)
+    .toBe('charizard ex & friends!!');
+  expect(cleanTitle('   lots   of   spaces   ').cleaned).toBe('lots of spaces');
+  ```
+
+- `junk-detector.test.ts`:
+  ```typescript
+  // Bulk → rejected
+  expect(detectJunk('pokemon card lot bundle x50')).toEqual({ isJunk: true, reason: 'bulk_lot' });
+  expect(detectJunk('mystery grab bag 10 random cards')).toEqual({ isJunk: true, reason: 'bulk_lot' });
+  // Fake → rejected
+  expect(detectJunk('custom proxy charizard orica')).toEqual({ isJunk: true, reason: 'fake' });
+  // Non-card → rejected
+  expect(detectJunk('pokemon booster box scarlet violet')).toEqual({ isJunk: true, reason: 'non_card' });
+  // Real card → not rejected
+  expect(detectJunk('charizard ex 006/197 obsidian flames')).toEqual({ isJunk: false });
+  expect(detectJunk('pikachu vmax 044/185 vivid voltage')).toEqual({ isJunk: false });
+  ```
+
+- `number-extractor.test.ts`:
+  ```typescript
+  // Standard format
+  expect(extractCardNumber('Charizard 006/197')).toEqual({ number: 6, prefix: null, denominator: 197 });
+  // Prefix format
+  expect(extractCardNumber('SV065/198 Iono SAR')).toEqual({ number: 65, prefix: 'SV', denominator: 198 });
+  // Trainer gallery
+  expect(extractCardNumber('TG15/TG30 Pikachu')).toEqual({ number: 15, prefix: 'TG', denominator: 30 });
+  // Hash format
+  expect(extractCardNumber('Mewtwo #150')).toEqual({ number: 150, prefix: null, denominator: null });
+  // No number
+  expect(extractCardNumber('Pokemon Card Holo Rare')).toBeNull();
+  ```
+
+- `variant-detector.test.ts`:
+  ```typescript
+  expect(detectVariant('reverse holo charizard')).toBe('reverseHolofoil');
+  expect(detectVariant('holo rare pikachu')).toBe('holofoil');
+  expect(detectVariant('1st edition holo charizard')).toBe('firstEditionHolofoil');
+  expect(detectVariant('1st edition dark blastoise')).toBe('firstEditionNormal');
+  expect(detectVariant('charizard ex 006/197')).toBeNull();  // No variant keyword → null
+  ```
+
+- `condition-mapper.test.ts`:
+  ```typescript
+  // From condition descriptors (highest priority)
+  expect(extractCondition({
+    conditionDescriptors: [{ name: '40001', values: ['400010'] }]
+  }).condition).toBe('NM');
+
+  expect(extractCondition({
+    conditionDescriptors: [{ name: '40001', values: ['400015'] }]
+  }).condition).toBe('LP');
+
+  // Graded card
+  const graded = extractCondition({
+    conditionDescriptors: [
+      { name: '27501', values: ['275010'] },  // PSA
+      { name: '27502', values: ['275020'] },  // Grade 10
+      { name: '27503', values: ['cert-123'] }
+    ]
+  });
+  expect(graded.isGraded).toBe(true);
+  expect(graded.gradingCompany).toBe('PSA');
+  expect(graded.grade).toBe('10');
+  expect(graded.certNumber).toBe('cert-123');
+
+  // No descriptors → fall back to title
+  expect(extractCondition({
+    conditionDescriptors: [],
+    title: 'Near Mint Charizard'
+  }).condition).toBe('NM');
+
+  // Nothing at all → default LP
+  expect(extractCondition({
+    conditionDescriptors: [], title: 'Charizard ex', localizedAspects: null
+  }).condition).toBe('LP');
+  expect(extractCondition({
+    conditionDescriptors: [], title: 'Charizard ex', localizedAspects: null
+  }).source).toBe('default');
+  ```
+
+- `signal-merger.test.ts`:
+  ```typescript
+  // Structured data overrides title data
+  const result = mergeSignals(
+    { cardNumber: { number: 6 }, variant: 'holofoil' },
+    { cardName: 'Charizard ex', set: 'Obsidian Flames', cardNumber: '006' },
+    { condition: 'NM', source: 'condition_descriptor' }
+  );
+  expect(result.cardName).toBe('Charizard ex');  // From structured, not title
+  expect(result.condition).toBe('NM');            // From descriptor
+  ```
+
+```bash
+npm test -- --run src/__tests__/stage6/
+```
+
+**No Railway smoke tests needed** — this stage is entirely pure functions with no external dependencies. If the automated tests pass, it works.
 
 **Deliverable:** A signal extraction pipeline that converts raw eBay listings into structured, typed data.
 
@@ -1751,28 +2576,200 @@ Each stage is built, tested, and verified before moving to the next. No stage de
 
 ### Stage 7: Matching Engine
 
-**Build:**
-- Number-first candidate lookup against local card index
-- Candidate disambiguation (name similarity, denominator, expansion)
-- Jaro-Winkler name validation (≥0.60 threshold)
-- Expansion cross-validation
-- Variant resolution (single variant → keyword match → cheapest default)
-- Confidence scoring (weighted geometric mean)
-- Validation gates (hard + soft)
+**Install these packages:**
+```bash
+npm install jaro-winkler   # String similarity (or use 'string-similarity' / 'natural')
+```
 
-**Test before moving on:**
-- [ ] Exact match: "Charizard ex 006/197 Obsidian Flames" → correct card + variant
-- [ ] Fuzzy name: "Charzard ex 006/197" (misspelled) → still matches
-- [ ] Number + denominator narrows to 1-3 candidates
-- [ ] Name similarity < 0.60 → rejected (hard gate)
-- [ ] Variant resolution: single-variant card → auto-selected
-- [ ] Variant resolution: multi-variant card + "holo" in title → holofoil variant
-- [ ] Variant resolution: multi-variant card + no keywords → cheapest variant
-- [ ] Confidence score reflects match quality (exact > fuzzy > guessed)
-- [ ] 20+ manually verified eBay titles produce correct matches
-- [ ] 5+ known-bad titles produce no match (not a wrong match)
-- [ ] Graded card detection: PSA/CGC/BGS in title → isGraded: true
-- [ ] Performance: matching completes in <10ms per listing (local DB query)
+**Step-by-step:**
+
+1. **Create `src/services/matching/candidate-lookup.ts`** — Find candidate cards from our local database using the extracted card number.
+   - Primary query: `SELECT * FROM cards WHERE number = $1` (the extracted card number)
+   - If a denominator was extracted (e.g., `/197`), narrow further: `AND printed_total = $2` or match against the expansion's total card count
+   - If a prefix was extracted (e.g., `SV`, `TG`), use it to filter by number prefix
+   - Returns an array of 0-N candidate cards
+   - **If no number was extracted**, fall back to name-based lookup: `SELECT * FROM cards WHERE name % $1 LIMIT 20` (pg_trgm similarity)
+   - Export: `findCandidates(signals: NormalizedListing): Promise<CandidateCard[]>`
+
+2. **Create `src/services/matching/name-validator.ts`** — Compare the eBay listing's card name against each candidate using Jaro-Winkler similarity.
+   - For each candidate card, compute `jaroWinkler(listing.cardName, candidate.name)`
+   - **Hard gate:** If the best similarity is < 0.60, reject all candidates (no match)
+   - **Soft gate:** If similarity is between 0.60-0.75, flag as low confidence but allow
+   - Return candidates sorted by similarity score (best first)
+   - Export: `validateNames(listingName: string, candidates: CandidateCard[]): ValidatedCandidate[]`
+
+3. **Create `src/services/matching/expansion-validator.ts`** — Cross-validate the expansion if the eBay title or structured data mentions a set name.
+   - If the listing mentions "Obsidian Flames" or "sv3", check if the candidate card's expansion matches
+   - Match against expansion name (fuzzy) and code (exact)
+   - Boost confidence if expansion matches, penalize if it conflicts
+   - Export: `validateExpansion(listing: NormalizedListing, candidate: CandidateCard): ExpansionScore`
+
+4. **Create `src/services/matching/variant-resolver.ts`** — Determine which variant of the card the listing is selling. Uses the logic from §4.6:
+   - Step 1: Get all variants for the matched card: `SELECT * FROM variants WHERE card_id = $1`
+   - Step 2: Filter to variants that have pricing data (prices JSONB is not empty/null)
+   - Step 3: If only 1 priced variant → auto-select (confidence 0.95)
+   - Step 4: If multiple priced variants → check listing's detected variant keyword against the variant keyword map
+   - Step 5: If no keyword match → default to the CHEAPEST priced variant (confidence 0.50, conservative)
+   - Export: `resolveVariant(listing: NormalizedListing, cardVariants: Variant[]): VariantMatch`
+
+5. **Create `src/services/matching/confidence-scorer.ts`** — Calculate composite confidence score.
+   - Individual scores (0-1 each):
+     - `nameScore` — Jaro-Winkler similarity
+     - `numberScore` — 1.0 if number matches, 0.0 if not, 0.5 if no number extracted
+     - `denominatorScore` — 1.0 if denominator matches printed_total, 0.0 if conflicts, 0.5 if not extracted
+     - `expansionScore` — 1.0 if matches, 0.0 if conflicts, 0.5 if not checked
+     - `variantScore` — Confidence from variant resolver (0.95/0.85/0.50)
+     - `extractionScore` — Higher if data came from structured fields vs. title-only
+   - **Composite:** Weighted geometric mean (see §4.5 for weights)
+   - Export: `calculateConfidence(scores: ScoreComponents): CompositeConfidence`
+
+6. **Create `src/services/matching/gates.ts`** — Validation gates that determine whether a match is accepted.
+   - **Hard gates** (instant reject):
+     - Name similarity < 0.60
+     - Number extracted but doesn't match any candidate
+     - Denominator extracted and conflicts with all candidates
+   - **Soft gates** (allow but flag):
+     - Composite confidence < 0.45 → reject
+     - Composite 0.45-0.65 → low tier (log only, don't display)
+     - Composite 0.65-0.85 → medium (display with warning badge)
+     - Composite ≥ 0.85 → high (display confidently)
+   - Export: `applyGates(match: MatchResult): GatedResult`
+
+7. **Create `src/services/matching/index.ts`** — The main matching pipeline:
+   ```typescript
+   export async function matchListing(signals: NormalizedListing): Promise<MatchResult | null> {
+     const candidates = await findCandidates(signals);
+     if (candidates.length === 0) return null;
+
+     const validated = validateNames(signals.cardName, candidates);
+     if (validated.length === 0) return null;  // Hard gate: no name close enough
+
+     const bestCandidate = validated[0];
+     const expansionScore = validateExpansion(signals, bestCandidate);
+     const variantMatch = await resolveVariant(signals, bestCandidate.variants);
+     const confidence = calculateConfidence({ ...scores });
+     const gated = applyGates({ candidate: bestCandidate, variant: variantMatch, confidence });
+
+     return gated;
+   }
+   ```
+
+**How to test:**
+
+**Automated tests (`src/__tests__/stage7/`)** — These need a seeded test database with real card data:
+
+Before running tests, create a test seed file (`src/__tests__/fixtures/seed-cards.ts`) that inserts ~50 known cards with their variants into the test database. Include a mix of:
+- Modern cards (Charizard ex 006/197 from Obsidian Flames)
+- Multi-variant cards (Base Set Charizard #4 with holofoil and firstEditionHolofoil)
+- Trainer Gallery cards (TG15/TG30)
+- Cards with similar names (multiple Pikachu variants across different sets)
+
+- `candidate-lookup.test.ts`:
+  ```typescript
+  // Number-based lookup
+  const candidates = await findCandidates({ cardNumber: { number: 6, denominator: 197 } });
+  expect(candidates.length).toBeGreaterThanOrEqual(1);
+  expect(candidates.some(c => c.name === 'Charizard ex')).toBe(true);
+
+  // Name-based fallback (no number)
+  const nameCandidates = await findCandidates({ cardName: 'Charizard' });
+  expect(nameCandidates.length).toBeGreaterThan(0);
+  ```
+
+- `name-validator.test.ts`:
+  ```typescript
+  // Exact match → high score
+  const exact = validateNames('Charizard ex', candidates);
+  expect(exact[0].similarity).toBeGreaterThan(0.95);
+
+  // Misspelled → still matches
+  const fuzzy = validateNames('Charzard ex', candidates);
+  expect(fuzzy[0].similarity).toBeGreaterThan(0.60);
+  expect(fuzzy[0].card.name).toBe('Charizard ex');
+
+  // Completely wrong name → hard gate rejects
+  const wrong = validateNames('Totally Different Card', candidates);
+  expect(wrong.length).toBe(0);  // All below 0.60 threshold
+  ```
+
+- `variant-resolver.test.ts`:
+  ```typescript
+  // Single variant → auto-select
+  const single = await resolveVariant(
+    { variant: null },
+    [{ name: 'normal', prices: { NM: { market: 5 } } }]
+  );
+  expect(single.variant.name).toBe('normal');
+  expect(single.confidence).toBe(0.95);
+
+  // Multi-variant + keyword → correct match
+  const holo = await resolveVariant(
+    { variant: 'holofoil' },
+    [{ name: 'holofoil', prices: { NM: { market: 350 } } }, { name: 'normal', prices: { NM: { market: 5 } } }]
+  );
+  expect(holo.variant.name).toBe('holofoil');
+  expect(holo.confidence).toBe(0.85);
+
+  // Multi-variant + no keyword → cheapest (conservative)
+  const noKeyword = await resolveVariant(
+    { variant: null },
+    [{ name: 'holofoil', prices: { NM: { market: 350 } } }, { name: 'normal', prices: { NM: { market: 5 } } }]
+  );
+  expect(noKeyword.variant.name).toBe('normal');  // Cheapest
+  expect(noKeyword.confidence).toBe(0.50);
+  ```
+
+- `matching-integration.test.ts` — End-to-end matching tests with 20+ real eBay title examples:
+  ```typescript
+  // Create a test corpus of real eBay titles with expected results:
+  const corpus = [
+    { title: 'Charizard ex 006/197 Obsidian Flames NM', expectedCard: 'charizard-ex-sv3-6', expectedVariant: 'normal' },
+    { title: 'PSA 10 Pikachu VMAX 044/185 Vivid Voltage', expectedCard: 'pikachu-vmax-swsh4-44', isGraded: true },
+    { title: 'Holo Rare Blastoise 2/102 Base Set', expectedCard: 'blastoise-base1-2', expectedVariant: 'holofoil' },
+    // ... 20+ more
+  ];
+
+  for (const entry of corpus) {
+    const signals = extractSignals(mockListing(entry.title));
+    const match = await matchListing(signals);
+    expect(match?.candidate.scrydex_card_id).toBe(entry.expectedCard);
+  }
+
+  // Known bad titles that should NOT match:
+  const badTitles = [
+    'Pokemon Card Lot Bundle x50 Mixed Cards',
+    'Custom Proxy Charizard Full Art Orica',
+    'Pokemon Booster Box Scarlet Violet',
+    'MTG Magic the Gathering Black Lotus',  // Wrong game
+    'Digimon Adventure Card Agumon',        // Wrong game
+  ];
+
+  for (const title of badTitles) {
+    const signals = extractSignals(mockListing(title));
+    expect(signals.rejected || await matchListing(signals) === null).toBe(true);
+  }
+  ```
+
+```bash
+npm test -- --run src/__tests__/stage7/
+```
+
+**Smoke tests on Railway:**
+
+Create a temporary test script `src/scripts/test-matching.ts` that:
+1. Fetches 10 real eBay listings via `searchItems()`
+2. Runs each through `extractSignals()` + `matchListing()`
+3. Prints: title → matched card name + variant + confidence (or "no match")
+4. You manually verify the matches are correct
+
+```bash
+npx tsx src/scripts/test-matching.ts
+# Review output:
+# ✅ "Charizard ex 006/197 Obsidian Flames" → Charizard ex (sv3-6) holofoil [0.92]
+# ✅ "Pokemon Card Lot x20 Bundle" → REJECTED (bulk_lot)
+# ✅ "Pikachu VMAX 044/185" → Pikachu VMAX (swsh4-44) normal [0.88]
+# ✅ No wrong matches (false positives)
+```
 
 **Deliverable:** A matching engine that correctly identifies which card an eBay listing is selling.
 
@@ -1780,29 +2777,213 @@ Each stage is built, tested, and verified before moving to the next. No stage de
 
 ### Stage 8: Scanner Pipeline — End to End
 
-**Build:**
-- Scanner service: search → filter → match → enrich → price → deal
-- Two-phase evaluation: Phase 1 (title-only) → Phase 2 (getItem enrichment)
-- Enrichment gate (≥15% profit, ≥0.50 confidence)
-- Budget management (daily call tracking, threshold tightening)
-- Deduplication (skip already-processed eBay item IDs)
-- Tier classification (GRAIL/HIT/FLIP/SLEEP)
-- Deal creation with full audit trail (match_signals JSONB)
-- Scan loop (every 5 minutes)
+**No new packages needed.** This stage wires together everything from Stages 4-7.
 
-**Test before moving on:**
-- [ ] Full pipeline: search → match → price → deal inserted in DB
-- [ ] Deals have correct profit calculations (verify 5 manually)
-- [ ] Deals have correct condition (from enrichment, not guessed)
-- [ ] Deals have correct variant (verify against Scrydex)
-- [ ] Tier assignment matches profit thresholds
-- [ ] Duplicate eBay items skipped (no duplicate deals)
-- [ ] Enrichment only fires when profit threshold met
-- [ ] Budget tracking: search calls + getItem calls counted correctly
-- [ ] Budget throttling: enrichment threshold tightens at low budget
-- [ ] Scan loop runs every 5 minutes without drift or overlap
-- [ ] Deals accumulate over 30+ minutes of running
-- [ ] Match signals JSONB contains full audit data
+**Step-by-step:**
+
+1. **Create `src/services/scanner/deduplicator.ts`** — Track which eBay item IDs have already been processed.
+   - Keep an in-memory `Set<string>` of processed item IDs
+   - Also check the `deals` table: `SELECT 1 FROM deals WHERE ebay_item_id = $1`
+   - Export: `isDuplicate(itemId: string): Promise<boolean>` and `markProcessed(itemId: string): void`
+   - Cap the in-memory set at 10,000 entries (evict oldest when full)
+
+2. **Create `src/services/scanner/enrichment-gate.ts`** — Decides whether a Phase 1 match deserves a `getItem()` call.
+   ```typescript
+   export function shouldEnrich(match: PhaseOneMatch, budget: BudgetStatus): boolean {
+     // If budget is low (<500 remaining), raise the threshold
+     const profitThreshold = budget.remaining < 500 ? 25 : 15;
+
+     return (
+       match.titleOnlyProfitPercent >= profitThreshold &&
+       match.confidence.composite >= 0.50 &&
+       !match.isDuplicate
+     );
+   }
+   ```
+
+3. **Create `src/services/scanner/tier-classifier.ts`** — Assign deal tier based on profit and confidence.
+   ```typescript
+   export function classifyTier(profitPercent: number, confidence: number, liquidityGrade: string): DealTier {
+     // Base tier from profit:
+     //   >40% → GRAIL, 25-40% → HIT, 15-25% → FLIP, 5-15% → SLEEP
+     // Liquidity adjustment (applied in Stage 9, for now just use profit):
+     //   illiquid → cap at SLEEP, low → cap at FLIP, medium → GRAIL downgrades to HIT
+     let tier: DealTier;
+     if (profitPercent > 40 && confidence >= 0.85) tier = 'GRAIL';
+     else if (profitPercent > 25 && confidence >= 0.65) tier = 'HIT';
+     else if (profitPercent > 15) tier = 'FLIP';
+     else tier = 'SLEEP';
+     return tier;
+   }
+   ```
+
+4. **Create `src/services/scanner/deal-creator.ts`** — Insert a new deal into the database.
+   - Takes: matched card, variant, condition, profit result, eBay listing data, match signals
+   - Inserts into `deals` table with all fields from §9 schema
+   - Stores full audit trail in `match_signals` JSONB column (all extraction signals, confidence breakdown, enrichment data)
+   - Returns the created deal (with `event_id` for SSE)
+   - Export: `createDeal(data: DealInput): Promise<Deal>`
+
+5. **Create `src/services/scanner/scanner-service.ts`** — The main scanner orchestrator. This is the core loop.
+   ```typescript
+   export async function runScanCycle(): Promise<ScanResult> {
+     // Step 1: Check budget
+     if (!canMakeCall()) { log.warn('Budget exhausted, skipping cycle'); return; }
+
+     // Step 2: PHASE 1 — Search eBay
+     const listings = await searchItems('pokemon', 200, { ... });
+     trackCall();  // 1 search call used
+
+     // Step 3: For each listing:
+     const results = [];
+     for (const listing of listings.itemSummaries) {
+       // 3a. Check dedup
+       if (await isDuplicate(listing.itemId)) continue;
+       markProcessed(listing.itemId);
+
+       // 3b. Extract signals (title-only for now)
+       const signals = extractSignals(listing);
+       if (signals.rejected) continue;
+
+       // 3c. Match against card index
+       const match = await matchListing(signals);
+       if (!match) continue;
+
+       // 3d. Quick profit estimate (title-parsed condition or default LP)
+       const quickProfit = calculateProfit({
+         ebayPriceGBP: listing.price.value,
+         shippingGBP: listing.shipping?.value || 0,
+         condition: signals.condition?.condition || 'LP',
+         variantPrices: match.variant.prices,
+         exchangeRate: await getValidRate()
+       });
+
+       // 3e. PHASE 2 — Enrichment gate
+       if (shouldEnrich({ titleOnlyProfitPercent: quickProfit.profitPercent, confidence: match.confidence, isDuplicate: false }, getBudgetStatus())) {
+         // Call getItem for full data
+         const enriched = await getItem(listing.itemId);
+         trackCall();  // 1 getItem call used
+
+         // Re-extract with enriched data
+         const enrichedSignals = extractSignals({ ...listing, ...enriched });
+         const enrichedMatch = await matchListing(enrichedSignals);
+         if (!enrichedMatch) continue;
+
+         // Recalculate profit with real condition
+         const realProfit = calculateProfit({
+           ebayPriceGBP: listing.price.value,
+           shippingGBP: listing.shipping?.value || 0,
+           condition: enrichedSignals.condition.condition,
+           variantPrices: enrichedMatch.variant.prices,
+           exchangeRate: await getValidRate()
+         });
+
+         if (realProfit.profitPercent < 5) continue;  // Not profitable after enrichment
+
+         // 3f. Create deal
+         const tier = classifyTier(realProfit.profitPercent, enrichedMatch.confidence.composite, 'unknown');
+         const deal = await createDeal({ listing, match: enrichedMatch, profit: realProfit, tier, signals: enrichedSignals });
+         results.push(deal);
+       }
+     }
+
+     return { dealsCreated: results.length, listingsProcessed: listings.itemSummaries.length };
+   }
+   ```
+
+6. **Create `src/services/scanner/scan-loop.ts`** — Runs the scanner on a 5-minute interval.
+   ```typescript
+   let isRunning = false;
+
+   export function startScanLoop(): void {
+     setInterval(async () => {
+       if (isRunning) { log.warn('Previous scan still running, skipping'); return; }
+       isRunning = true;
+       try {
+         const result = await runScanCycle();
+         log.info({ ...result }, 'Scan cycle complete');
+       } catch (err) {
+         log.error({ err }, 'Scan cycle failed');
+       } finally {
+         isRunning = false;
+       }
+     }, 5 * 60 * 1000);  // 5 minutes
+   }
+   ```
+
+7. **Wire into boot sequence** — In `src/server.ts`, after DB connection and migrations, call `startScanLoop()`.
+
+**How to test:**
+
+**Automated tests (`src/__tests__/stage8/`):**
+
+- `deduplicator.test.ts`:
+  ```typescript
+  expect(await isDuplicate('item-123')).toBe(false);
+  markProcessed('item-123');
+  expect(await isDuplicate('item-123')).toBe(true);
+  // Also test DB dedup: insert a deal with ebay_item_id, then check
+  ```
+
+- `enrichment-gate.test.ts`:
+  ```typescript
+  // Profitable + confident → enrich
+  expect(shouldEnrich({ titleOnlyProfitPercent: 20, confidence: { composite: 0.80 }, isDuplicate: false }, { remaining: 4000 })).toBe(true);
+  // Low profit → skip
+  expect(shouldEnrich({ titleOnlyProfitPercent: 10, confidence: { composite: 0.80 }, isDuplicate: false }, { remaining: 4000 })).toBe(false);
+  // Low budget → higher threshold
+  expect(shouldEnrich({ titleOnlyProfitPercent: 20, confidence: { composite: 0.80 }, isDuplicate: false }, { remaining: 300 })).toBe(false);  // 20% < 25% threshold
+  expect(shouldEnrich({ titleOnlyProfitPercent: 30, confidence: { composite: 0.80 }, isDuplicate: false }, { remaining: 300 })).toBe(true);   // 30% ≥ 25%
+  ```
+
+- `tier-classifier.test.ts`:
+  ```typescript
+  expect(classifyTier(45, 0.90, 'high')).toBe('GRAIL');
+  expect(classifyTier(30, 0.70, 'high')).toBe('HIT');
+  expect(classifyTier(20, 0.60, 'high')).toBe('FLIP');
+  expect(classifyTier(10, 0.50, 'high')).toBe('SLEEP');
+  ```
+
+- `scanner-integration.test.ts` — Full pipeline test with mocked eBay API:
+  - Mock `searchItems` to return 5 test listings (mix of: profitable card, junk lot, duplicate, low profit, good deal)
+  - Mock `getItem` to return enriched data for the listings that pass the gate
+  - Run `runScanCycle()`
+  - Verify: correct number of deals created (should be 1-2 from 5 listings)
+  - Verify: deals in DB have correct card_id, variant, condition, profit, tier
+  - Verify: match_signals JSONB is populated
+  - Verify: junk lot was rejected, duplicate was skipped, low profit wasn't enriched
+
+```bash
+npm test -- --run src/__tests__/stage8/
+```
+
+**Smoke tests on Railway:**
+
+```bash
+# Let the scanner run for 30+ minutes (6+ cycles)
+# Then check deals were created:
+psql $DATABASE_URL -c "SELECT COUNT(*) FROM deals;"
+# ✅ Should have some deals (depends on current eBay listings)
+
+# Inspect a deal:
+psql $DATABASE_URL -c "SELECT card_name, ebay_price_gbp, market_value_gbp, profit_gbp, profit_percent, tier, condition, confidence FROM deals ORDER BY created_at DESC LIMIT 5;"
+# ✅ Verify manually:
+#   - profit_gbp = market_value_gbp - (ebay_price + shipping + fee)
+#   - tier matches profit thresholds (GRAIL >40%, HIT >25%, etc.)
+#   - condition is NM/LP/MP/HP (not null)
+
+# Check match signals audit trail:
+psql $DATABASE_URL -c "SELECT match_signals FROM deals ORDER BY created_at DESC LIMIT 1;" | jq '.'
+# ✅ Should contain: extraction signals, confidence breakdown, enrichment data
+
+# Check no duplicate deals:
+psql $DATABASE_URL -c "SELECT ebay_item_id, COUNT(*) FROM deals GROUP BY ebay_item_id HAVING COUNT(*) > 1;"
+# ✅ Should return 0 rows (no duplicates)
+
+# Check budget tracking (in application logs):
+# Look for log lines like: "Scan cycle complete: { dealsCreated: 2, listingsProcessed: 200 }"
+# ✅ Budget counter should increment by ~1 (search) + N (getItem calls)
+```
 
 **Deliverable:** A working arbitrage scanner that finds real deals automatically.
 
@@ -1810,28 +2991,172 @@ Each stage is built, tested, and verified before moving to the next. No stage de
 
 ### Stage 9: Liquidity Engine & Sales Velocity
 
-**Build:**
-- Tier 1 liquidity signals (free — from synced card data): trend activity, price completeness, price spread
-- Tier 2 signals (from eBay listing): concurrent supply, quantity sold
-- Tier 3 signals (Scrydex `/listings` endpoint): sales velocity, 7-day cache
-- Composite liquidity scoring (weighted arithmetic mean)
-- Liquidity grade assignment (high/medium/low/illiquid)
-- Tier adjustment based on liquidity (illiquid → capped at SLEEP)
-- Sales velocity cache table (7-day TTL)
-- Auto-fetch velocity for high-profit deals
-- On-demand velocity fetch endpoint
+**No new packages needed.**
 
-**Test before moving on:**
-- [ ] Tier 1 signals computed from real synced data
-- [ ] Tier 2 signals extracted from eBay listings
-- [ ] Scrydex `/listings` endpoint called successfully, response parsed
-- [ ] Sales velocity cached and reused within 7-day window
-- [ ] Composite score in 0-1 range, grade assigned correctly
-- [ ] Illiquid card capped at SLEEP tier regardless of profit
-- [ ] Low liquidity caps at FLIP
-- [ ] Medium liquidity downgrades GRAIL to HIT
-- [ ] High liquidity: no tier adjustment
-- [ ] On-demand velocity fetch works and updates deal
+**Step-by-step:**
+
+1. **Create `src/services/liquidity/tier1-signals.ts`** — Free signals from synced Scrydex data (no extra API calls).
+   - **Trend activity:** Does this card have real price movement? Check the variant's `trends` JSONB.
+     ```typescript
+     // Score 0-1: how many trend windows have non-zero changes?
+     // If 4/6 windows have movement → 0.67
+     function scoreTrendActivity(trends: TrendData): number { ... }
+     ```
+   - **Price completeness:** How many conditions have pricing data?
+     ```typescript
+     // If NM + LP + MP + HP all have prices → 1.0
+     // If only NM has prices → 0.25
+     function scorePriceCompleteness(prices: PriceData): number { ... }
+     ```
+   - **Price spread:** Is the low-to-market spread tight (liquid) or wide (illiquid)?
+     ```typescript
+     // tight spread (low ≈ market) → 1.0, wide spread → 0.0
+     function scorePriceSpread(prices: PriceData, condition: string): number { ... }
+     ```
+
+2. **Create `src/services/liquidity/tier2-signals.ts`** — Signals from the eBay listing itself.
+   - **Concurrent supply:** How many other listings exist for this card in the current scan batch? More supply = more liquid.
+     ```typescript
+     function scoreSupply(listingsForSameCard: number): number {
+       // 0 → 0.0, 1-2 → 0.3, 3-5 → 0.6, 6+ → 1.0
+     }
+     ```
+   - **Quantity sold:** eBay's `quantitySold` field from the listing. More sales from a single listing = active demand.
+     ```typescript
+     function scoreSold(quantitySold: number): number {
+       // 0 → 0.0, 1-2 → 0.4, 3-5 → 0.7, 6+ → 1.0
+     }
+     ```
+
+3. **Create `src/services/liquidity/tier3-velocity.ts`** — Premium signal from Scrydex `/listings` endpoint (costs 3 credits/call).
+   - Call `GET /pokemon/v1/en/cards/{cardId}/listings?days=30&source=ebay`
+   - Parse response: count of sold listings in last 7 days and 30 days
+   - Calculate median price and average days between sales
+   - **Cache in `sales_velocity_cache` table** with 7-day TTL
+   - Before calling the API, check the cache first: `SELECT * FROM sales_velocity_cache WHERE card_id = $1 AND variant_name = $2 AND fetched_at > NOW() - INTERVAL '7 days'`
+   - Score:
+     ```typescript
+     function scoreVelocity(sales7d: number): number {
+       // 0 → 0.0, 1-2 → 0.3, 3-5 → 0.6, 6-10 → 0.8, 11+ → 1.0
+     }
+     ```
+
+4. **Create `src/services/liquidity/composite.ts`** — Combine all signals into a single liquidity score.
+   ```typescript
+   // Weighted arithmetic mean (weights from §6):
+   // Tier 1 (free): trend 0.15, completeness 0.10, spread 0.15
+   // Tier 2 (from listing): supply 0.15, sold 0.15
+   // Tier 3 (premium): velocity 0.30
+   //
+   // If velocity is not available, redistribute its weight equally among other signals.
+
+   function compositeScore(signals: LiquiditySignals): number { ... }
+
+   function assignGrade(score: number): 'high' | 'medium' | 'low' | 'illiquid' {
+     if (score >= 0.70) return 'high';
+     if (score >= 0.45) return 'medium';
+     if (score >= 0.20) return 'low';
+     return 'illiquid';
+   }
+   ```
+
+5. **Create `src/services/liquidity/tier-adjuster.ts`** — Adjust deal tiers based on liquidity.
+   ```typescript
+   export function adjustTierForLiquidity(tier: DealTier, grade: LiquidityGrade): DealTier {
+     if (grade === 'illiquid') return 'SLEEP';        // Always cap at SLEEP
+     if (grade === 'low' && tier === 'GRAIL') return 'HIT';
+     if (grade === 'low' && tier === 'HIT') return 'FLIP';
+     if (grade === 'medium' && tier === 'GRAIL') return 'HIT';  // GRAIL requires high liquidity
+     return tier;  // 'high' liquidity → no adjustment
+   }
+   ```
+
+6. **Wire into scanner** — Update `scanner-service.ts` to:
+   - Calculate Tier 1+2 liquidity signals for every deal (free)
+   - For high-profit deals (>40%), auto-fetch Tier 3 velocity (costs 3 Scrydex credits)
+   - Apply tier adjustment before saving the deal
+   - Store liquidity signals in the deal's JSONB column
+
+7. **Create velocity fetch endpoint** — For on-demand fetching from the frontend:
+   - `GET /api/deals/:id/velocity` — Fetches velocity for the deal's card, caches it, returns updated liquidity data
+   - This allows the frontend to show a "Fetch velocity → 3cr" button
+
+**How to test:**
+
+**Automated tests (`src/__tests__/stage9/`):**
+
+- `tier1-signals.test.ts` — Pure function tests:
+  ```typescript
+  // Trend activity: card with movement in 4/6 windows
+  expect(scoreTrendActivity({ NM: { '1d': { pct: 1.2 }, '7d': { pct: 4.8 }, '30d': { pct: 0 }, '90d': { pct: 20 }, '180d': { pct: 0 } } })).toBeCloseTo(0.60);
+
+  // Price completeness: all 4 conditions priced
+  expect(scorePriceCompleteness({ NM: { market: 52 }, LP: { market: 38 }, MP: { market: 24 }, HP: { market: 12 } })).toBe(1.0);
+
+  // Only NM priced
+  expect(scorePriceCompleteness({ NM: { market: 52 } })).toBe(0.25);
+  ```
+
+- `tier2-signals.test.ts`:
+  ```typescript
+  expect(scoreSupply(0)).toBe(0.0);
+  expect(scoreSupply(3)).toBeCloseTo(0.6);
+  expect(scoreSupply(10)).toBe(1.0);
+  expect(scoreSold(0)).toBe(0.0);
+  expect(scoreSold(5)).toBeCloseTo(0.7);
+  ```
+
+- `composite.test.ts`:
+  ```typescript
+  // High liquidity card: all signals strong
+  const high = compositeScore({ trendActivity: 0.8, priceCompleteness: 1.0, priceSpread: 0.9, supply: 0.8, sold: 0.7, velocity: 0.95 });
+  expect(assignGrade(high)).toBe('high');
+
+  // Illiquid card: no movement, no supply
+  const illiq = compositeScore({ trendActivity: 0.0, priceCompleteness: 0.25, priceSpread: 0.1, supply: 0.0, sold: 0.0, velocity: null });
+  expect(assignGrade(illiq)).toBe('illiquid');
+  ```
+
+- `tier-adjuster.test.ts`:
+  ```typescript
+  expect(adjustTierForLiquidity('GRAIL', 'high')).toBe('GRAIL');     // No change
+  expect(adjustTierForLiquidity('GRAIL', 'medium')).toBe('HIT');     // Downgraded
+  expect(adjustTierForLiquidity('GRAIL', 'illiquid')).toBe('SLEEP'); // Capped
+  expect(adjustTierForLiquidity('HIT', 'low')).toBe('FLIP');         // Downgraded
+  expect(adjustTierForLiquidity('FLIP', 'high')).toBe('FLIP');       // No change
+  ```
+
+- `tier3-velocity.test.ts` — Integration test with mocked Scrydex `/listings` endpoint:
+  - Mock response with 8 sold listings in 7 days
+  - Verify score calculation
+  - Verify caching: second call for same card uses cache (no API call)
+  - Verify cache expiry: after 7 days, makes a fresh API call
+
+```bash
+npm test -- --run src/__tests__/stage9/
+```
+
+**Smoke tests on Railway:**
+
+```bash
+# Check deals now have liquidity data:
+psql $DATABASE_URL -c "SELECT card_name, tier, profit_percent, liquidity_grade, liquidity_score FROM deals ORDER BY created_at DESC LIMIT 10;"
+# ✅ liquidity_grade should be 'high'/'medium'/'low'/'illiquid'
+# ✅ liquidity_score should be between 0 and 1
+
+# Verify tier adjustments applied:
+psql $DATABASE_URL -c "SELECT card_name, profit_percent, liquidity_grade, tier FROM deals WHERE liquidity_grade = 'illiquid';"
+# ✅ All illiquid deals should have tier = 'SLEEP' regardless of profit
+
+# Check velocity cache:
+psql $DATABASE_URL -c "SELECT COUNT(*) FROM sales_velocity_cache;"
+# ✅ Should have entries for cards where velocity was fetched
+
+# Test on-demand velocity fetch:
+DEAL_ID=$(psql -t $DATABASE_URL -c "SELECT id FROM deals ORDER BY created_at DESC LIMIT 1;" | tr -d ' ')
+curl "$RAILWAY_URL/api/deals/$DEAL_ID/velocity"
+# ✅ Should return updated liquidity data with velocity signal filled in
+```
 
 **Deliverable:** Deals now include real liquidity assessment based on actual market data.
 
@@ -1839,29 +3164,216 @@ Each stage is built, tested, and verified before moving to the next. No stage de
 
 ### Stage 10: Authentication & API Endpoints
 
-**Build:**
-- Password authentication (constant-time comparison against `ACCESS_PASSWORD`)
-- Session cookies (httpOnly, 7-day expiry)
-- Auth middleware for protected routes
-- REST endpoints: deals list, deal detail, deal review, lookup, status, preferences
-- SSE endpoint: deal stream with Last-Event-Id replay
-- SSE status events (every 30s)
-- Input validation (Zod schemas on all request bodies)
+**Install these packages:**
+```bash
+npm install express-session connect-pg-simple uuid
+npm install -D @types/express-session @types/uuid supertest @types/supertest
+```
 
-**Test before moving on:**
-- [ ] Login with correct password → session cookie set
-- [ ] Login with wrong password → 401
-- [ ] Protected endpoints without cookie → 401
-- [ ] Protected endpoints with valid cookie → 200
-- [ ] `GET /api/deals` returns paginated deal list
-- [ ] `GET /api/deals/:id` returns full deal detail
-- [ ] `POST /api/deals/:id/review` stores correct/incorrect verdict
-- [ ] `POST /api/lookup` runs full pipeline for pasted eBay URL
-- [ ] `GET /api/status` returns scanner, sync, API usage metrics
-- [ ] SSE stream connects, receives deal events
-- [ ] SSE reconnects and replays missed deals via Last-Event-Id
-- [ ] SSE status events arrive every 30s
-- [ ] Zod rejects malformed request bodies with clear errors
+**Step-by-step:**
+
+1. **Create `src/middleware/auth.ts`** — Password authentication and session handling.
+   - Use `express-session` with `connect-pg-simple` (stores sessions in PostgreSQL)
+   - Session config: `secret: config.SESSION_SECRET`, `cookie: { httpOnly: true, maxAge: 7 * 24 * 60 * 60 * 1000, sameSite: 'lax' }`
+   - `POST /auth/login` handler:
+     - Receives `{ password: string }` in body
+     - Compare against `config.ACCESS_PASSWORD` using **constant-time comparison** (`crypto.timingSafeEqual`)
+     - If match: set `req.session.authenticated = true`, return 200
+     - If no match: return 401 `{ error: 'Invalid password' }`
+   - `POST /auth/logout` handler: `req.session.destroy()`, return 200
+   - `requireAuth` middleware: Check `req.session.authenticated === true`. If not, return 401.
+   - Mount on `app.use('/auth', authRouter)` (no auth middleware on these routes)
+
+2. **Create `src/routes/deals.ts`** — All deal endpoints (protected with `requireAuth`).
+   - **`GET /api/deals`** — Paginated deal list.
+     - Query params: `?page=1&limit=50&sort=-createdAt&tier=GRAIL,HIT&status=active`
+     - SQL: `SELECT * FROM deals WHERE status = $1 ORDER BY created_at DESC LIMIT $2 OFFSET $3`
+     - Response: `{ data: [...], total: 142, page: 1 }`
+   - **`GET /api/deals/:id`** — Full deal detail including match_signals, liquidity breakdown, condition comps, trends.
+   - **`POST /api/deals/:id/review`** — Mark deal as correct or incorrect.
+     - Body (Zod validated): `{ isCorrectMatch: boolean, reason?: 'wrong_card' | 'wrong_set' | 'wrong_variant' | 'wrong_price' }`
+     - Updates deal: `status = 'reviewed'`, stores review data
+   - **`GET /api/deals/:id/velocity`** — Trigger velocity fetch (from Stage 9) and return updated liquidity.
+
+3. **Create `src/routes/lookup.ts`** — Manual lookup endpoint (protected).
+   - **`POST /api/lookup`** — Takes `{ ebayUrl: string }`, extracts item ID, runs full pipeline.
+     - Validate URL format (Zod: must be an eBay URL)
+     - Extract item ID from URL (regex: `/itm/(\d+)` or `/itm/.+/(\d+)`)
+     - Call `getItem(itemId)` to fetch full listing
+     - Run through extraction → matching → pricing pipeline
+     - Return full result: matched card, variant, condition, profit breakdown, confidence, debug data
+
+4. **Create `src/routes/status.ts`** — System status endpoint (protected).
+   - **`GET /api/status`** — Returns system health metrics:
+     ```json
+     {
+       "scanner": { "status": "running", "lastScan": "2025-01-15T10:30:00Z", "dealsToday": 47, "grailsToday": 3 },
+       "sync": { "lastFull": "2025-01-12T03:00:00Z", "lastDelta": "2025-01-15T03:00:00Z", "totalCards": 35892, "totalExpansions": 354 },
+       "ebay": { "callsToday": 1847, "dailyLimit": 5000, "status": "healthy" },
+       "scrydex": { "creditsUsed": 2340, "creditsRemaining": 47660, "status": "healthy" },
+       "exchangeRate": { "rate": 0.789, "fetchedAt": "2025-01-15T09:00:00Z", "isStale": false },
+       "accuracy": { "rolling7d": 91.2, "totalReviewed": 156, "totalCorrect": 142 }
+     }
+     ```
+
+5. **Create `src/routes/preferences.ts`** — User preferences (protected).
+   - **`GET /api/preferences`** — Returns preferences JSONB from the singleton `preferences` table.
+   - **`PUT /api/preferences`** — Partial update: merge incoming JSON with existing preferences. Zod schema validates the structure.
+
+6. **Create `src/routes/sse.ts`** — Server-Sent Events for live deal stream (protected).
+   - **`GET /api/deals/stream`** — SSE endpoint.
+   - Set headers: `Content-Type: text/event-stream`, `Cache-Control: no-cache`, `Connection: keep-alive`
+   - On connect: Check `Last-Event-Id` header. If present, replay all deals with `event_id > lastEventId`.
+   - **Deal events:** When a new deal is created (from scanner), emit `event: deal\nid: {event_id}\ndata: {deal JSON}\n\n`
+   - **Status events:** Every 30 seconds, emit `event: status\ndata: {status JSON}\n\n`
+   - **Ping:** Every 15 seconds, emit `:ping\n\n` (keepalive comment)
+   - **Important:** Use an in-memory event emitter. When the scanner creates a deal, it emits an event. All SSE connections listen for that event and send it to clients.
+
+7. **Create `src/middleware/validation.ts`** — Zod validation middleware.
+   ```typescript
+   export function validate(schema: ZodSchema) {
+     return (req, res, next) => {
+       const result = schema.safeParse(req.body);
+       if (!result.success) {
+         return res.status(400).json({ error: 'Validation failed', details: result.error.flatten() });
+       }
+       req.body = result.data;
+       next();
+     };
+   }
+   ```
+
+8. **Mount all routes** in `src/app.ts`:
+   ```typescript
+   app.use('/auth', authRouter);                      // No auth
+   app.use('/api/catalog', catalogRouter);             // No auth (from Stage 3)
+   app.use('/api/deals', requireAuth, dealsRouter);    // Auth required
+   app.use('/api/lookup', requireAuth, lookupRouter);  // Auth required
+   app.use('/api/status', requireAuth, statusRouter);  // Auth required
+   app.use('/api/preferences', requireAuth, prefsRouter); // Auth required
+   ```
+
+**How to test:**
+
+**Automated tests (`src/__tests__/stage10/`):**
+
+- `auth.test.ts` — Using `supertest`:
+  ```typescript
+  // Login with correct password → 200 + session cookie
+  const login = await request(app).post('/auth/login').send({ password: 'test-password' });
+  expect(login.status).toBe(200);
+  expect(login.headers['set-cookie']).toBeDefined();
+  const cookie = login.headers['set-cookie'][0];
+
+  // Access protected endpoint with cookie → 200
+  const deals = await request(app).get('/api/deals').set('Cookie', cookie);
+  expect(deals.status).toBe(200);
+
+  // Access protected endpoint WITHOUT cookie → 401
+  const noCookie = await request(app).get('/api/deals');
+  expect(noCookie.status).toBe(401);
+
+  // Login with wrong password → 401
+  const bad = await request(app).post('/auth/login').send({ password: 'wrong' });
+  expect(bad.status).toBe(401);
+
+  // Logout → cookie cleared
+  await request(app).post('/auth/logout').set('Cookie', cookie);
+  const afterLogout = await request(app).get('/api/deals').set('Cookie', cookie);
+  expect(afterLogout.status).toBe(401);
+  ```
+
+- `deals-api.test.ts` — Seed test DB with 10 deals, authenticated requests:
+  ```typescript
+  // GET /api/deals → returns paginated list
+  const res = await authedRequest(app).get('/api/deals?limit=5');
+  expect(res.body.data.length).toBe(5);
+  expect(res.body.total).toBe(10);
+
+  // GET /api/deals/:id → returns full detail
+  const detail = await authedRequest(app).get(`/api/deals/${dealId}`);
+  expect(detail.body.cardName).toBeDefined();
+  expect(detail.body.matchSignals).toBeDefined();
+
+  // POST /api/deals/:id/review → marks deal reviewed
+  await authedRequest(app).post(`/api/deals/${dealId}/review`).send({ isCorrectMatch: true });
+  const updated = await authedRequest(app).get(`/api/deals/${dealId}`);
+  expect(updated.body.status).toBe('reviewed');
+  ```
+
+- `validation.test.ts`:
+  ```typescript
+  // Invalid body → 400 with Zod error details
+  const res = await authedRequest(app).post('/api/lookup').send({ notAUrl: 123 });
+  expect(res.status).toBe(400);
+  expect(res.body.error).toBe('Validation failed');
+
+  // Valid body → passes through
+  // (mock the pipeline to not actually call eBay)
+  ```
+
+- `sse.test.ts` — Test SSE connection and events:
+  ```typescript
+  // Connect to SSE stream
+  // Emit a mock deal event
+  // Verify the SSE message arrives with correct format
+  // Test Last-Event-Id replay: send header with old ID, verify missed events replayed
+  ```
+
+```bash
+npm test -- --run src/__tests__/stage10/
+```
+
+**Smoke tests on Railway:**
+
+```bash
+# Test login
+curl -c cookies.txt -X POST "$RAILWAY_URL/auth/login" \
+  -H "Content-Type: application/json" \
+  -d '{"password":"your-access-password"}'
+# ✅ Should return 200
+
+# Test protected endpoint with cookie
+curl -b cookies.txt "$RAILWAY_URL/api/deals?limit=5" | jq '.data | length'
+# ✅ Should return deal data
+
+# Test protected endpoint WITHOUT cookie
+curl -s -o /dev/null -w "%{http_code}" "$RAILWAY_URL/api/deals"
+# ✅ Should return 401
+
+# Test deal detail
+DEAL_ID=$(curl -s -b cookies.txt "$RAILWAY_URL/api/deals?limit=1" | jq -r '.data[0].id')
+curl -b cookies.txt "$RAILWAY_URL/api/deals/$DEAL_ID" | jq '.cardName, .profitGBP, .tier'
+# ✅ Should show full deal data
+
+# Test deal review
+curl -b cookies.txt -X POST "$RAILWAY_URL/api/deals/$DEAL_ID/review" \
+  -H "Content-Type: application/json" \
+  -d '{"isCorrectMatch":true}'
+# ✅ Should return 200
+
+# Test manual lookup (use a real eBay listing URL)
+curl -b cookies.txt -X POST "$RAILWAY_URL/api/lookup" \
+  -H "Content-Type: application/json" \
+  -d '{"ebayUrl":"https://www.ebay.co.uk/itm/123456789"}'
+# ✅ Should return matched card, profit breakdown, confidence
+
+# Test system status
+curl -b cookies.txt "$RAILWAY_URL/api/status" | jq '.'
+# ✅ Should show scanner, sync, eBay, Scrydex, exchange rate metrics
+
+# Test SSE stream (leave running for 30s to see events)
+curl -b cookies.txt -N "$RAILWAY_URL/api/deals/stream"
+# ✅ Should see ping comments every 15s
+# ✅ Should see status events every 30s
+# ✅ Should see deal events when scanner finds something
+
+# Test Zod validation
+curl -b cookies.txt -X POST "$RAILWAY_URL/api/lookup" \
+  -H "Content-Type: application/json" \
+  -d '{"notAUrl": 123}'
+# ✅ Should return 400 with validation error
+```
 
 **Deliverable:** Complete backend API — the scanner finds deals, the API serves them.
 
@@ -1869,27 +3381,195 @@ Each stage is built, tested, and verified before moving to the next. No stage de
 
 ### Stage 11: Deal Lifecycle & Background Jobs
 
-**Build:**
-- Deal expiry (72-hour TTL, hourly cleanup)
-- Deal status tracking (active → expired/sold/reviewed)
-- Stale deal pruning (hard-delete unreviewed deals >30 days)
-- Exchange rate refresh job (hourly)
-- Daily hot refresh (10 most recent expansions)
-- Weekly full sync
-- Expansion check (detect new sets)
-- Listings pre-fetch (weekly, top 200 matched cards)
-- All scheduled via in-process `node-cron`
+**Install these packages:**
+```bash
+npm install node-cron
+npm install -D @types/node-cron
+```
 
-**Test before moving on:**
-- [ ] Deals older than 72h auto-expire (status → expired)
-- [ ] Expired deals excluded from default deal list
-- [ ] Reviewed deals preserved past 30-day prune
-- [ ] Exchange rate refreshes hourly
-- [ ] Hot refresh updates prices for recent sets
-- [ ] Weekly sync completes without errors
-- [ ] New expansion detected and synced automatically
-- [ ] All jobs survive process restart (re-register on boot)
-- [ ] Jobs don't overlap (scan skips if previous cycle still running)
+**Step-by-step:**
+
+1. **Create `src/services/lifecycle/deal-expiry.ts`** — Expire old deals.
+   ```typescript
+   export async function expireOldDeals(): Promise<number> {
+     // Set status = 'expired' for active deals past their expires_at
+     const result = await pool.query(
+       `UPDATE deals SET status = 'expired' WHERE status = 'active' AND expires_at < NOW() RETURNING id`
+     );
+     return result.rowCount;
+   }
+   ```
+
+2. **Create `src/services/lifecycle/deal-pruner.ts`** — Hard-delete unreviewed stale deals.
+   ```typescript
+   export async function pruneStaleDeals(): Promise<number> {
+     // Delete deals that are >30 days old AND were never reviewed
+     const result = await pool.query(
+       `DELETE FROM deals WHERE status IN ('active', 'expired') AND created_at < NOW() - INTERVAL '30 days' RETURNING id`
+     );
+     return result.rowCount;
+   }
+   ```
+   - **Do NOT delete reviewed deals** — those are used for accuracy tracking.
+
+3. **Create `src/services/lifecycle/deal-status.ts`** — Track deal status transitions.
+   - Status flow: `active` → `expired` (TTL), `active` → `reviewed` (user action), `active` → `sold` (if detected)
+   - Export: `updateDealStatus(dealId: string, status: DealStatus): Promise<void>`
+
+4. **Create `src/services/jobs/scheduler.ts`** — Central job scheduler using `node-cron`.
+   ```typescript
+   import cron from 'node-cron';
+
+   const jobs: Map<string, { task: cron.ScheduledTask; isRunning: boolean }> = new Map();
+
+   export function registerJob(name: string, schedule: string, fn: () => Promise<void>): void {
+     const task = cron.schedule(schedule, async () => {
+       const job = jobs.get(name)!;
+       if (job.isRunning) {
+         log.warn({ job: name }, 'Job still running, skipping');
+         return;
+       }
+       job.isRunning = true;
+       try {
+         await fn();
+         log.info({ job: name }, 'Job completed');
+       } catch (err) {
+         log.error({ job: name, err }, 'Job failed');
+       } finally {
+         job.isRunning = false;
+       }
+     });
+     jobs.set(name, { task, isRunning: false });
+   }
+   ```
+
+5. **Create `src/services/jobs/register-all.ts`** — Register all background jobs at boot.
+   ```typescript
+   export function registerAllJobs(): void {
+     // Scanner — every 5 minutes (already running from Stage 8, move here)
+     registerJob('ebay-scan', '*/5 * * * *', runScanCycle);
+
+     // Deal cleanup — every hour
+     registerJob('deal-expiry', '0 * * * *', async () => {
+       const expired = await expireOldDeals();
+       const pruned = await pruneStaleDeals();
+       log.info({ expired, pruned }, 'Deal cleanup complete');
+     });
+
+     // Exchange rate refresh — every hour
+     registerJob('exchange-rate', '30 * * * *', async () => {
+       await fetchAndSaveRate();
+     });
+
+     // Hot refresh — daily at 03:00 (re-sync 10 most recent expansions)
+     registerJob('hot-refresh', '0 3 * * *', async () => {
+       const recent = await getRecentExpansions(10);
+       for (const exp of recent) {
+         await syncExpansionCards(exp.id);
+       }
+     });
+
+     // Expansion check — daily at 04:00 (detect new sets)
+     registerJob('expansion-check', '0 4 * * *', async () => {
+       const newExps = await checkForNewExpansions();
+       for (const exp of newExps) {
+         await syncExpansionCards(exp.id);
+       }
+     });
+
+     // Full sync — weekly Sunday at 03:00
+     registerJob('full-sync', '0 3 * * 0', syncAll);
+
+     // Listings pre-fetch — weekly Sunday at 05:00 (top 200 matched cards velocity)
+     registerJob('velocity-prefetch', '0 5 * * 0', async () => {
+       const topCards = await getTopMatchedCards(200);
+       for (const card of topCards) {
+         await fetchAndCacheVelocity(card.id, card.variantName);
+       }
+     });
+   }
+   ```
+
+6. **Create helper functions:**
+   - `getRecentExpansions(n)` — `SELECT * FROM expansions ORDER BY release_date DESC LIMIT $1`
+   - `checkForNewExpansions()` — Fetch expansions from Scrydex, compare against DB, return new ones
+   - `getTopMatchedCards(n)` — `SELECT card_id, COUNT(*) FROM deals GROUP BY card_id ORDER BY COUNT(*) DESC LIMIT $1`
+
+7. **Wire into boot sequence** — Replace the `startScanLoop()` from Stage 8 with `registerAllJobs()`. The scanner is now managed by the job scheduler alongside all other background tasks.
+
+**How to test:**
+
+**Automated tests (`src/__tests__/stage11/`):**
+
+- `deal-expiry.test.ts` — Seed test DB with deals at various ages:
+  ```typescript
+  // Insert deal created 80 hours ago (past 72h TTL)
+  // Run expireOldDeals()
+  // Verify deal status changed to 'expired'
+
+  // Insert deal created 1 hour ago
+  // Run expireOldDeals()
+  // Verify deal status still 'active'
+  ```
+
+- `deal-pruner.test.ts`:
+  ```typescript
+  // Insert unreviewed deal created 35 days ago
+  // Run pruneStaleDeals()
+  // Verify deal is DELETED from DB
+
+  // Insert reviewed deal created 35 days ago
+  // Run pruneStaleDeals()
+  // Verify deal is NOT deleted (preserved for accuracy tracking)
+  ```
+
+- `scheduler.test.ts`:
+  ```typescript
+  // Register a job, trigger it manually
+  // Verify it runs
+  // Trigger it again while first is still "running"
+  // Verify it skips (overlap protection)
+  ```
+
+- `hot-refresh.test.ts` — Mock Scrydex, seed DB:
+  ```typescript
+  // Seed 3 expansions with old prices
+  // Mock Scrydex to return updated prices
+  // Run hot refresh
+  // Verify variant prices updated in DB
+  ```
+
+```bash
+npm test -- --run src/__tests__/stage11/
+```
+
+**Smoke tests on Railway:**
+
+```bash
+# Check deal expiry — look for expired deals
+psql $DATABASE_URL -c "SELECT status, COUNT(*) FROM deals GROUP BY status;"
+# ✅ Should show 'active' and possibly 'expired' deals
+
+# Manually test expiry by checking an old deal:
+psql $DATABASE_URL -c "SELECT id, status, created_at, expires_at FROM deals WHERE expires_at < NOW() LIMIT 5;"
+# ✅ These should have status = 'expired'
+
+# Check exchange rate is being refreshed:
+psql $DATABASE_URL -c "SELECT fetched_at FROM exchange_rates ORDER BY fetched_at DESC LIMIT 5;"
+# ✅ Should show multiple entries, latest within the last hour
+
+# Check sync log for hot refresh runs:
+psql $DATABASE_URL -c "SELECT sync_type, started_at, status FROM sync_log WHERE sync_type = 'hot_refresh' ORDER BY started_at DESC LIMIT 3;"
+# ✅ Should show completed hot refresh entries
+
+# Check job overlap protection in logs:
+# Look for: "Job still running, skipping" messages (shouldn't appear often, but proves the guard works)
+
+# Verify jobs survive restart:
+# Redeploy on Railway, then check after 10 minutes:
+psql $DATABASE_URL -c "SELECT COUNT(*) FROM deals WHERE created_at > NOW() - INTERVAL '10 minutes';"
+# ✅ Should have new deals (scanner re-registered after restart)
+```
 
 **Deliverable:** Self-maintaining system — deals expire, prices stay fresh, new sets appear automatically.
 
@@ -1897,36 +3577,185 @@ Each stage is built, tested, and verified before moving to the next. No stage de
 
 ### Stage 12: Frontend — Dashboard
 
-**Build:**
-- Login page (password → session cookie)
-- Deal feed (live-updating via SSE)
-- Deal detail panel (right-side, full breakdown)
-- Filter bar (tier, condition, liquidity, confidence, time, min profit, graded)
-- Client-side filtering
-- System status footer
-- Manual lookup tool
-- Settings modal (preferences, Telegram config)
-- Notifications (toasts, banners, Telegram)
-- Responsive layout (desktop, tablet, mobile breakpoints)
-- Glass morphism design system
+**Install these packages (in `client/`):**
+```bash
+cd client
+npm install @fontsource/plus-jakarta-sans @fontsource/dm-mono
+# Plus Jakarta Sans and DM Mono are the two fonts from the design system
+```
 
-**Test before moving on:**
-- [ ] Login flow works end-to-end
-- [ ] Deal feed populates on load
-- [ ] New deals appear via SSE without page refresh
-- [ ] Click deal → detail panel opens with correct data
-- [ ] Profit, condition comps, trends show real Scrydex data (not fabricated)
-- [ ] Liquidity breakdown shows real signals
-- [ ] "Fetch velocity" button works and updates inline
-- [ ] Filters work client-side (instant, no API call)
-- [ ] Filter persistence via preferences API
-- [ ] "SNAG ON EBAY" opens correct eBay URL
-- [ ] Manual lookup: paste URL → full pipeline result
-- [ ] Status footer shows real metrics
-- [ ] SSE reconnection banner works
-- [ ] Responsive: tablet and mobile breakpoints functional
-- [ ] Graded badge shows when applicable
-- [ ] Deal review (correct/wrong) works
+**Step-by-step:**
+
+The frontend spec (FRONTEND_DESIGN_SPEC_FINAL.md) is the detailed reference for this stage. This build guide covers the implementation order and how things connect.
+
+1. **Set up the design system** — Create `client/src/styles/`:
+   - `variables.css` — All CSS custom properties from §12 of the frontend spec (`--bg0`, `--bg1`, `--glass`, `--tMax`, `--greenB`, `--red`, etc.)
+   - `global.css` — Base styles: body background `--bg0`, default font Plus Jakarta Sans, box-sizing, scrollbar styling
+   - `glass.css` — Glass morphism utility classes: `.glass` (backdrop-filter + rgba), `.glass-hover`, `.grad-border` (gradient border trick)
+   - Import both fonts in `main.tsx`
+
+2. **Create the Login page** — `client/src/pages/Login.tsx`
+   - Centered card on radial gradient background (see §10 of frontend spec)
+   - Password input → `POST /auth/login` on submit
+   - On success: redirect to `/` (dashboard)
+   - On failure: shake animation + "Invalid password" error
+   - Store auth state in React context (or just check cookie existence)
+
+3. **Create the auth context** — `client/src/context/AuthContext.tsx`
+   - On app load: `GET /api/status`. If 200 → authenticated. If 401 → show login.
+   - Export: `useAuth()` hook → `{ isAuthenticated, login, logout }`
+   - Wrap all routes in `AuthProvider`
+   - Dashboard routes require auth, catalog routes don't
+
+4. **Create the deal feed** — `client/src/pages/Dashboard.tsx` + `client/src/components/DealFeed.tsx`
+   - On mount: `GET /api/deals?limit=50&sort=-createdAt` to load initial deals
+   - Store deals in state array
+   - Open SSE connection: `new EventSource('/api/deals/stream')`
+   - On `event: deal` → prepend new deal to state array (appears at top)
+   - Each deal renders as a `DealCard` component (see §2 of frontend spec)
+   - `DealCard` shows: thumbnail, card name, eBay price → market price, profit, confidence bar, liquidity pill, condition pill, graded badge, time listed, trend arrow
+   - Tier determines visual treatment (GRAIL = gradient glow, SLEEP = 35% opacity)
+   - "FRESH HEAT ↑" pill appears if user has scrolled down and new deals arrive
+
+5. **Create the deal detail panel** — `client/src/components/DealDetailPanel.tsx`
+   - Right-side panel (440px fixed width on desktop, bottom sheet on mobile)
+   - On deal click: `GET /api/deals/:id` to fetch full detail
+   - Panel sections (each as a sub-component):
+     - **Header:** Tier badge, card name, images (Scrydex + eBay side by side)
+     - **Profit Hero:** Large profit number (42px), percentage, tier tagline
+     - **CTA:** "SNAG ON EBAY →" button → `window.open(deal.ebayUrl, '_blank')`
+     - **No BS Pricing:** Simple breakdown (eBay + shipping + fees = total cost, market USD → GBP, profit)
+     - **Match Confidence:** Composite score + per-field bars
+     - **Liquidity:** Per-signal bars + "Fetch velocity → 3cr" button
+     - **Comps by Condition:** Table of NM/LP/MP/HP prices from Scrydex
+     - **Price Trends:** 1d/7d/30d/90d trend arrows with real data
+     - **Card Data:** Rarity, types, artist, "View in Catalog →" link
+     - **Footer:** "Correct" / "Wrong" review buttons
+   - See §3 of frontend spec for full layout details
+
+6. **Create the filter bar** — `client/src/components/FilterBar.tsx`
+   - Horizontal bar below header (see §4 of frontend spec)
+   - Filter groups: Tier, Condition, Liquidity, Confidence, Time, Min Profit, Graded
+   - Each group is a `FilterGroup` component (glass capsule with toggle chips)
+   - **Filtering is 100% client-side** — filter the in-memory deals array, no API calls
+   - Apply filters: `deals.filter(d => selectedTiers.includes(d.tier) && selectedConditions.includes(d.condition) && ...)`
+   - "SAVE" button calls `PUT /api/preferences` to persist default filters
+
+7. **Create the system status footer** — `client/src/components/StatusFooter.tsx`
+   - 42px bar at bottom (see §5 of frontend spec)
+   - Left zone: scanner status, time since last scan, deals today, accuracy
+   - Right zone: eBay budget, Scrydex credits, card index count
+   - Data from SSE `event: status` messages (updates every 30s)
+   - Status dots: green/amber/red
+
+8. **Create the manual lookup tool** — `client/src/components/LookupModal.tsx`
+   - Triggered by header button
+   - Centered overlay: paste eBay URL → `POST /api/lookup` → show result
+   - Loading states: "Fetching..." → "Extracting..." → "Matching..." (amber text)
+   - Result: card info, condition, liquidity, profit hero, "Open on eBay" button
+   - Expandable debug section: raw eBay data, candidates, signals
+
+9. **Create the settings modal** — `client/src/components/SettingsModal.tsx`
+   - Triggered by gear icon in header
+   - Two tabs: General (tier thresholds, display, sound) and Notifications (Telegram config)
+   - Changes debounced (500ms), sent as `PUT /api/preferences`
+   - Telegram: "Test Message" button calls `POST /api/notifications/telegram/test`
+
+10. **Create notifications** — `client/src/components/`:
+    - `Toast.tsx` — Top-right notification for GRAIL deals, auto-dismiss 5s
+    - `SSEBanner.tsx` — Connection status banner (reconnecting/lost)
+    - `SystemBanner.tsx` — Persistent amber/red banners for warnings/errors
+
+11. **Handle responsive layout:**
+    - ≤920px: Detail panel becomes bottom sheet (75vh, rounded top corners)
+    - ≤640px: Card images hide, filter groups collapse, footer hides API section
+    - Use CSS media queries or a responsive hook
+
+12. **Update routing** in `client/src/App.tsx`:
+    ```
+    /               → Dashboard (requires auth)
+    /catalog/*      → Catalog pages (no auth, from Stage 3)
+    ```
+
+**How to test:**
+
+**Automated tests (Vitest + Testing Library):**
+
+The frontend tests live in `client/src/__tests__/`:
+
+- `Login.test.tsx`:
+  ```typescript
+  // Render Login, type password, submit
+  // Mock POST /auth/login → 200
+  // Verify redirect to dashboard
+
+  // Mock POST /auth/login → 401
+  // Verify error message shown
+  ```
+
+- `DealFeed.test.tsx`:
+  ```typescript
+  // Mock GET /api/deals with 5 deals
+  // Verify 5 DealCards rendered
+  // Verify sorted by tier then profit (GRAIL first)
+  // Verify SLEEP deals have opacity styling
+  // Verify GRAIL deals have gradient glow
+  ```
+
+- `DealDetailPanel.test.tsx`:
+  ```typescript
+  // Mock GET /api/deals/:id with full deal data
+  // Click a deal card → verify panel opens
+  // Verify profit hero shows correct value
+  // Verify condition comps show real Scrydex prices
+  // Verify "SNAG ON EBAY" button has correct URL
+  // Verify "Correct" / "Wrong" buttons call POST /api/deals/:id/review
+  ```
+
+- `FilterBar.test.tsx`:
+  ```typescript
+  // Render with 10 deals (mix of tiers)
+  // Toggle off 'SLEEP' filter → verify SLEEP deals hidden
+  // Toggle off 'NM' condition → verify only LP/MP/HP deals shown
+  // Verify filtering is instant (no API call made)
+  ```
+
+- `SSE.test.tsx`:
+  ```typescript
+  // Mock EventSource
+  // Emit a 'deal' event → verify new deal appears in feed
+  // Emit a 'status' event → verify footer updates
+  // Simulate disconnect → verify "Reconnecting" banner appears
+  ```
+
+```bash
+cd client && npm test
+```
+
+**Smoke tests on Railway (manual browser testing):**
+
+Open `https://your-app.railway.app/` in a browser and test:
+
+- [ ] **Login:** Enter password → dashboard loads. Wrong password → error message.
+- [ ] **Deal feed:** Deals appear in the list. GRAIL deals have gradient glow. SLEEP deals are dimmed.
+- [ ] **Live updates:** Leave the page open. After a scan cycle (5 min), new deals slide in at the top without refreshing.
+- [ ] **Deal detail:** Click a deal → right panel opens with full breakdown. Check:
+  - Profit number matches eBay price + fees vs market value
+  - Condition comps show NM/LP/MP/HP with real prices (not all the same)
+  - Trends show real data (arrows, percentages)
+  - Liquidity shows per-signal bars
+  - "SNAG ON EBAY" opens the correct eBay listing in a new tab
+- [ ] **Fetch velocity:** In the liquidity section, click "Fetch → 3cr". Bar should fill in after a moment.
+- [ ] **Filters:** Toggle tier filters → deals filter instantly. Toggle conditions → deals filter. Try all filter groups.
+- [ ] **Save filters:** Change some filters, click SAVE. Refresh the page. Filters should persist.
+- [ ] **Manual lookup:** Click the lookup button. Paste a real eBay listing URL. Verify it returns a result with card match, profit, confidence.
+- [ ] **Deal review:** In the detail panel footer, click "Correct" or "Wrong". Verify it saves.
+- [ ] **Status footer:** Bottom bar shows scanner status, deal counts, API budgets. Should update every 30s.
+- [ ] **Responsive:** Open Chrome DevTools, toggle device toolbar:
+  - 920px width: detail panel becomes bottom sheet
+  - 640px width: card images hide, some filters collapse
+- [ ] **SSE reconnection:** Disconnect WiFi briefly → "Reconnecting..." banner. Reconnect → banner disappears, missed deals appear.
+- [ ] **Graded badge:** If any deals are graded cards, verify the blue PSA/CGC badge shows.
 
 **Deliverable:** Working arbitrage dashboard — scan, evaluate, buy.
 
@@ -1934,26 +3763,332 @@ Each stage is built, tested, and verified before moving to the next. No stage de
 
 ### Stage 13: Observability, Testing & Production Hardening
 
-**Build:**
-- Pino structured JSON logging with correlation IDs
-- Telegram alerts (sync failures, budget warnings, accuracy drops)
-- Accuracy tracking (automated 7-day rolling, manual review count)
-- Match corpus (initial 100 entries)
-- Accuracy regression test suite
-- GitHub Actions CI pipeline (lint, typecheck, unit, integration, API, accuracy gate)
-- Dockerfile (multi-stage build)
-- Railway deployment config
+**Install these packages:**
+```bash
+npm install pino-pretty   # Already installed from Stage 1, but ensure it's there
+```
 
-**Test before moving on:**
-- [ ] Structured logs appear in Railway log viewer
-- [ ] Correlation IDs trace a listing through the full pipeline
-- [ ] Telegram alerts fire for test conditions
-- [ ] Match corpus tests pass at ≥85% accuracy
-- [ ] CI pipeline runs on PR, blocks merge if accuracy < 85%
-- [ ] Docker build succeeds
-- [ ] Railway deployment works (health check passes)
-- [ ] Full system runs for 24h without errors
-- [ ] Deals created, expired, reviewed — full lifecycle verified
-- [ ] API budget stays within limits over 24h
+**Step-by-step:**
+
+1. **Enhance Pino logging with correlation IDs** — `src/services/logger/correlation.ts`
+   - Generate a unique `correlationId` (UUID) when an eBay listing enters the pipeline
+   - Pass it through every function: extraction → matching → pricing → deal creation
+   - Every log line includes `correlationId` so you can trace a single listing from search result to deal
+   ```typescript
+   // Before (generic):
+   log.info('Deal created');
+
+   // After (traceable):
+   log.info({ correlationId: 'abc-123', service: 'scanner', dealId: 'uuid', profitGBP: 32.50, tier: 'GRAIL' }, 'Deal created');
+   ```
+   - Update all log calls across the codebase to include: `service` (scanner/sync/catalog/auth), `correlationId` (when applicable), `context` (relevant data)
+
+2. **Create Telegram alert service** — `src/services/notifications/telegram.ts`
+   - Uses Telegram Bot API: `POST https://api.telegram.org/bot<TOKEN>/sendMessage`
+   - Body: `{ chat_id: config.TELEGRAM_CHAT_ID, text: message, parse_mode: 'HTML' }`
+   - Alert functions:
+     ```typescript
+     export async function sendAlert(severity: 'critical' | 'warning', title: string, details: string): Promise<void> {
+       if (!config.TELEGRAM_BOT_TOKEN || !config.TELEGRAM_CHAT_ID) return;  // Skip if not configured
+       const emoji = severity === 'critical' ? '🚨' : '⚠️';
+       const text = `${emoji} <b>${title}</b>\n${details}`;
+       await fetch(`https://api.telegram.org/bot${config.TELEGRAM_BOT_TOKEN}/sendMessage`, {
+         method: 'POST',
+         headers: { 'Content-Type': 'application/json' },
+         body: JSON.stringify({ chat_id: config.TELEGRAM_CHAT_ID, text, parse_mode: 'HTML' })
+       });
+     }
+     ```
+
+3. **Wire alerts into existing services** — Add alert triggers at the right places:
+   ```typescript
+   // In sync service — after sync failure:
+   catch (err) { await sendAlert('critical', 'Sync Failed', `${err.message}`); }
+
+   // In Scrydex client — when credits drop below threshold:
+   if (creditsRemaining < 5000) await sendAlert('warning', 'Scrydex Credits Low', `${creditsRemaining} remaining`);
+   if (creditsRemaining < 2000) await sendAlert('critical', 'Scrydex Credits Critical', `${creditsRemaining} remaining`);
+
+   // In eBay client — on 3+ consecutive 429s:
+   if (consecutive429s >= 3) await sendAlert('warning', 'eBay Rate Limited', `${consecutive429s} consecutive 429 responses`);
+
+   // In exchange rate service — stale rate:
+   if (isStale()) await sendAlert('warning', 'Exchange Rate Stale', `Last fetch: ${lastFetchedAt}`);
+
+   // In accuracy tracker — rolling average drops:
+   if (rolling7dAccuracy < 80) await sendAlert('critical', 'Accuracy Drop', `7-day rolling: ${rolling7dAccuracy}%`);
+
+   // In sync service — no sync in 48h:
+   if (hoursSinceLastSync > 48) await sendAlert('critical', 'Card Index Stale', `Last sync: ${lastSyncAt}`);
+   ```
+
+4. **Create GRAIL/HIT deal notifications** — `src/services/notifications/deal-alerts.ts`
+   - When a GRAIL or HIT deal is created, send a Telegram message:
+     ```
+     GRAIL DEAL
+     Charizard ex 006/197 — Obsidian Flames
+     eBay: £12.50 → Market: £44.97
+     Profit: +£29.50 (+190%)
+     Condition: NM · Confidence: 0.92
+     Link: ebay.co.uk/itm/123456789
+     ```
+   - Configurable: user can set which tiers trigger notifications (via preferences)
+
+5. **Create accuracy tracking** — `src/services/accuracy/tracker.ts`
+   - **Manual accuracy:** Track user reviews (correct/incorrect from deal review endpoint)
+   ```typescript
+   export async function getAccuracyStats(): Promise<AccuracyStats> {
+     const result = await pool.query(`
+       SELECT
+         COUNT(*) FILTER (WHERE status = 'reviewed') as total_reviewed,
+         COUNT(*) FILTER (WHERE status = 'reviewed' AND review_correct = true) as total_correct
+       FROM deals
+       WHERE created_at > NOW() - INTERVAL '7 days'
+     `);
+     const { total_reviewed, total_correct } = result.rows[0];
+     return {
+       rolling7d: total_reviewed > 0 ? (total_correct / total_reviewed) * 100 : null,
+       totalReviewed: total_reviewed,
+       totalCorrect: total_correct
+     };
+   }
+   ```
+   - Wire into `/api/status` response
+
+6. **Create match corpus** — `src/__tests__/corpus/`
+   - Create `corpus.json` — a JSON file with 100+ test entries:
+     ```json
+     [
+       {
+         "ebayTitle": "Charizard ex 006/197 Obsidian Flames Pokemon NM",
+         "localizedAspects": [{ "name": "Card Name", "value": "Charizard ex" }],
+         "conditionDescriptors": [{ "name": "40001", "values": ["400010"] }],
+         "expectedCardId": "charizard-ex-sv3-6",
+         "expectedVariant": "holofoil",
+         "expectedCondition": "NM",
+         "difficulty": "easy",
+         "tags": ["modern", "standard_format"]
+       }
+     ]
+     ```
+   - Mix: modern sets (30%), legacy (20%), vintage (20%), graded (15%), edge cases (15%)
+   - Include known-tricky titles (misspellings, unusual formats, multi-variant cards)
+   - Include negative examples (should NOT match)
+
+7. **Create accuracy regression test** — `src/__tests__/corpus/accuracy.test.ts`
+   ```typescript
+   import corpus from './corpus.json';
+
+   describe('Match accuracy corpus', () => {
+     let correct = 0;
+     let total = 0;
+
+     for (const entry of corpus) {
+       test(`${entry.ebayTitle}`, async () => {
+         total++;
+         const listing = buildMockListing(entry);
+         const signals = extractSignals(listing);
+
+         if (entry.expectedCardId === null) {
+           // Should NOT match
+           expect(signals.rejected || await matchListing(signals) === null).toBe(true);
+           correct++;
+           return;
+         }
+
+         const match = await matchListing(signals);
+         expect(match).not.toBeNull();
+         if (match?.candidate.scrydex_card_id === entry.expectedCardId) correct++;
+       });
+     }
+
+     afterAll(() => {
+       const accuracy = (correct / total) * 100;
+       console.log(`Accuracy: ${accuracy.toFixed(1)}% (${correct}/${total})`);
+       process.stdout.write(`${accuracy.toFixed(1)}`);
+     });
+   });
+   ```
+
+8. **Create GitHub Actions CI pipeline** — `.github/workflows/ci.yml`
+   ```yaml
+   name: CI
+   on: [push, pull_request]
+
+   jobs:
+     test:
+       runs-on: ubuntu-latest
+       services:
+         postgres:
+           image: postgres:16
+           env:
+             POSTGRES_USER: test
+             POSTGRES_PASSWORD: test
+             POSTGRES_DB: pokesnipe_test
+           ports: ['5432:5432']
+           options: >-
+             --health-cmd pg_isready --health-interval 10s --health-timeout 5s --health-retries 5
+
+       steps:
+         - uses: actions/checkout@v4
+         - uses: actions/setup-node@v4
+           with: { node-version: 20 }
+         - run: npm ci
+         - run: npm run build
+         - run: npx tsc --noEmit
+         - run: npm test
+         - name: Accuracy gate
+           run: |
+             ACCURACY=$(npm run test:accuracy --silent 2>&1 | tail -1)
+             echo "Accuracy: $ACCURACY%"
+             if (( $(echo "$ACCURACY < 85" | bc -l) )); then
+               echo "Accuracy $ACCURACY% is below 85% threshold"
+               exit 1
+             fi
+             echo "Accuracy $ACCURACY% passes threshold"
+       env:
+         DATABASE_URL: postgresql://test:test@localhost:5432/pokesnipe_test
+         ACCESS_PASSWORD: test-password-12345678
+         SESSION_SECRET: test-session-secret-must-be-32-chars-long
+         SCRYDEX_API_KEY: test-key
+         SCRYDEX_TEAM_ID: test-team
+         EBAY_CLIENT_ID: test-client
+         EBAY_CLIENT_SECRET: test-secret
+         EXCHANGE_RATE_API_KEY: test-key
+         NODE_ENV: test
+   ```
+
+9. **Create Dockerfile** — Multi-stage build for Railway:
+   ```dockerfile
+   # Stage 1: Build
+   FROM node:20-alpine AS builder
+   WORKDIR /app
+   COPY package*.json ./
+   RUN npm ci
+   COPY . .
+   RUN npm run build
+   RUN cd client && npm ci && npm run build
+
+   # Stage 2: Production
+   FROM node:20-alpine
+   WORKDIR /app
+   COPY --from=builder /app/dist ./dist
+   COPY --from=builder /app/client/dist ./client/dist
+   COPY --from=builder /app/node_modules ./node_modules
+   COPY --from=builder /app/package.json ./
+   COPY --from=builder /app/migrations ./migrations
+   EXPOSE 3000
+   CMD ["node", "dist/server.js"]
+   ```
+
+10. **Create Railway config** — `railway.toml`:
+    ```toml
+    [build]
+    builder = "dockerfile"
+
+    [deploy]
+    healthcheckPath = "/healthz"
+    healthcheckTimeout = 30
+    restartPolicyType = "on_failure"
+    restartPolicyMaxRetries = 3
+    ```
+
+11. **Add npm scripts** for all the new commands:
+    ```json
+    {
+      "scripts": {
+        "dev": "tsx watch src/server.ts",
+        "build": "tsc",
+        "start": "node dist/server.js",
+        "test": "vitest run",
+        "test:watch": "vitest",
+        "test:accuracy": "vitest run src/__tests__/corpus/accuracy.test.ts",
+        "sync": "tsx src/scripts/run-sync.ts",
+        "migrate": "tsx src/db/migrate.ts"
+      }
+    }
+    ```
+
+**How to test:**
+
+**Automated tests (`src/__tests__/stage13/`):**
+
+- `telegram.test.ts` — Mock the Telegram API:
+  ```typescript
+  // Mock fetch to Telegram API
+  // Call sendAlert('critical', 'Test', 'Details')
+  // Verify correct URL called with correct body
+  // Verify HTML formatting correct
+
+  // When TELEGRAM_BOT_TOKEN is not set → no API call made (silent skip)
+  ```
+
+- `accuracy-tracker.test.ts` — Seed test DB with reviewed deals:
+  ```typescript
+  // Insert 10 deals: 9 correct, 1 incorrect
+  const stats = await getAccuracyStats();
+  expect(stats.rolling7d).toBe(90);
+  expect(stats.totalReviewed).toBe(10);
+  expect(stats.totalCorrect).toBe(9);
+  ```
+
+- `corpus/accuracy.test.ts` — Run the full match corpus (see step 7 above)
+
+```bash
+# Run all tests
+npm test
+
+# Run just the accuracy corpus
+npm run test:accuracy
+
+# Type check
+npx tsc --noEmit
+```
+
+**Smoke tests on Railway:**
+
+```bash
+# 1. Verify structured logs in Railway log viewer
+# Go to Railway dashboard → your service → Logs
+# ✅ Logs should be JSON format with service, correlationId, message
+# ✅ Search for a correlationId to see the full pipeline trace for one listing
+
+# 2. Test Telegram alerts
+curl -b cookies.txt -X POST "$RAILWAY_URL/api/notifications/telegram/test"
+# ✅ Should receive a test message in your Telegram chat
+
+# 3. Verify accuracy tracking in status
+curl -b cookies.txt "$RAILWAY_URL/api/status" | jq '.accuracy'
+# ✅ Should show rolling7d, totalReviewed, totalCorrect
+
+# 4. Verify Docker build works
+docker build -t pokesnipe .
+# ✅ Should complete without errors
+
+# 5. Run CI pipeline locally (to verify before pushing)
+npm test
+npx tsc --noEmit
+npm run test:accuracy
+# ✅ All should pass
+
+# 6. Full 24-hour soak test on Railway:
+# Leave the system running for 24 hours, then check:
+
+psql $DATABASE_URL -c "SELECT COUNT(*) FROM deals WHERE created_at > NOW() - INTERVAL '24 hours';"
+# ✅ Deals accumulating
+
+psql $DATABASE_URL -c "SELECT status, COUNT(*) FROM deals GROUP BY status;"
+# ✅ Mix of active, expired, reviewed
+
+psql $DATABASE_URL -c "SELECT fetched_at FROM exchange_rates ORDER BY fetched_at DESC LIMIT 5;"
+# ✅ Hourly entries
+
+psql $DATABASE_URL -c "SELECT * FROM sync_log ORDER BY started_at DESC LIMIT 5;"
+# ✅ Hot refresh entries, no failures
+
+# Check eBay budget stayed within limits:
+curl -b cookies.txt "$RAILWAY_URL/api/status" | jq '.ebay'
+# ✅ callsToday < 5000
+```
 
 **Deliverable:** Production-ready system with monitoring, testing, and deployment pipeline.
