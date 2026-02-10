@@ -116,24 +116,24 @@ The dominant visual element:
 
 #### 3.4 NO BS PRICING
 
-Buyer Protection tiered breakdown:
+Clean, simple breakdown — fees are included in the total, no detailed tier breakdown needed:
 
 ```
-eBay           £12.50
+eBay price     £12.50
 Shipping       £1.99
-Buyer Prot.    £0.98
-  ├ Flat fee    £0.10
-  ├ 7% band     £0.88
-  (├ 4% band    if applicable)
-  (└ 2% band    if applicable)
-Market (USD)          $57.00
-FX rate               ×0.789
+Fees (inc.)    £0.98
 ─────────────────────────────
-Total        £15.47   £44.97
+Total cost     £15.47
+
+Market (USD)   $57.00
+FX rate        ×0.789
+Market (GBP)   £44.97
 ┌─────────────────────────────┐
 │ Profit    +£29.50 (+190%)   │
 └─────────────────────────────┘
 ```
+
+Buyer Protection fee is calculated on the backend and included as a single "Fees (inc.)" line. No need for tiered sub-rows — just show the total fee amount.
 
 #### 3.5 MATCH CONFIDENCE
 
@@ -709,7 +709,7 @@ Connected → disconnect (network/redeploy) → Reconnecting (auto-retry with La
 Test critical UI components in isolation:
 
 - **DealFeed:** Sorted by tier then profit, client-side filters, "FRESH HEAT" pill, GRAIL glow, SLEEP opacity
-- **PriceBreakdown:** Buyer protection fee display, condition-specific real pricing, expandable fee sub-rows
+- **PriceBreakdown:** Total cost with fees included, condition-specific real pricing, profit calculation
 - **LoginPage:** Password input, submit, error handling, redirect
 - **LiquidityBreakdown:** Real signal bars, velocity fetch button, grade updates
 - **TrendDisplay:** Real trend data arrows and percentages, color coding

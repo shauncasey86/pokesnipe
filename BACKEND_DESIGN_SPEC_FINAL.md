@@ -1569,3 +1569,391 @@ GitHub push to main → Railway auto-deploy
 | Expansion check | Daily 04:00 | Check for new expansions |
 | Full sync | Weekly Sun 03:00 | Full catalog resync |
 | Listings pre-fetch | Weekly Sun 05:00 | Top 200 matched cards velocity |
+
+---
+
+## 15. Phased Build Plan
+
+Each stage is built, tested, and verified before moving to the next. No stage depends on a later stage working. Each stage produces a deployable, testable artifact.
+
+**Principle:** Build the data foundation first (card database + catalog), then layer the scanner on top. No point building the matching engine if there's nothing to match against.
+
+---
+
+### Stage 1: Foundation — Database, Config, Boot Sequence
+
+**Build:**
+- Project scaffold: TypeScript, Express, Vitest, Pino logger
+- Zod-validated `AppConfig` from environment variables
+- PostgreSQL connection pool + migration runner (`node-pg-migrate`)
+- Database schema: all tables from §9 (expansions, cards, variants, deals, exchange_rates, preferences, api_credentials, sync_log, sales_velocity_cache)
+- Health endpoint: `GET /healthz`
+- Boot sequence: validate config → connect DB → run migrations → start server
+
+**Test before moving on:**
+- [ ] `npm run dev` starts the server without errors
+- [ ] Missing env vars → clear Zod error at boot, process exits
+- [ ] `GET /healthz` returns 200
+- [ ] Migrations run on empty DB without errors
+- [ ] Migrations are idempotent (run twice = no errors)
+- [ ] All tables created with correct columns, indexes, constraints
+- [ ] Connection pool handles DB restart gracefully
+
+**Deliverable:** A running Express server with an empty database, ready to receive data.
+
+---
+
+### Stage 2: Scrydex Client & Card Sync
+
+**Build:**
+- Scrydex API client with token bucket rate limiter (80 req/sec)
+- URL path language scoping (`/pokemon/v1/en/...`)
+- Retry logic (3 retries, exponential backoff)
+- Sync service: fetch expansions, fetch cards with `?include=prices`
+- Store ALL price entries per variant (all conditions: NM, LP, MP, HP)
+- Store trend data per condition (1d, 7d, 14d, 30d, 90d, 180d)
+- Store graded prices
+- Batch inserts (100 rows per statement)
+- Sync log tracking (progress, credits used, status)
+- Credit usage tracking via Scrydex account API
+
+**Test before moving on:**
+- [ ] Full sync completes against live Scrydex API
+- [ ] Expansions table populated (~350 rows) with logos, codes, release dates
+- [ ] Cards table populated (~35,000 rows) with images, rarity, subtypes
+- [ ] Variants table populated (~70,000 rows) with correct card_id references
+- [ ] Variant prices JSONB contains NM, LP, MP, HP entries (not just first price)
+- [ ] Variant trends JSONB contains per-condition trend windows
+- [ ] Graded prices populated where available
+- [ ] Sync log records completion, credits used, cards upserted
+- [ ] Re-running sync is idempotent (upsert, no duplicates)
+- [ ] Rate limiter stays within 100 req/sec
+- [ ] Batch inserts work correctly (spot-check 10 random cards against Scrydex API)
+- [ ] `pg_trgm` name search works: `SELECT * FROM cards WHERE name % 'charzard'` returns Charizard cards
+
+**Deliverable:** A populated card database with real pricing, trends, and images for every English Pokemon card.
+
+---
+
+### Stage 3: Card Catalog API & Frontend
+
+**Build:**
+- Public catalog API endpoints (no auth): expansions list, expansion detail, card search, card detail, trending
+- Pagination, sorting, filtering on all list endpoints
+- pg_trgm-powered search
+- Trending cards endpoint (biggest price movers by period)
+- Frontend: catalog navigation, expansion browser, card grid, card detail page, search, trending
+- Public access (no auth required for catalog)
+
+**Test before moving on:**
+- [ ] `GET /api/catalog/expansions` returns all expansions with logos
+- [ ] `GET /api/catalog/expansions/:id` returns cards in the set with images and prices
+- [ ] `GET /api/catalog/cards/search?q=charizard` returns relevant results
+- [ ] `GET /api/catalog/cards/search?q=charzard` (misspelled) still works via pg_trgm
+- [ ] `GET /api/catalog/cards/:id` returns full card detail with all variants, conditions, trends, graded prices
+- [ ] `GET /api/catalog/trending?period=7d` returns cards with real price movements
+- [ ] Sorting, filtering, pagination all work
+- [ ] Frontend: expansion browser renders grid with logos
+- [ ] Frontend: card detail shows all condition prices, trends, graded prices, variant selector
+- [ ] Frontend: search works
+- [ ] All accessible without authentication
+
+**Deliverable:** A working, browsable card catalog — useful on its own before any arbitrage scanning exists.
+
+---
+
+### Stage 4: Exchange Rate & Pricing Engine
+
+**Build:**
+- Exchange rate service: fetch USD/GBP, store in DB, 1-hour refresh
+- Staleness hard gate: refuse to create deals if rate > 6 hours old
+- Buyer Protection fee calculator (pure function, tiered bands)
+- Pricing engine: condition-specific Scrydex price → GBP conversion → profit calc
+- No hardcoded exchange rate fallback — ever
+
+**Test before moving on:**
+- [ ] Exchange rate fetched and stored in DB
+- [ ] Rate refresh works on schedule
+- [ ] Stale rate (>6h) blocks deal creation with clear error
+- [ ] Buyer Protection fee examples match spec:
+  - £10 item → £0.80 fee
+  - £50 item → £2.70 fee
+  - £500 item → £16.70 fee
+- [ ] Profit calculation correct for known card + known eBay price
+- [ ] Condition-specific pricing used (NM price for NM listing, LP price for LP listing)
+- [ ] Profit is negative when eBay price > market price (no false positives)
+
+**Deliverable:** A pricing engine that produces correct profit calculations for any card + condition + eBay price combination.
+
+---
+
+### Stage 5: eBay Client & Search
+
+**Build:**
+- eBay OAuth2 client credentials flow (token caching, auto-refresh)
+- `searchItems()`: 200 results, `sort=newlyListed`, price/condition/buying option filters
+- `getItem()`: full listing detail with localizedAspects + conditionDescriptors
+- Token bucket rate limiter (5 req/sec)
+- Daily budget tracker (5,000 calls/day)
+- Rate limit header parsing
+
+**Test before moving on:**
+- [ ] OAuth token obtained and cached
+- [ ] Token auto-refreshes before expiry
+- [ ] `searchItems('pokemon', 200, ...)` returns ~200 results from category 183454
+- [ ] Results are sorted newest first (verify `itemCreationDate` ordering)
+- [ ] Results are Buy It Now only (no auctions)
+- [ ] Results are £10+ only
+- [ ] `getItem(itemId)` returns `localizedAspects` with card-specific fields
+- [ ] `getItem(itemId)` returns `conditionDescriptors` with descriptor IDs
+- [ ] Daily budget counter increments correctly
+- [ ] Rate limiter prevents burst beyond 5 req/sec
+
+**Deliverable:** Working eBay API client that can search listings and fetch individual item details.
+
+---
+
+### Stage 6: Signal Extraction & Condition Mapping
+
+**Build:**
+- Title parser: 5-phase pipeline (clean → classify → extract → identify → assemble)
+- Junk/bulk/fake detection (early exit)
+- Card number extraction (prioritized pattern array)
+- Variant keyword detection (holo, reverse, 1st edition, etc.)
+- Condition descriptor extraction using full eBay descriptor ID mapping (§3.4)
+- Condition priority: descriptors → localizedAspects → title → default LP
+- Grading detection (company, grade, cert number from descriptors)
+- Structured data extractor (from localizedAspects)
+- Signal merger (title signals + structured signals → NormalizedListing)
+
+**Test before moving on:**
+- [ ] Title cleaning: emojis stripped, HTML decoded, whitespace collapsed
+- [ ] Junk detection: "Pokemon Card Lot Bundle x50" → rejected
+- [ ] Fake detection: "Custom Proxy Charizard" → rejected
+- [ ] Card number extraction from 10+ title formats:
+  - `"123/456"` → number: 123, denominator: 456
+  - `"SV065/198"` → number: 65, prefix: SV, denominator: 198
+  - `"#123"` → number: 123
+- [ ] Condition descriptors mapped correctly:
+  - Descriptor `40001` value `400010` → NM
+  - Descriptor `40001` value `400015` → LP
+  - Descriptor `27501` value `275010` + `27502` value `275020` → PSA 10
+- [ ] Variant detection:
+  - Title "Holo" → holofoil
+  - Title "Reverse Holo" → reverseHolofoil
+  - Title "1st Edition Holo" → firstEditionHolofoil
+- [ ] Signal merger: structured data overrides title when both present
+- [ ] Signal merger: conflicting signals flagged in warnings
+
+**Deliverable:** A signal extraction pipeline that converts raw eBay listings into structured, typed data.
+
+---
+
+### Stage 7: Matching Engine
+
+**Build:**
+- Number-first candidate lookup against local card index
+- Candidate disambiguation (name similarity, denominator, expansion)
+- Jaro-Winkler name validation (≥0.60 threshold)
+- Expansion cross-validation
+- Variant resolution (single variant → keyword match → cheapest default)
+- Confidence scoring (weighted geometric mean)
+- Validation gates (hard + soft)
+
+**Test before moving on:**
+- [ ] Exact match: "Charizard ex 006/197 Obsidian Flames" → correct card + variant
+- [ ] Fuzzy name: "Charzard ex 006/197" (misspelled) → still matches
+- [ ] Number + denominator narrows to 1-3 candidates
+- [ ] Name similarity < 0.60 → rejected (hard gate)
+- [ ] Variant resolution: single-variant card → auto-selected
+- [ ] Variant resolution: multi-variant card + "holo" in title → holofoil variant
+- [ ] Variant resolution: multi-variant card + no keywords → cheapest variant
+- [ ] Confidence score reflects match quality (exact > fuzzy > guessed)
+- [ ] 20+ manually verified eBay titles produce correct matches
+- [ ] 5+ known-bad titles produce no match (not a wrong match)
+- [ ] Graded card detection: PSA/CGC/BGS in title → isGraded: true
+- [ ] Performance: matching completes in <10ms per listing (local DB query)
+
+**Deliverable:** A matching engine that correctly identifies which card an eBay listing is selling.
+
+---
+
+### Stage 8: Scanner Pipeline — End to End
+
+**Build:**
+- Scanner service: search → filter → match → enrich → price → deal
+- Two-phase evaluation: Phase 1 (title-only) → Phase 2 (getItem enrichment)
+- Enrichment gate (≥15% profit, ≥0.50 confidence)
+- Budget management (daily call tracking, threshold tightening)
+- Deduplication (skip already-processed eBay item IDs)
+- Tier classification (GRAIL/HIT/FLIP/SLEEP)
+- Deal creation with full audit trail (match_signals JSONB)
+- Scan loop (every 5 minutes)
+
+**Test before moving on:**
+- [ ] Full pipeline: search → match → price → deal inserted in DB
+- [ ] Deals have correct profit calculations (verify 5 manually)
+- [ ] Deals have correct condition (from enrichment, not guessed)
+- [ ] Deals have correct variant (verify against Scrydex)
+- [ ] Tier assignment matches profit thresholds
+- [ ] Duplicate eBay items skipped (no duplicate deals)
+- [ ] Enrichment only fires when profit threshold met
+- [ ] Budget tracking: search calls + getItem calls counted correctly
+- [ ] Budget throttling: enrichment threshold tightens at low budget
+- [ ] Scan loop runs every 5 minutes without drift or overlap
+- [ ] Deals accumulate over 30+ minutes of running
+- [ ] Match signals JSONB contains full audit data
+
+**Deliverable:** A working arbitrage scanner that finds real deals automatically.
+
+---
+
+### Stage 9: Liquidity Engine & Sales Velocity
+
+**Build:**
+- Tier 1 liquidity signals (free — from synced card data): trend activity, price completeness, price spread
+- Tier 2 signals (from eBay listing): concurrent supply, quantity sold
+- Tier 3 signals (Scrydex `/listings` endpoint): sales velocity, 7-day cache
+- Composite liquidity scoring (weighted arithmetic mean)
+- Liquidity grade assignment (high/medium/low/illiquid)
+- Tier adjustment based on liquidity (illiquid → capped at SLEEP)
+- Sales velocity cache table (7-day TTL)
+- Auto-fetch velocity for high-profit deals
+- On-demand velocity fetch endpoint
+
+**Test before moving on:**
+- [ ] Tier 1 signals computed from real synced data
+- [ ] Tier 2 signals extracted from eBay listings
+- [ ] Scrydex `/listings` endpoint called successfully, response parsed
+- [ ] Sales velocity cached and reused within 7-day window
+- [ ] Composite score in 0-1 range, grade assigned correctly
+- [ ] Illiquid card capped at SLEEP tier regardless of profit
+- [ ] Low liquidity caps at FLIP
+- [ ] Medium liquidity downgrades GRAIL to HIT
+- [ ] High liquidity: no tier adjustment
+- [ ] On-demand velocity fetch works and updates deal
+
+**Deliverable:** Deals now include real liquidity assessment based on actual market data.
+
+---
+
+### Stage 10: Authentication & API Endpoints
+
+**Build:**
+- Password authentication (constant-time comparison against `ACCESS_PASSWORD`)
+- Session cookies (httpOnly, 7-day expiry)
+- Auth middleware for protected routes
+- REST endpoints: deals list, deal detail, deal review, lookup, status, preferences
+- SSE endpoint: deal stream with Last-Event-Id replay
+- SSE status events (every 30s)
+- Input validation (Zod schemas on all request bodies)
+
+**Test before moving on:**
+- [ ] Login with correct password → session cookie set
+- [ ] Login with wrong password → 401
+- [ ] Protected endpoints without cookie → 401
+- [ ] Protected endpoints with valid cookie → 200
+- [ ] `GET /api/deals` returns paginated deal list
+- [ ] `GET /api/deals/:id` returns full deal detail
+- [ ] `POST /api/deals/:id/review` stores correct/incorrect verdict
+- [ ] `POST /api/lookup` runs full pipeline for pasted eBay URL
+- [ ] `GET /api/status` returns scanner, sync, API usage metrics
+- [ ] SSE stream connects, receives deal events
+- [ ] SSE reconnects and replays missed deals via Last-Event-Id
+- [ ] SSE status events arrive every 30s
+- [ ] Zod rejects malformed request bodies with clear errors
+
+**Deliverable:** Complete backend API — the scanner finds deals, the API serves them.
+
+---
+
+### Stage 11: Deal Lifecycle & Background Jobs
+
+**Build:**
+- Deal expiry (72-hour TTL, hourly cleanup)
+- Deal status tracking (active → expired/sold/reviewed)
+- Stale deal pruning (hard-delete unreviewed deals >30 days)
+- Exchange rate refresh job (hourly)
+- Daily hot refresh (10 most recent expansions)
+- Weekly full sync
+- Expansion check (detect new sets)
+- Listings pre-fetch (weekly, top 200 matched cards)
+- All scheduled via in-process `node-cron`
+
+**Test before moving on:**
+- [ ] Deals older than 72h auto-expire (status → expired)
+- [ ] Expired deals excluded from default deal list
+- [ ] Reviewed deals preserved past 30-day prune
+- [ ] Exchange rate refreshes hourly
+- [ ] Hot refresh updates prices for recent sets
+- [ ] Weekly sync completes without errors
+- [ ] New expansion detected and synced automatically
+- [ ] All jobs survive process restart (re-register on boot)
+- [ ] Jobs don't overlap (scan skips if previous cycle still running)
+
+**Deliverable:** Self-maintaining system — deals expire, prices stay fresh, new sets appear automatically.
+
+---
+
+### Stage 12: Frontend — Dashboard
+
+**Build:**
+- Login page (password → session cookie)
+- Deal feed (live-updating via SSE)
+- Deal detail panel (right-side, full breakdown)
+- Filter bar (tier, condition, liquidity, confidence, time, min profit, graded)
+- Client-side filtering
+- System status footer
+- Manual lookup tool
+- Settings modal (preferences, Telegram config)
+- Notifications (toasts, banners, Telegram)
+- Responsive layout (desktop, tablet, mobile breakpoints)
+- Glass morphism design system
+
+**Test before moving on:**
+- [ ] Login flow works end-to-end
+- [ ] Deal feed populates on load
+- [ ] New deals appear via SSE without page refresh
+- [ ] Click deal → detail panel opens with correct data
+- [ ] Profit, condition comps, trends show real Scrydex data (not fabricated)
+- [ ] Liquidity breakdown shows real signals
+- [ ] "Fetch velocity" button works and updates inline
+- [ ] Filters work client-side (instant, no API call)
+- [ ] Filter persistence via preferences API
+- [ ] "SNAG ON EBAY" opens correct eBay URL
+- [ ] Manual lookup: paste URL → full pipeline result
+- [ ] Status footer shows real metrics
+- [ ] SSE reconnection banner works
+- [ ] Responsive: tablet and mobile breakpoints functional
+- [ ] Graded badge shows when applicable
+- [ ] Deal review (correct/wrong) works
+
+**Deliverable:** Working arbitrage dashboard — scan, evaluate, buy.
+
+---
+
+### Stage 13: Observability, Testing & Production Hardening
+
+**Build:**
+- Pino structured JSON logging with correlation IDs
+- Telegram alerts (sync failures, budget warnings, accuracy drops)
+- Accuracy tracking (automated 7-day rolling, manual review count)
+- Match corpus (initial 100 entries)
+- Accuracy regression test suite
+- GitHub Actions CI pipeline (lint, typecheck, unit, integration, API, accuracy gate)
+- Dockerfile (multi-stage build)
+- Railway deployment config
+
+**Test before moving on:**
+- [ ] Structured logs appear in Railway log viewer
+- [ ] Correlation IDs trace a listing through the full pipeline
+- [ ] Telegram alerts fire for test conditions
+- [ ] Match corpus tests pass at ≥85% accuracy
+- [ ] CI pipeline runs on PR, blocks merge if accuracy < 85%
+- [ ] Docker build succeeds
+- [ ] Railway deployment works (health check passes)
+- [ ] Full system runs for 24h without errors
+- [ ] Deals created, expired, reviewed — full lifecycle verified
+- [ ] API budget stays within limits over 24h
+
+**Deliverable:** Production-ready system with monitoring, testing, and deployment pipeline.
