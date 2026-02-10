@@ -11,7 +11,9 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "migrate": "tsx src/db/migrate.ts",
-    "sync": "tsx src/scripts/run-sync.ts"
+    "sync": "tsx src/scripts/run-sync.ts",
+    "verify": "tsx src/scripts/verify-sync.ts",
+    "verify:only": "tsx src/scripts/verify-sync.ts -- --verify-only"
   },
   "repository": {
     "type": "git",
