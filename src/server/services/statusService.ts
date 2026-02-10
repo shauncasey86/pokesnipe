@@ -1,5 +1,7 @@
 import { pool } from "../db/pool.js";
 import { getApiUsageToday } from "./apiUsageTracker.js";
+import { ebayRateLimit } from "./ebayClient.js";
+import { fetchScrydexUsage } from "./scrydexClient.js";
 
 export const getStatus = async () => {
   const dealsToday = await pool.query(
@@ -27,11 +29,23 @@ export const getStatus = async () => {
       : "stale"
     : "hunting";
 
-  // API usage — query actual daily counts
-  const [ebayUsed, scrydexUsed] = await Promise.all([
-    getApiUsageToday("ebay"),
-    getApiUsageToday("scrydex")
-  ]);
+  // eBay: use rate-limit headers from actual API responses (captured in ebayClient)
+  const ebayLocal = await getApiUsageToday("ebay");
+  const ebayUsed = ebayRateLimit.used > 0 ? ebayRateLimit.used : ebayLocal;
+  const ebayCap = ebayRateLimit.limit > 0 ? ebayRateLimit.limit : 5000;
+
+  // Scrydex: call actual /account/v1/usage endpoint (cached for 30 min)
+  let scrydexUsed = 0;
+  let scrydexCap = 50000;
+  let scrydexUsage: any = null;
+  try {
+    scrydexUsage = await fetchScrydexUsage();
+    scrydexUsed = scrydexUsage?.credits_used ?? scrydexUsage?.used ?? scrydexUsage?.api_calls ?? 0;
+    scrydexCap = scrydexUsage?.credits_limit ?? scrydexUsage?.limit ?? scrydexUsage?.credits_total ?? 50000;
+  } catch {
+    // Fallback to local DB count if Scrydex usage endpoint fails
+    scrydexUsed = await getApiUsageToday("scrydex");
+  }
 
   return {
     scanner: {
@@ -41,8 +55,8 @@ export const getStatus = async () => {
     dealsToday: dealsToday.rows[0],
     accuracy: { rolling7d },
     apis: {
-      ebay: { used: ebayUsed, cap: 5000 },
-      scrydex: { used: scrydexUsed, cap: 50000 },
+      ebay: { used: ebayUsed, cap: ebayCap, remaining: ebayRateLimit.remaining, source: ebayRateLimit.used > 0 ? "api" : "local" },
+      scrydex: { used: scrydexUsed, cap: scrydexCap, raw: scrydexUsage, source: scrydexUsage ? "api" : "local" },
       index: { count: cardCount.rows[0]?.count ?? 0, lastSync: sync.rows[0]?.finished_at ?? null }
     }
   };

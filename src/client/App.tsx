@@ -356,6 +356,7 @@ export default function App() {
   const [toast, setToast] = useState<any>(null);
   const [saved, setSaved] = useState(false);
   const [sseStatus, setSseStatus] = useState<string>("connected");
+  const [ticker, setTicker] = useState<{ message: string; type: string; time: number }[]>([]);
   const [showHelp, setShowHelp] = useState(false);
   const [showTests, setShowTests] = useState(false);
   const [testResults, setTestResults] = useState<Record<string, any>>({});
@@ -413,6 +414,10 @@ export default function App() {
         if (feedRef.current && feedRef.current.scrollTop > 100) setPill(true);
       });
       source.addEventListener("status", (e: any) => setStatus(JSON.parse(e.data)));
+      source.addEventListener("ticker", (e: any) => {
+        const t = JSON.parse(e.data);
+        setTicker(prev => [t, ...prev].slice(0, 20));
+      });
       source.addEventListener("ping", () => { retryCount = 0; setSseStatus("connected"); });
       source.onopen = () => { retryCount = 0; setSseStatus("connected"); };
       source.onerror = () => {
@@ -574,11 +579,33 @@ export default function App() {
         <button className="hdr-save" onClick={saveFilters} style={{ marginLeft: "auto", fontFamily: "var(--fm)", fontSize: 8, color: saved ? "var(--green)" : "var(--tGho)", letterSpacing: 2, padding: "5px 10px", borderRadius: "var(--r-pill)", border: `1px solid ${saved ? "rgba(52,211,153,0.25)" : "var(--brd)"}`, background: saved ? "rgba(52,211,153,0.06)" : "transparent", transition: "all 0.25s var(--ease)", textTransform: "uppercase" as const }}>{saved ? "✓ SAVED" : "SAVE"}</button>
       </nav>
 
-      {/* SSE BANNER */}
-      {sseStatus !== "connected" && (
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 10, padding: "8px 24px", background: "rgba(251,191,36,0.08)", borderBottom: "1px solid rgba(251,191,36,0.15)", flexShrink: 0 }}>
-          <div style={{ width: 6, height: 6, borderRadius: "50%", background: "var(--amber)", animation: "pulse 1.5s ease infinite" }} />
-          <span style={{ fontFamily: "var(--fm)", fontSize: 11, fontWeight: 600, color: "var(--amber)" }}>Reconnecting...</span>
+      {/* TICKER TAPE */}
+      {(ticker.length > 0 || sseStatus !== "connected") && (
+        <div style={{ display: "flex", alignItems: "center", gap: 16, padding: "0 24px", height: 28, background: "rgba(10,14,22,0.7)", borderBottom: "1px solid var(--brd)", flexShrink: 0, overflow: "hidden", position: "relative" }}>
+          <div style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: 40, background: "linear-gradient(90deg, rgba(10,14,22,0.9), transparent)", zIndex: 2, pointerEvents: "none" }} />
+          <div style={{ position: "absolute", right: 0, top: 0, bottom: 0, width: 40, background: "linear-gradient(270deg, rgba(10,14,22,0.9), transparent)", zIndex: 2, pointerEvents: "none" }} />
+          <div style={{ display: "flex", alignItems: "center", gap: 24, animation: ticker.length > 2 ? "tickerScroll 30s linear infinite" : "none", whiteSpace: "nowrap" as const }}>
+            {sseStatus !== "connected" && (
+              <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                <span style={{ width: 5, height: 5, borderRadius: "50%", background: "var(--amber)", animation: "pulse 1.5s ease infinite", display: "inline-block" }} />
+                <span style={{ fontFamily: "var(--fm)", fontSize: 10, fontWeight: 600, color: "var(--amber)", letterSpacing: 0.5 }}>Reconnecting</span>
+              </span>
+            )}
+            {ticker.slice(0, 10).map((t, i) => {
+              const c = t.type === "success" ? "var(--green)" : t.type === "error" ? "var(--red)" : "var(--blue)";
+              const icon = t.type === "success" ? "✓" : t.type === "error" ? "✗" : "→";
+              const age = Math.floor((Date.now() - t.time) / 60000);
+              const ago = age < 1 ? "now" : age < 60 ? `${age}m` : `${Math.floor(age / 60)}h`;
+              return (
+                <span key={t.time + i} style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                  <span style={{ fontFamily: "var(--fm)", fontSize: 10, fontWeight: 700, color: c }}>{icon}</span>
+                  <span style={{ fontFamily: "var(--fm)", fontSize: 10, color: "var(--tSec)", fontWeight: 500 }}>{t.message}</span>
+                  <span style={{ fontFamily: "var(--fm)", fontSize: 9, color: "var(--tGho)" }}>{ago}</span>
+                  <span style={{ color: "var(--tGho)", fontSize: 8, margin: "0 4px" }}>·</span>
+                </span>
+              );
+            })}
+          </div>
         </div>
       )}
 
@@ -598,23 +625,33 @@ export default function App() {
       <footer style={{ display: "flex", alignItems: "center", justifyContent: "space-between", height: 42, background: "rgba(7,10,18,0.9)", backdropFilter: "blur(12px)", borderTop: "1px solid var(--brd)", fontFamily: "var(--fm)", fontSize: 11, flexShrink: 0, position: "relative", padding: "0 20px" }}>
         <div style={{ position: "absolute", top: -1, left: 0, right: 0, height: 1, background: GRAD_LINE, opacity: 0.4 }} />
         <div style={{ display: "flex", alignItems: "center", gap: 0, flexShrink: 0 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "0 14px 0 0" }}><div style={{ width: 6, height: 6, borderRadius: "50%", background: status?.scanner?.status === "stale" ? "var(--red)" : status?.scanner?.status === "running" ? "var(--amber)" : "var(--green)", boxShadow: `0 0 8px ${status?.scanner?.status === "stale" ? "rgba(248,113,113,0.5)" : status?.scanner?.status === "running" ? "rgba(251,191,36,0.5)" : "rgba(52,211,153,0.5)"}` }} /><span style={{ color: "var(--tSec)", fontWeight: 600 }}>{status?.scanner?.status === "running" ? "Scanning" : status?.scanner?.status === "stale" ? "Stale" : "Hunting"}</span>{status?.scanner?.lastRun && <span style={{ fontSize: 10, color: "var(--tMut)", marginLeft: 2 }}>{tsAgo(status.scanner.lastRun)}</span>}</div>
+          <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "0 14px 0 0" }}><div style={{ width: 6, height: 6, borderRadius: "50%", background: status?.scannerPaused ? "var(--red)" : status?.scanner?.status === "stale" ? "var(--red)" : status?.scanner?.status === "running" ? "var(--amber)" : "var(--green)", boxShadow: `0 0 8px ${status?.scannerPaused ? "rgba(248,113,113,0.5)" : status?.scanner?.status === "stale" ? "rgba(248,113,113,0.5)" : status?.scanner?.status === "running" ? "rgba(251,191,36,0.5)" : "rgba(52,211,153,0.5)"}` }} /><span style={{ color: "var(--tSec)", fontWeight: 600 }}>{status?.scannerPaused ? "Paused" : status?.scanner?.status === "running" ? "Scanning" : status?.scanner?.status === "stale" ? "Stale" : "Hunting"}</span>{status?.scanner?.lastRun && <span style={{ fontSize: 10, color: "var(--tMut)", marginLeft: 2 }}>{tsAgo(status.scanner.lastRun)}</span>}</div>
           <div style={{ width: 1, height: 16, background: "var(--brd)" }} />
           <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "0 14px" }}><span style={{ color: "var(--tMut)" }}>Today:</span><span style={{ color: "var(--tMax)", fontWeight: 700 }}>{status?.dealsToday?.total ?? deals.length}</span><span style={{ fontSize: 9, color: TIERS.grail.color, fontWeight: 600 }}>{grailCount}G</span><span style={{ fontSize: 9, color: TIERS.hit.color, fontWeight: 600 }}>{hitCount}H</span></div>
           <div style={{ width: 1, height: 16, background: "var(--brd)" }} />
           <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "0 14px" }}><span style={{ color: "var(--tMut)" }}>Acc:</span><span style={{ color: "var(--green)", fontWeight: 700 }}>{Math.round((status?.accuracy?.rolling7d ?? 0) * 100)}%</span><span style={{ color: "var(--tGho)", fontSize: 10 }}>7d</span></div>
         </div>
         <div className="foot-apis" style={{ display: "flex", alignItems: "center", flexShrink: 0 }}>
-          {[{ label: "eBay", val: status?.apis?.ebay?.used ?? 0, cap: 5000, capLabel: "5K" }, { label: "Scrydex", val: status?.apis?.scrydex?.used ?? 0, cap: 50000, capLabel: "50K" }, { label: "Index", val: status?.apis?.index?.count ?? 0, cap: 0, capLabel: null as any }].map((a, i) => {
-            const ratio = a.cap > 0 ? a.val / a.cap : 0;
-            const dotColor = ratio > 0.95 ? "var(--red)" : ratio > 0.8 ? "var(--amber)" : "var(--green)";
-            return (
-            <div key={i} style={{ display: "flex", alignItems: "center", gap: 5, padding: "0 12px", borderLeft: i > 0 ? "1px solid var(--brd)" : "none" }}>
-              <div style={{ width: 5, height: 5, borderRadius: "50%", background: dotColor, boxShadow: `0 0 6px ${dotColor === "var(--red)" ? "rgba(248,113,113,0.4)" : dotColor === "var(--amber)" ? "rgba(251,191,36,0.4)" : "rgba(52,211,153,0.4)"}` }} />
-              <span style={{ color: "var(--tMut)", fontSize: 10 }}>{a.label}</span><span style={{ color: "var(--tSec)", fontWeight: 600, fontSize: 10 }}>{a.val}</span>
-              {a.capLabel && <span style={{ color: "var(--tGho)", fontSize: 9 }}>/{a.capLabel}</span>}
-            </div>
-          ); })}
+          {(() => {
+            const ebayCap = status?.apis?.ebay?.cap ?? 5000;
+            const scrydexCap = status?.apis?.scrydex?.cap ?? 50000;
+            const fmtCap = (n: number) => n >= 1000 ? `${(n / 1000).toFixed(n % 1000 === 0 ? 0 : 1)}K` : String(n);
+            return [
+              { label: "eBay", val: status?.apis?.ebay?.used ?? 0, cap: ebayCap, capLabel: fmtCap(ebayCap), src: status?.apis?.ebay?.source },
+              { label: "Scrydex", val: status?.apis?.scrydex?.used ?? 0, cap: scrydexCap, capLabel: fmtCap(scrydexCap), src: status?.apis?.scrydex?.source },
+              { label: "Index", val: status?.apis?.index?.count ?? 0, cap: 0, capLabel: null as any, src: null }
+            ].map((a, i) => {
+              const ratio = a.cap > 0 ? a.val / a.cap : 0;
+              const dotColor = ratio > 0.95 ? "var(--red)" : ratio > 0.8 ? "var(--amber)" : "var(--green)";
+              return (
+                <div key={i} style={{ display: "flex", alignItems: "center", gap: 5, padding: "0 12px", borderLeft: i > 0 ? "1px solid var(--brd)" : "none" }}>
+                  <div style={{ width: 5, height: 5, borderRadius: "50%", background: dotColor, boxShadow: `0 0 6px ${dotColor === "var(--red)" ? "rgba(248,113,113,0.4)" : dotColor === "var(--amber)" ? "rgba(251,191,36,0.4)" : "rgba(52,211,153,0.4)"}` }} />
+                  <span style={{ color: "var(--tMut)", fontSize: 10 }}>{a.label}</span><span style={{ color: "var(--tSec)", fontWeight: 600, fontSize: 10 }}>{a.val}</span>
+                  {a.capLabel && <span style={{ color: "var(--tGho)", fontSize: 9 }}>/{a.capLabel}</span>}
+                </div>
+              );
+            });
+          })()}
         </div>
       </footer>
 

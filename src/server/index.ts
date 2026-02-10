@@ -117,21 +117,25 @@ app.post("/api/scanner/toggle", requireAuth, (_req, res) => {
 app.post("/api/scan", requireAuth, async (_req, res) => {
   if (scanRunning) return res.json({ ok: false, error: "scan already in progress" });
   scanRunning = true;
+  broadcastTicker("Manual scan triggered — searching eBay...", "info");
   try {
     const before = (await pool.query("SELECT COUNT(*)::int as c FROM deals")).rows[0].c;
     await pool.query("INSERT INTO scanner_runs (status) VALUES ('running')");
     await scanEbay();
     const after = (await pool.query("SELECT COUNT(*)::int as c FROM deals")).rows[0].c;
+    const found = after - before;
     await pool.query(
       "UPDATE scanner_runs SET status='completed', finished_at=now(), deals_found=$1 WHERE id=(SELECT MAX(id) FROM scanner_runs)",
-      [after - before]
+      [found]
     );
-    res.json({ ok: true, deals_found: after - before });
+    broadcastTicker(`Manual scan complete — ${found} new deal${found !== 1 ? "s" : ""} found`, "success");
+    res.json({ ok: true, deals_found: found });
   } catch (error: any) {
     await pool.query(
       "UPDATE scanner_runs SET status='failed', finished_at=now(), error=$1 WHERE id=(SELECT MAX(id) FROM scanner_runs)",
       [error.message]
     ).catch(() => {});
+    broadcastTicker(`Manual scan failed: ${error.message}`, "error");
     res.status(500).json({ ok: false, error: error.message });
   } finally {
     scanRunning = false;
@@ -181,6 +185,11 @@ const broadcastStatus = async () => {
   clients.forEach((res) => sendEvent(res, "status", status));
 };
 
+const broadcastTicker = (msg: string, type: "info" | "success" | "error" = "info") => {
+  const payload = { message: msg, type, time: Date.now() };
+  clients.forEach((res) => sendEvent(res, "ticker", payload));
+};
+
 setInterval(() => {
   pollDeals().catch((error) => logger.error({ error }, "poll deals failed"));
 }, 5000);
@@ -210,10 +219,15 @@ app.listen(config.PORT, () => {
   (async () => {
     try {
       logger.info("starting initial Scrydex sync...");
+      broadcastTicker("Syncing card index from Scrydex...", "info");
       await runFullSync();
+      const cardCount = (await pool.query("SELECT COUNT(*)::int as c FROM cards")).rows[0].c;
+      const expCount = (await pool.query("SELECT COUNT(*)::int as c FROM expansions")).rows[0].c;
       logger.info("initial sync completed");
+      broadcastTicker(`Sync complete — ${cardCount} cards across ${expCount} expansions indexed`, "success");
     } catch (error) {
       logger.error({ error }, "initial sync failed (will retry in 24h)");
+      broadcastTicker("Sync failed — will retry in 24h", "error");
     }
 
     // Scan every 5 minutes (respects pause)
@@ -223,15 +237,19 @@ app.listen(config.PORT, () => {
       const doScan = async () => {
         const { rows } = await pool.query("INSERT INTO scanner_runs (status) VALUES ('running') RETURNING id");
         const runId = rows[0].id as number;
+        broadcastTicker("Scanner started — searching eBay for deals...", "info");
         try {
           const before = (await pool.query("SELECT COUNT(*)::int as c FROM deals")).rows[0].c;
           await scanEbay();
           const after = (await pool.query("SELECT COUNT(*)::int as c FROM deals")).rows[0].c;
-          await pool.query("UPDATE scanner_runs SET status='completed', finished_at=now(), deals_found=$2 WHERE id=$1", [runId, after - before]);
-          logger.info({ runId, dealsFound: after - before }, "scan completed");
+          const found = after - before;
+          await pool.query("UPDATE scanner_runs SET status='completed', finished_at=now(), deals_found=$2 WHERE id=$1", [runId, found]);
+          logger.info({ runId, dealsFound: found }, "scan completed");
+          broadcastTicker(`Scan complete — ${found} new deal${found !== 1 ? "s" : ""} found`, "success");
         } catch (error) {
           await pool.query("UPDATE scanner_runs SET status='failed', finished_at=now(), error=$2 WHERE id=$1", [runId, error instanceof Error ? error.message : "unknown"]).catch(() => {});
           logger.error({ error }, "scan failed");
+          broadcastTicker(`Scan failed: ${error instanceof Error ? error.message : "unknown error"}`, "error");
         } finally {
           scanRunning = false;
         }
@@ -243,9 +261,17 @@ app.listen(config.PORT, () => {
     setInterval(() => {
       if (syncRunning) return;
       syncRunning = true;
+      broadcastTicker("Scheduled sync — refreshing card index from Scrydex...", "info");
       runFullSync()
-        .then(() => logger.info("scheduled sync completed"))
-        .catch((error) => logger.error({ error }, "scheduled sync failed"))
+        .then(async () => {
+          const cardCount = (await pool.query("SELECT COUNT(*)::int as c FROM cards")).rows[0].c;
+          logger.info("scheduled sync completed");
+          broadcastTicker(`Sync complete — ${cardCount} cards indexed`, "success");
+        })
+        .catch((error) => {
+          logger.error({ error }, "scheduled sync failed");
+          broadcastTicker("Scheduled sync failed", "error");
+        })
         .finally(() => { syncRunning = false; });
     }, 1000 * 60 * 60 * 24);
   })();

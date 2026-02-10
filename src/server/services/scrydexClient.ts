@@ -14,6 +14,29 @@ const client = axios.create({
 
 const limiter = new TokenBucket(5, 1);
 
+// Scrydex account usage client (different base URL)
+const accountClient = axios.create({
+  baseURL: "https://api.scrydex.com/account/v1",
+  timeout: 15000,
+  headers: {
+    "X-Api-Key": config.SCRYDEX_API_KEY,
+    "X-Team-ID": config.SCRYDEX_TEAM_ID
+  }
+});
+
+// Cache usage data (refresh at most every 30 min to minimize credit burn)
+let scrydexUsageCache: { data: any; fetchedAt: number } | null = null;
+const USAGE_CACHE_TTL = 30 * 60 * 1000; // 30 min
+
+export const fetchScrydexUsage = async (): Promise<any> => {
+  if (scrydexUsageCache && Date.now() - scrydexUsageCache.fetchedAt < USAGE_CACHE_TTL) {
+    return scrydexUsageCache.data;
+  }
+  const { data } = await accountClient.get("/usage");
+  scrydexUsageCache = { data, fetchedAt: Date.now() };
+  return data;
+};
+
 export type ScrydexExpansion = {
   id: string;
   name: string;
@@ -83,7 +106,7 @@ export const fetchCardsPage = async (page: number) => {
   await limiter.take();
   const { data } = await withRetry(() =>
     client.get("/cards", {
-      params: { page, page_size: 100, language: "en", include: "prices" }
+      params: { page, page_size: 100, language: "en", include: "prices,variants,images" }
     })
   );
   trackApiCall("scrydex").catch(() => {});

@@ -6,11 +6,18 @@ import { calculateProfit } from "./pricing.js";
 import { v4 as uuidv4 } from "uuid";
 
 const QUERY_SET = [
-  "pokemon card PSA",
-  "pokemon card lot",
-  "pokemon tcg alt art",
-  "pokemon tcg promo"
+  "pokemon tcg single card holo",
+  "pokemon tcg single card V VMAX",
+  "pokemon tcg single card ex",
+  "pokemon tcg alt art single",
+  "pokemon tcg illustration rare",
+  "pokemon tcg gold card single",
+  "pokemon card charizard single",
+  "pokemon card promo single",
 ];
+
+// Reject listings that are clearly lots, bundles, or bulk
+const BULK_PATTERNS = /\b(lot|bundle|collection|choose|pick|select|random|mystery|grab bag|bulk|set of|x\d{2,}|\d{2,}\s*cards|\d{2,}\s*card\s*lot|wholesale|mixed|assorted|binder|starter kit)\b/i;
 
 const toGbp = (value: number, currency: string, fx: number) => {
   if (currency === "GBP") return value;
@@ -65,8 +72,11 @@ const computeLiquidity = (breakdown: Record<string, number | null>): string => {
 export const scanEbay = async () => {
   const fx = await getUsdToGbpRate();
   for (const query of QUERY_SET) {
-    const listings = await searchItems(query, 25);
+    // 183454 = eBay category "CCG Individual Cards" — excludes lots, sealed, bundles
+    const listings = await searchItems(query, 25, "183454");
     for (const listing of listings) {
+      // Skip bulk/lot/bundle listings
+      if (BULK_PATTERNS.test(listing.title)) continue;
       const existing = await pool.query("SELECT 1 FROM deals WHERE ebay_item_id=$1", [listing.itemId]);
       if (existing.rows.length > 0) continue;
       const match = await matchListing(listing.title, listing.itemSpecifics);
