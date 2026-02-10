@@ -13,6 +13,9 @@ const HASH_REGEX = /#0*(\d{1,4})\b/;
 // "No." format: No. 123 or No 123
 const NO_REGEX = /\bNo\.?\s*0*(\d{1,4})\b/i;
 
+// Standalone promo format: SM60, SWSH050, XY123, etc. (prefix directly joined to number)
+const PROMO_REGEX = /\b(SV|TG|GG|SWSH|SM|XY)0*(\d{1,4})\b/i;
+
 export function extractCardNumber(cleanedTitle: string): CardNumber | null {
   // Priority 1: Fraction formats (with optional prefix)
   const fractionMatch = cleanedTitle.match(FRACTION_REGEX);
@@ -40,6 +43,16 @@ export function extractCardNumber(cleanedTitle: string): CardNumber | null {
     return {
       number: parseInt(noMatch[1]!, 10),
       prefix: null,
+      denominator: null,
+    };
+  }
+
+  // Priority 4: Standalone promo format (SM60, SWSH050, etc.)
+  const promoMatch = cleanedTitle.match(PROMO_REGEX);
+  if (promoMatch) {
+    return {
+      number: parseInt(promoMatch[2]!, 10),
+      prefix: promoMatch[1]!.toUpperCase(),
       denominator: null,
     };
   }
