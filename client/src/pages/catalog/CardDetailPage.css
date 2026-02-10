@@ -1,0 +1,154 @@
+.card-detail {
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 24px;
+}
+
+.card-detail-layout {
+  display: grid;
+  grid-template-columns: 340px 1fr;
+  gap: 32px;
+  align-items: start;
+}
+
+.card-detail-image img {
+  width: 100%;
+  max-width: 340px;
+  border-radius: 12px;
+}
+
+.card-detail-placeholder {
+  width: 100%;
+  aspect-ratio: 2.5/3.5;
+  background: var(--bg2);
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--tMut);
+}
+
+.card-detail-data h1 {
+  font-size: 1.75rem;
+  font-weight: 700;
+  color: var(--tMax);
+  margin-bottom: 8px;
+}
+
+.card-meta-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+
+.badge {
+  padding: 3px 10px;
+  background: var(--glass);
+  border: 1px solid var(--brd);
+  border-radius: 20px;
+  font-size: 0.75rem;
+  color: var(--tSec);
+  font-weight: 500;
+}
+
+.card-artist {
+  font-size: 0.8125rem;
+  color: var(--tMut);
+  margin-bottom: 16px;
+}
+
+.card-expansion {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  margin-bottom: 20px;
+  text-decoration: none;
+  color: var(--tPri);
+  border-radius: var(--radius);
+}
+
+.card-expansion:hover {
+  text-decoration: none;
+}
+
+.card-exp-logo {
+  max-height: 32px;
+  max-width: 120px;
+  object-fit: contain;
+}
+
+.card-exp-name {
+  display: block;
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--tMax);
+}
+
+.card-exp-series {
+  display: block;
+  font-size: 0.75rem;
+  color: var(--tSec);
+}
+
+.variant-tabs {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 20px;
+  flex-wrap: wrap;
+}
+
+.variant-tab {
+  padding: 6px 14px;
+  border-radius: 6px;
+  border: 1px solid var(--brd);
+  background: var(--glass);
+  color: var(--tSec);
+  font-size: 0.8125rem;
+  font-weight: 500;
+  transition: all 0.15s;
+}
+
+.variant-tab:hover {
+  color: var(--tPri);
+  background: var(--glass2);
+}
+
+.variant-tab.active {
+  color: var(--tMax);
+  background: var(--glass2);
+  border-color: var(--blue);
+}
+
+.variant-label {
+  font-size: 0.8125rem;
+  color: var(--tSec);
+  margin-bottom: 20px;
+}
+
+.detail-section {
+  margin-bottom: 24px;
+}
+
+.detail-section h2 {
+  font-size: 0.9375rem;
+  font-weight: 600;
+  color: var(--tMax);
+  margin-bottom: 12px;
+}
+
+@media (max-width: 768px) {
+  .card-detail-layout {
+    grid-template-columns: 1fr;
+  }
+  .card-detail-image {
+    display: flex;
+    justify-content: center;
+  }
+  .card-detail-image img {
+    max-width: 240px;
+  }
+  .card-detail { padding: 16px; }
+}

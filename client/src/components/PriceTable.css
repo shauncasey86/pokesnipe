@@ -1,0 +1,36 @@
+.price-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.875rem;
+}
+
+.price-table th {
+  text-align: left;
+  padding: 8px 12px;
+  color: var(--tSec);
+  font-weight: 500;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  border-bottom: 1px solid var(--brd);
+}
+
+.price-table td {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--brd);
+}
+
+.price-table .cond-label {
+  font-weight: 600;
+  color: var(--tMax);
+}
+
+.price-table .mono {
+  color: var(--green);
+}
+
+.price-table-empty {
+  color: var(--tMut);
+  font-size: 0.875rem;
+  padding: 12px 0;
+}
