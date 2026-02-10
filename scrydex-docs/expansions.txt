@@ -1,0 +1,261 @@
++----------------------------------------------------------------------------------+
+|                                    EXPANSIONS                                    |
++----------------------------------------------------------------------------------+
+
+THE EXPANSION OBJECT
+--------------------
+Each field available on a Pokémon expansion is described below with its field name
+and corresponding data type.
+
++----------------+----------------+-------------------------------------------------------------+
+| FIELD          | TYPE           | DESCRIPTION                                                 |
++----------------+----------------+-------------------------------------------------------------+
+| id             | string         | Unique identifier for the expansion.                        |
+| name           | string         | Expansion name.                                             |
+| series         | string         | Series name (e.g., "Scarlet & Violet").                     |
+| code           | string         | Unique expansion code.                                      |
+| total          | integer        | Total cards incl. secret rares (variants not separate).     |
+| printed_total  | integer        | Printed total on cards (e.g., "1/86, 2/86" => 86).          |
+| language       | string         | Expansion language (e.g., English).                         |
+| language_code  | string         | ISO-2 language code (e.g., EN, JA).                         |
+| release_date   | string         | YYYY/MM/DD (e.g., 2025/07/18).                              |
+| is_online_only | boolean        | True if only available online (e.g., Pocket expansions).    |
+| logo           | string         | Logo URL.                                                   |
+| symbol         | string         | Symbol URL.                                                 |
+| translation    | map            | Non-English expansions may include translation.en.* fields. |
++----------------+----------------+-------------------------------------------------------------+
+
+
+NESTED OBJECT: translation (map)
+--------------------------------
+If the expansion language is not English, translation is nested under "en".
+
++---------------------+--------+--------------------------------------+
+| KEY                 | TYPE   | DESCRIPTION                          |
++---------------------+--------+--------------------------------------+
+| translation.en.name | string | English name (when available).       |
++---------------------+--------+--------------------------------------+
+
+
+
++----------------------------------------------------------------------------------+
+|                              EXAMPLE EXPANSION OBJECTS                           |
++----------------------------------------------------------------------------------+
+
+EXAMPLE (ENGLISH)
+-----------------
+{
+  "id": "zsv10pt5",
+  "name": "Black Bolt",
+  "series": "Scarlet & Violet",
+  "code": "BLK",
+  "total": 172,
+  "printed_total": 86,
+  "language": "English",
+  "language_code": "EN",
+  "release_date": "2025/07/18",
+  "is_online_only": false,
+  "logo": "https://images.scrydex.com/pokemon/zsv10pt5-logo/logo",
+  "symbol": "https://images.scrydex.com/pokemon/zsv10pt5-symbol/symbol"
+}
+
+EXAMPLE (JAPANESE + TRANSLATION)
+--------------------------------
+{
+  "id": "m1s_ja",
+  "name": "メガシンフォニア",
+  "series": "Mega Evolution",
+  "code": "M1S",
+  "total": 92,
+  "printed_total": 63,
+  "language": "Japanese",
+  "language_code": "JA",
+  "release_date": "2025/08/01",
+  "is_online_only": false,
+  "logo": "https://images.scrydex.com/pokemon/m1s_ja-logo/logo",
+  "symbol": "https://images.scrydex.com/pokemon/m1s_ja-symbol/symbol",
+  "translation": {
+    "en": {
+      "name": "Mega Symphonia"
+    }
+  }
+}
+
+
+
++----------------------------------------------------------------------------------+
+|                                  ENDPOINTS                                       |
++----------------------------------------------------------------------------------+
+
+LIST EXPANSIONS
+---------------
+GET https://api.scrydex.com/pokemon/v1/expansions
+
+
+GET AN EXPANSION
+----------------
+Retrieves a specific Pokémon expansion by its unique identifier.
+
+URL
+---
+GET https://api.scrydex.com/pokemon/v1/expansions/<id>
+
+URL PARAMETERS
+--------------
++------+--------+--------------------------------------------+
+| NAME | TYPE   | DESCRIPTION                                |
++------+--------+--------------------------------------------+
+| id   | string | Required. Expansion unique identifier.     |
++------+--------+--------------------------------------------+
+
+QUERY PARAMETERS (OPTIONAL)
+---------------------------
++----------+------------------------+----------------------------------------------+
+| NAME     | TYPE                   | DESCRIPTION                                  |
++----------+------------------------+----------------------------------------------+
+| select   | comma-separated string | Fields to return (e.g., name,logo).          |
+| casing   | string                 | Output case: camel | snake                   |
++----------+------------------------+----------------------------------------------+
+
+
+
+SEARCH EXPANSIONS
+-----------------
+Use query parameters to fetch multiple expansions with filtering and pagination.
+
+QUERY PARAMETERS (OPTIONAL)
+---------------------------
+Note: parameters can be camelCase or snake_case (pageSize or page_size).
+
++-----------+------------------------+----------------------------------------------+----------------+
+| PARAM     | TYPE                   | DESCRIPTION                                  | DEFAULT        |
++-----------+------------------------+----------------------------------------------+----------------+
+| q         | string                 | Lucene-like search query (examples below).  | -              |
+| page      | integer                | Page number.                                 | 1              |
+| page_size | integer                | Max expansions per page (max 100).           | 100 (max 100)  |
+| select    | comma-separated string | Fields to return (e.g., id,name).            | -              |
++-----------+------------------------+----------------------------------------------+----------------+
+
+
+
++----------------------------------------------------------------------------------+
+|                              q SEARCH QUERY FEATURES                             |
++----------------------------------------------------------------------------------+
+
+Search queries use a Lucene-like syntax for filtering.
+
+KEYWORD MATCHING
+----------------
+- name:mega
+- name:"mega brave"
+- series:XY language:japanese
+- series:XY (language:japanese OR language:english)
+
+EXCLUDE RESULTS
+---------------
+- series:xy -language:english
+
+WILDCARD MATCHING
+-----------------
+- name:twi*
+- name:twi*ght
+
+EXACT MATCHING
+--------------
+- !name:"lost thunder"
+
+RANGE SEARCHES (NUMERIC FIELDS)
+-------------------------------
+- total:[200 TO *]
+- total:[* TO 100]
+- total:[100 TO *]
+
+Pro Tip:
+- [ ] inclusive ranges
+- { } exclusive ranges
+
+
+
++----------------------------------------------------------------------------------+
+|                       ORDERING, FIELD SELECTION, RESPONSE                        |
++----------------------------------------------------------------------------------+
+
+ORDERING DATA (orderBy)
+-----------------------
+- Order expansions by name:
+  ?orderBy=name
+
+- Combine ASC and DESC:
+  ?orderBy=name,-total
+
+
+FIELD SELECTION (select)
+------------------------
+- Return only id and name:
+  ?select=id,name
+
+
+SAMPLE SEARCH RESPONSE
+----------------------
+{
+  "data": [
+    {
+      "id": "sm11",
+      "name": "Unified Minds",
+      "series": "Sun & Moon",
+      "total": 260,
+      "printed_total": 236,
+      "language": "English",
+      "language_code": "EN",
+      "release_date": "2019/08/02",
+      "is_online_only": false,
+      "logo": "https://images.scrydex.com/pokemon/sm11-logo/logo",
+      "symbol": "https://images.scrydex.com/pokemon/sm11-symbol/symbol"
+    },
+    {
+      "id": "sm10",
+      "name": "Unbroken Bonds",
+      "series": "Sun & Moon",
+      "total": 234,
+      "printed_total": 214,
+      "language": "English",
+      "language_code": "EN",
+      "release_date": "2019/05/03",
+      "is_online_only": false,
+      "logo": "https://images.scrydex.com/pokemon/sm10-logo/logo",
+      "symbol": "https://images.scrydex.com/pokemon/sm10-symbol/symbol"
+    }
+  ],
+  "page": 1,
+  "pageSize": 100,
+  "totalCount": 200
+}
+
+
+BEST PRACTICES: FETCH & SEARCH
+------------------------------
++------------------------+------------------------------------------------+
+| PRACTICE               | DETAILS                                        |
++------------------------+------------------------------------------------+
+| Paginate Results       | Use page and pageSize/page_size.               |
++------------------------+------------------------------------------------+
+| Limit Fields Returned  | Use select to reduce payload.                  |
++------------------------+------------------------------------------------+
+| Avoid Overhead         | Minimize heavy wildcard/range queries.         |
++------------------------+------------------------------------------------+
+
+
+EXAMPLE REQUESTS
+----------------
+
+Language: curl
+
+curl --request GET \
+  --url "https://api.scrydex.com/pokemon/v1/expansions" \
+  --header "X-Api-Key: <api_key_here>" \
+  --header "X-Team-ID: <team_id_here>"
+
+curl --request GET \
+  --url "https://api.scrydex.com/pokemon/v1/expansions/sv1" \
+  --header "X-Api-Key: <api_key_here>" \
+  --header "X-Team-ID: <team_id_here>"

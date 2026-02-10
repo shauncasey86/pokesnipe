@@ -1,0 +1,334 @@
++----------------------------------------------------------------------------------+
+|                                 SEALED PRODUCTS                                  |
++----------------------------------------------------------------------------------+
+
+THE SEALED PRODUCT OBJECT
+-------------------------
+Each field available on a Pokémon sealed product is described below with its field
+name and corresponding data type.
+
++----------------------+----------------------+----------------------------------------------+
+| FIELD                | TYPE                 | DESCRIPTION                                  |
++----------------------+----------------------+----------------------------------------------+
+| id                   | string               | Unique identifier for the sealed product.    |
+| name                 | string               | Sealed product name.                          |
+| description          | string               | Brief product description.                    |
+| type                 | string               | e.g., "Booster Pack", "Booster Box", "ETB".  |
+| images               | array[map]           | Image URLs (type, small, medium, large).     |
+| expansion            | object               | Expansion/set metadata (see below).          |
+| language             | string               | Product language.                             |
+| language_code        | string               | "EN", "JA", etc.                              |
+| expansion_sort_order | integer              | Sort position within expansion.               |
+| variants             | array[map]           | Variant list (name, images, prices).         |
++----------------------+----------------------+----------------------------------------------+
+
+
+NESTED OBJECT: images (array of maps)
+-------------------------------------
++--------+--------+----------------------------------------------+
+| KEY    | TYPE   | DESCRIPTION                                  |
++--------+--------+----------------------------------------------+
+| type   | string | e.g., "front", "back".                       |
+| small  | string | URL to small image.                           |
+| medium | string | URL to medium image.                          |
+| large  | string | URL to large image.                           |
++--------+--------+----------------------------------------------+
+
+
+NESTED OBJECT: expansion (object)
+---------------------------------
++----------------+----------+-------------------------------------------------------------+
+| KEY            | TYPE     | DESCRIPTION                                                 |
++----------------+----------+-------------------------------------------------------------+
+| id             | string   | Expansion ID.                                                |
+| name           | string   | Expansion name.                                              |
+| series         | string   | Series name.                                                 |
+| total          | integer  | Total cards incl. secret rares.                              |
+| printed_total  | integer  | Printed total on cards (e.g., "87/160" => 160).              |
+| language       | string   | Expansion language.                                          |
+| language_code  | string   | "EN", "JA", etc.                                             |
+| release_date   | string   | YYYY/MM/DD.                                                  |
+| is_online_only | boolean  | True if only available online (e.g., Pocket expansions).     |
++----------------+----------+-------------------------------------------------------------+
+
+
+NESTED OBJECT: variants (array of maps)
+---------------------------------------
++--------+------------+--------------------------------------------------+
+| KEY    | TYPE       | DESCRIPTION                                      |
++--------+------------+--------------------------------------------------+
+| name   | string     | Variant name (e.g., "normal", "firstEdition").   |
+| images | array[map] | Variant-specific images (if available).          |
+| prices | array      | Variant price data (if included / available).    |
++--------+------------+--------------------------------------------------+
+
+
+
++----------------------------------------------------------------------------------+
+|                         EXAMPLE SEALED PRODUCT OBJECT                            |
++----------------------------------------------------------------------------------+
+
+{
+  "id": "me1-s1",
+  "name": "Mega Evolution Booster Pack",
+  "type": "Booster Pack",
+  "description": "Mega Evolve Your Strength to the Next Stage!\nStriving to become stronger, Pokémon of all types are putting everything on the line to become Mega Evolution Pokémon ex! Harness the strong aura of Mega Lucario ex, embrace the overflowing power of Mega Gardevoir ex, and team up with more of these powerful Pokémon that boast devastating attacks and massive HP. But consider your strategy carefully—extra power brings extra risks! Choose your Pokémon partners and prepare for the biggest battles you’ve ever seen in the Pokémon TCG: Mega Evolution expansion!\n\nEach pack contains 10 cards.",
+  "images": [
+    {
+      "type": "front",
+      "small": "https://images.scrydex.com/pokemon/me1-s1/small",
+      "medium": "https://images.scrydex.com/pokemon/me1-s1/medium",
+      "large": "https://images.scrydex.com/pokemon/me1-s1/large"
+    }
+  ],
+  "expansion": {
+    "id": "me1",
+    "name": "Mega Evolution",
+    "series": "Mega Evolution",
+    "code": "MEG",
+    "total": 188,
+    "printed_total": 132,
+    "language": "English",
+    "language_code": "EN",
+    "release_date": "2025/09/26",
+    "is_online_only": false
+  },
+  "expansion_sort_order": 1,
+  "variants": [
+    {
+      "name": "normal",
+      "prices": [
+        {
+          "condition": "U",
+          "is_perfect": false,
+          "is_signed": false,
+          "is_error": false,
+          "type": "raw",
+          "low": 7.39,
+          "market": 7.13,
+          "currency": "USD",
+          "trends": {
+            "days_1": { "price_change": 0.25, "percent_change": 3.63 },
+            "days_7": { "price_change": -0.76, "percent_change": -9.63 }
+          }
+        }
+      ]
+    }
+  ]
+}
+
+
+
++----------------------------------------------------------------------------------+
+|                                  ENDPOINTS                                       |
++----------------------------------------------------------------------------------+
+
+GET A SEALED PRODUCT
+--------------------
+Retrieves a specific Pokémon sealed product by its unique identifier.
+
+URL
+---
+GET https://api.scrydex.com/pokemon/v1/sealed/<id>
+
+URL PARAMETERS
+--------------
++------+--------+----------------------------------------------+
+| NAME | TYPE   | DESCRIPTION                                  |
++------+--------+----------------------------------------------+
+| id   | string | Required. Sealed product unique identifier.  |
++------+--------+----------------------------------------------+
+
+QUERY PARAMETERS (OPTIONAL)
+---------------------------
++----------+------------------------+--------------------------------------------------------+
+| NAME     | TYPE                   | DESCRIPTION                                            |
++----------+------------------------+--------------------------------------------------------+
+| select   | comma-separated string | Fields to return (e.g., type,description).             |
+| casing   | string                 | Output case: camel | snake                             |
+| include  | comma-separated string | Additional resources: prices                           |
++----------+------------------------+--------------------------------------------------------+
+
+Note: Prices are opt-in via include=prices. Avoid including prices unless needed.
+
+
+EXAMPLE REQUEST (GET A SEALED PRODUCT)
+--------------------------------------
+Language: curl
+
+curl --request GET \
+  --url "https://api.scrydex.com/pokemon/v1/sealed/me1-s1" \
+  --header "X-Api-Key: <api_key_here>" \
+  --header "X-Team-ID: <team_id_here>"
+
+
+
+SEARCH SEALED PRODUCTS
+----------------------
+Two main ways to fetch multiple sealed products:
+1) Across the whole sealed product database
+2) Scoped to a specific expansion
+
+URLS
+----
+Get all sealed products (paginated, unfiltered):
+GET https://api.scrydex.com/pokemon/v1/sealed
+
+Get all sealed products for a specific expansion (paginated):
+GET https://api.scrydex.com/pokemon/v1/expansions/<expansion_id>/sealed
+Example:
+GET https://api.scrydex.com/pokemon/v1/expansions/me1/sealed
+
+
+QUERY PARAMETERS (OPTIONAL)
+---------------------------
+Note: query parameters can be camelCase or snake_case (pageSize or page_size).
+
++-----------+------------------------+-----------------------------------------------+----------------+
+| PARAM     | TYPE                   | DESCRIPTION                                   | DEFAULT        |
++-----------+------------------------+-----------------------------------------------+----------------+
+| q         | string                 | Lucene-like search query (examples below).   | -              |
+| page      | integer                | Page number.                                  | 1              |
+| page_size | integer                | Max items per page (max 100).                 | 100 (max 100)  |
+| select    | comma-separated string | Fields to return (e.g., id,name).             | -              |
+| include   | comma-separated string | Opt-in additional data (e.g., prices).        | -              |
++-----------+------------------------+-----------------------------------------------+----------------+
+
+
+
++----------------------------------------------------------------------------------+
+|                              q SEARCH QUERY FEATURES                             |
++----------------------------------------------------------------------------------+
+
+Search queries use a Lucene-like syntax for filtering.
+
+KEYWORD MATCHING
+----------------
+- name:charizard
+- name:"venusaur v"
+- name:alakazam type:"Booster Pack"
+- name:alakazam (type:"Booster Pack" OR type:"Booster Box")
+
+EXCLUDE RESULTS
+---------------
+- type:box -expansion.id:base1
+
+WILDCARD MATCHING
+-----------------
+- name:char*
+- name:char*der
+
+EXACT MATCHING
+--------------
+- !name:"jungle booster box"
+
+RANGE SEARCHES
+--------------
+- Currently no sealed product fields support range searches.
+
+NESTED FIELD SEARCH (DOT NOTATION)
+----------------------------------
+- expansion.id:sm1
+
+
+
++----------------------------------------------------------------------------------+
+|                       ORDERING, FIELD SELECTION, RESPONSE                        |
++----------------------------------------------------------------------------------+
+
+ORDERING DATA (orderBy)
+-----------------------
+- Order sealed products by name:
+  ?orderBy=name
+
+- Combine ASC and DESC:
+  ?orderBy=name,-expansion_sort_order
+
+
+FIELD SELECTION (select)
+------------------------
+- Return only id and name:
+  ?select=id,name
+
+
+SAMPLE SEARCH RESPONSE
+----------------------
+{
+  "status": "success",
+  "data": [
+    {
+      "id": "base2-s2",
+      "name": "Jungle Booster Box",
+      "type": "Booster Box",
+      "images": [
+        {
+          "type": "front",
+          "small": "https://images.scrydex.com/pokemon/base2-s2f/small",
+          "medium": "https://images.scrydex.com/pokemon/base2-s2f/medium",
+          "large": "https://images.scrydex.com/pokemon/base2-s2f/large"
+        }
+      ],
+      "expansion": {
+        "id": "base2",
+        "name": "Jungle",
+        "series": "Base",
+        "total": 64,
+        "printed_total": 64,
+        "language": "English",
+        "language_code": "EN",
+        "release_date": "1999/06/16",
+        "is_online_only": false
+      },
+      "expansion_sort_order": 2,
+      "variants": [
+        { "name": "firstEdition", "prices": [] },
+        { "name": "unlimited", "prices": [] }
+      ]
+    },
+    {
+      "id": "base3-s2",
+      "name": "Pokemon Fossil Booster Box",
+      "type": "Booster Box",
+      "images": [
+        {
+          "type": "front",
+          "small": "https://images.scrydex.com/pokemon/base3-s2f/small",
+          "medium": "https://images.scrydex.com/pokemon/base3-s2f/medium",
+          "large": "https://images.scrydex.com/pokemon/base3-s2f/large"
+        }
+      ],
+      "expansion": {
+        "id": "base3",
+        "name": "Fossil",
+        "series": "Base",
+        "total": 62,
+        "printed_total": 62,
+        "language": "English",
+        "language_code": "EN",
+        "release_date": "1999/10/10",
+        "is_online_only": false
+      },
+      "expansion_sort_order": 2,
+      "variants": [
+        { "name": "firstEdition", "prices": [] },
+        { "name": "unlimited", "prices": [] }
+      ]
+    }
+  ],
+  "page": 1,
+  "pageSize": 2,
+  "totalCount": 263
+}
+
+
+BEST PRACTICES: FETCH & SEARCH
+------------------------------
++------------------------+------------------------------------------------+
+| PRACTICE               | DETAILS                                        |
++------------------------+------------------------------------------------+
+| Paginate Results       | Use page and pageSize/page_size.               |
++------------------------+------------------------------------------------+
+| Limit Fields Returned  | Use select to reduce payload.                  |
++------------------------+------------------------------------------------+
+| Avoid Overhead         | Minimize heavy wildcard queries.               |
++------------------------+------------------------------------------------+

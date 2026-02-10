@@ -1,0 +1,160 @@
++----------------------------------------------------------------------------------+
+|                                  API REFERENCE                                   |
++----------------------------------------------------------------------------------+
+
+OVERVIEW
+--------
+The Scrydex Pokémon API provides data for:
+- English expansions
+- Japanese expansions
+- Promo cards
+- Trainer kits
+- Non-core expansions
+
+The API supports language scoping using language codes in the URL.
+
+
+URL STRUCTURE
+-------------
+
+DEFAULT (MULTI-LANGUAGE DATA)
+
+https://api.scrydex.com/pokemon/v1/cards
+
+
+LANGUAGE-SCOPED REQUESTS
+
++----------+-----------------------------------------------+
+| LANGUAGE | EXAMPLE URL                                   |
++----------+-----------------------------------------------+
+| English  | /pokemon/v1/en/cards                          |
+| English  | /pokemon/v1/en/expansions                     |
+| Japanese | /pokemon/v1/ja/cards                          |
+| Japanese | /pokemon/v1/ja/expansions                     |
++----------+-----------------------------------------------+
+
+FULL EXAMPLES
+
+https://api.scrydex.com/pokemon/v1/en/cards
+https://api.scrydex.com/pokemon/v1/ja/cards
+
+
+
++----------------------------------------------------------------------------------+
+|                          JAPANESE CARD DATA & TRANSLATIONS                       |
++----------------------------------------------------------------------------------+
+
+Japanese card translation support is still in progress.
+
+DATA BEHAVIOR
+
++------------------------+------------------------------------------------+
+| CATEGORY               | BEHAVIOR                                       |
++------------------------+------------------------------------------------+
+| Primary Data Language  | Most fields returned in Japanese.              |
++------------------------+------------------------------------------------+
+| English Translations   | Provided in translation.en object (if exists). |
++------------------------+------------------------------------------------+
+| Missing Japanese Data  | Falls back to English translation when needed. |
++------------------------+------------------------------------------------+
+
+
+KEY JAPANESE DATA NOTES
+-----------------------
+
++----------------------+------------------------------------------------+
+| FIELD TYPE           | LOCATION                                       |
++----------------------+------------------------------------------------+
+| Japanese Values      | Top-level fields                               |
+| English Equivalents  | translation.en object                          |
++----------------------+------------------------------------------------+
+
+
+FUTURE IMPROVEMENTS
+-------------------
+
+- Expanded Japanese → English translations
+- English → Japanese translations for new cards
+- Improved cross-language data consistency
+
+
+
++----------------------------------------------------------------------------------+
+|                           SAMPLE JAPANESE CARD OBJECT                            |
++----------------------------------------------------------------------------------+
+
+{
+  "id": "sv10_ja-1",
+  "name": "クヌギダマ",
+  "supertype": "ポケモン",
+  "subtypes": ["たね"],
+  "types": ["草"],
+  "hp": "70",
+  "attacks": [
+    {
+      "cost": ["無"],
+      "converted_energy_cost": 1,
+      "name": "ぶらさがる",
+      "text": "",
+      "damage": "10"
+    }
+  ],
+  "weaknesses": [
+    {
+      "type": "炎",
+      "value": "×2"
+    }
+  ],
+  "retreat_cost": ["無", "無"],
+  "converted_retreat_cost": 2,
+  "number": "1",
+  "printed_number": "001/098",
+  "rarity": "通常",
+  "artist": "YASHIRO Nanaco",
+  "language": "Japanese",
+  "language_code": "JA",
+  "translation": {
+    "en": {
+      "name": "Pineco",
+      "supertype": "Pokémon",
+      "subtypes": ["Basic"],
+      "types": ["Grass"],
+      "attacks": [
+        {
+          "cost": ["Colorless"],
+          "name": "Hang Down",
+          "text": "",
+          "damage": "10"
+        }
+      ],
+      "weaknesses": [
+        {
+          "type": "Fire",
+          "value": "×2"
+        }
+      ],
+      "retreat_cost": ["Colorless", "Colorless"],
+      "rarity": "Common"
+    }
+  }
+}
+
+
+
+BASE API ENDPOINT
+-----------------
+
+All Pokémon endpoints:
+
+https://api.scrydex.com/pokemon/v1/
+
+
+
+EXAMPLE REQUEST
+---------------
+
+Language: curl
+
+curl -X GET "https://api.scrydex.com/pokemon/v1/cards" \
+  --header "X-Api-Key: <api_key_here>" \
+  --header "X-Team-ID: <team_id_here>"

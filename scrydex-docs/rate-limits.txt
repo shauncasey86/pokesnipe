@@ -1,0 +1,111 @@
++----------------------------------------------------------------------------------+
+|                                   RATE LIMITS                                    |
++----------------------------------------------------------------------------------+
+
+UNDERSTANDING RATE LIMITS
+-------------------------
+Access to the Scrydex API is controlled by credit-based rate limits tied to your
+subscription plan. Every request deducts credits from your balance.
+
+
+HOW RATE LIMITS WORK
+--------------------
+
++----------------------+------------------------------------------------+
+| CATEGORY             | DETAILS                                        |
++----------------------+------------------------------------------------+
+| Credit-Based Limits  | Rate limits are based on credits in your plan. |
+|                      | Each request consumes credits per API docs.    |
++----------------------+------------------------------------------------+
+| Per-Second Limit     | 100 requests per second across all endpoints.  |
+|                      | Same limit for all plans.                     |
+|                      | Exceeding limit returns HTTP 429 error.        |
++----------------------+------------------------------------------------+
+| Overage Fees         | Applied when included credits are exhausted.   |
+|                      | Usage endpoint updates every 20–30 minutes.    |
++----------------------+------------------------------------------------+
+| Abuse Policy         | Excessive unpaid usage may cause suspension    |
+|                      | or termination of subscription.                |
++----------------------+------------------------------------------------+
+
+
+HOW TO MONITOR USAGE
+--------------------
+
++------------------------------+---------------------------------------------+
+| METHOD                       | DESCRIPTION                                 |
++------------------------------+---------------------------------------------+
+| Developer Dashboard          | View usage inside Scrydex dashboard.        |
+| Usage API Endpoint           | Call /account/v1/usage to get usage stats.  |
++------------------------------+---------------------------------------------+
+
+
+ABUSE POLICY DETAILS
+--------------------
+
+Scrydex may suspend or terminate service if the following occurs:
+
++---------------------------+-----------------------------------------------+
+| CONDITION                 | DESCRIPTION                                   |
++---------------------------+-----------------------------------------------+
+| Clear Abuse               | Extremely high request volume without         |
+|                           | valid payment history.                        |
++---------------------------+-----------------------------------------------+
+| Overdue / Failed Payments | Repeated unpaid subscription or overage fees. |
++---------------------------+-----------------------------------------------+
+
+Support Contact:
+support@scrydex.com
+
+
+BEST PRACTICES TO AVOID ISSUES
+------------------------------
+
++----------------------+------------------------------------------------+
+| PRACTICE             | DETAILS                                        |
++----------------------+------------------------------------------------+
+| Monitor Usage        | Regularly call usage endpoint or check         |
+|                      | dashboard to track credit usage.               |
++----------------------+------------------------------------------------+
+| Use Caching          | Cache data to reduce API calls and save        |
+|                      | credits.                                       |
++----------------------+------------------------------------------------+
+| Optimize Requests    | Batch requests where possible.                 |
+|                      | Use filtering and pagination to limit data.    |
++----------------------+------------------------------------------------+
+
+
+MONITORING CREDIT AND USAGE DATA
+--------------------------------
+
+The /account/v1/usage endpoint returns:
+
++----------------------+--------------------------------+
+| FIELD                | DESCRIPTION                    |
++----------------------+--------------------------------+
+| total_credits        | Total credits included in plan |
+| remaining_credits    | Credits currently available    |
+| used_credits         | Credits already consumed       |
+| overage_credit_rate  | Cost per extra credit          |
++----------------------+--------------------------------+
+
+
+RATE LIMIT POLICY SUMMARY
+-------------------------
+
+- Limits are credit-based per subscription plan.
+- Monitor usage actively using the usage endpoint.
+- Abusive or unpaid excessive usage may result in service suspension.
+
+
+FIND YOUR CURRENT USAGE
+-----------------------
+
+EXAMPLE REQUEST
+---------------
+
+Language: curl
+
+curl -X GET "https://api.scrydex.com/account/v1/usage" \
+  -H "X-Api-Key: YOUR_API_KEY" \
+  -H "X-Team-ID: YOUR_TEAM_ID"

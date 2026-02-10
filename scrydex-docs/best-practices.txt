@@ -1,0 +1,194 @@
++----------------------------------------------------------------------------------+
+|                                   BEST PRACTICES                                 |
++----------------------------------------------------------------------------------+
+
+IMAGES
+------
+You are free to use Scrydex-provided card images in your applications. Follow these
+best practices for optimal performance and reliability.
+
+
+1. CACHE IMAGES LOCALLY
+-----------------------
+
++------------------+--------------------------------------------------+
+| CATEGORY         | DETAILS                                          |
++------------------+--------------------------------------------------+
+| Why              | Reduces dependency on API and external servers.  |
++------------------+--------------------------------------------------+
+| Benefits         | Faster load times.                               |
+|                  | Better reliability during API downtime.          |
++------------------+--------------------------------------------------+
+| How              | Store image URLs in database.                    |
+|                  | Cache responses on your server.                  |
++------------------+--------------------------------------------------+
+
+
+2. STORE IMAGES ON YOUR OWN SERVERS
+-----------------------------------
+
+Hosting images on your own CDN or servers provides better control and reliability.
+
++----------------------+-----------------------------------------------+
+| ADVANTAGE            | RESULT                                        |
++----------------------+-----------------------------------------------+
+| Reduced Server Load  | Fewer repeated requests to Scrydex servers.   |
++----------------------+-----------------------------------------------+
+| Lower Credit Usage   | No need to call endpoints repeatedly.         |
+|                      | (Image delivery itself costs 0 credits.)      |
++----------------------+-----------------------------------------------+
+
+
+3. USE SCRYDEX IMAGE URLS DIRECTLY (IF NEEDED)
+----------------------------------------------
+
++----------------------+-----------------------------------------------+
+| RECOMMENDATION       | DETAILS                                       |
++----------------------+-----------------------------------------------+
+| Fallback Logic       | Add retry logic or placeholder images.        |
++----------------------+-----------------------------------------------+
+| URL Handling         | Never assume URL patterns.                    |
+|                      | Always use URLs returned by the API.          |
++----------------------+-----------------------------------------------+
+
+
+KEY BENEFITS OF IMAGE BEST PRACTICES
+------------------------------------
+
++------------------------+---------------------------------------------+
+| BENEFIT                | DESCRIPTION                                 |
++------------------------+---------------------------------------------+
+| Improved Performance   | Faster image load times.                    |
++------------------------+---------------------------------------------+
+| Reduced API Costs      | Preserve credits for important requests.    |
++------------------------+---------------------------------------------+
+| Better User Experience | More reliable image delivery.               |
++------------------------+---------------------------------------------+
+
+
+IMAGE USAGE NOTES
+-----------------
+
++----------------------+-----------------------------------------------+
+| TOPIC                | DETAILS                                       |
++----------------------+-----------------------------------------------+
+| Copyright            | Scrydex does not own the images.              |
+|                      | You are responsible for copyright compliance. |
++----------------------+-----------------------------------------------+
+| Attribution          | Recommended to credit copyright holders.      |
++----------------------+-----------------------------------------------+
+
+
+IMAGE DOWNLOAD EXAMPLE
+----------------------
+
+Language: bash / curl
+
+bash curl -o xy1-1.webp https://images.scrydex.com/cards/xy1-1/large
+
+
+
++----------------------------------------------------------------------------------+
+|                                     CACHING                                      |
++----------------------------------------------------------------------------------+
+
+Caching improves performance, reduces API usage, and increases reliability.
+
+
+1. CACHE API RESPONSES
+----------------------
+
++------------------+--------------------------------------------------+
+| CATEGORY         | DETAILS                                          |
++------------------+--------------------------------------------------+
+| Why              | Avoid repeated API calls for same data.          |
++------------------+--------------------------------------------------+
+| Benefits         | Faster responses.                                |
+|                  | Lower credit consumption.                        |
+|                  | Better resilience during outages.                |
++------------------+--------------------------------------------------+
+| How              | Use Valkey, Redis, or Memcached.                 |
+|                  | Set cache expiration based on data type.         |
++------------------+--------------------------------------------------+
+
+RECOMMENDED CACHE DURATIONS:
+
++----------------------+-----------------------------------------------+
+| DATA TYPE            | RECOMMENDED CACHE TIME                         |
++----------------------+-----------------------------------------------+
+| Pricing Data         | ~24 hours (updates at most daily)              |
++----------------------+-----------------------------------------------+
+| Card Metadata        | Long duration (hours to days)                  |
++----------------------+-----------------------------------------------+
+| Expansion Data       | Long duration (rarely changes)                 |
++----------------------+-----------------------------------------------+
+
+
+2. PERIODIC CACHE REFRESH
+-------------------------
+
++----------------------+-----------------------------------------------+
+| METHOD               | DESCRIPTION                                   |
++----------------------+-----------------------------------------------+
+| Background Jobs      | Refresh cached data on schedule.              |
++----------------------+-----------------------------------------------+
+| Predictable Updates  | Adjust expiry based on update frequency.      |
++----------------------+-----------------------------------------------+
+
+
+3. LOCAL DATABASE STORAGE
+-------------------------
+
+Recommended for high-traffic or heavy usage applications.
+
++----------------------+-----------------------------------------------+
+| USE CASE             | EXAMPLE                                       |
++----------------------+-----------------------------------------------+
+| Historical Data      | Price history charts.                         |
++----------------------+-----------------------------------------------+
+| Catalog Data         | Cards and expansions lists.                   |
++----------------------+-----------------------------------------------+
+| Market Data          | Listings and sales history.                   |
++----------------------+-----------------------------------------------+
+
+Recommended Databases:
+- PostgreSQL
+- MySQL
+- MongoDB
+
+
+KEY BENEFITS OF EFFECTIVE CACHING
+---------------------------------
+
++-----------------------------+------------------------------------------+
+| BENEFIT                     | DESCRIPTION                              |
++-----------------------------+------------------------------------------+
+| Lower Credit Costs          | Avoid duplicate API calls.               |
++-----------------------------+------------------------------------------+
+| Faster Response Times       | Cached data returns in milliseconds.     |
++-----------------------------+------------------------------------------+
+| Improved Resilience         | Works during network or API downtime.    |
++-----------------------------+------------------------------------------+
+
+
+CACHING NOTES
+-------------
+
++----------------------+-----------------------------------------------+
+| TOPIC                | DETAILS                                       |
++----------------------+-----------------------------------------------+
+| Expiration Policies  | Static data: long cache duration.             |
+|                      | Dynamic data: shorter refresh intervals.      |
++----------------------+-----------------------------------------------+
+| Data Accuracy        | Cached data may not be real-time.             |
++----------------------+-----------------------------------------------+
+| API Credit Savings   | Major savings for high-traffic applications.  |
++----------------------+-----------------------------------------------+
+
+
+IMAGE DOWNLOAD EXAMPLE (REFERENCE)
+----------------------------------
+
+Language: bash / curl
+
+bash curl -o xy1-1.webp https://images.scrydex.com/cards/xy1-1/large

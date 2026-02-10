@@ -1,0 +1,93 @@
++----------------------------------------------------------------------------------+
+|                               UNDERSTANDING API CREDITS                          |
++----------------------------------------------------------------------------------+
+
+OVERVIEW
+--------
+API credits are consumed when making requests to the Scrydex API.
+
+Most requests cost 1 credit unless otherwise specified.
+
+
+CREDIT COSTS BY REQUEST TYPE
+----------------------------
+
++--------------------------------------------+------------------+
+| REQUEST TYPE                               | CREDITS CONSUMED |
++--------------------------------------------+------------------+
+| General Request (/cards, /expansions, etc) | 1 Credit         |
+| Price History (/cards/ID/price_history)    | 3 Credits        |
+| Image Analysis (coming soon)               | TBD              |
++--------------------------------------------+------------------+
+
+
+WHAT HAPPENS WHEN YOU RUN OUT OF CREDITS?
+-----------------------------------------
+
+When your included monthly credits are fully consumed, you enter Overage Credit usage.
+
++-------------------------+------------------------------------------------+
+| CATEGORY                | DETAILS                                        |
++-------------------------+------------------------------------------------+
+| Uninterrupted Access    | API access continues normally.                 |
+|                         | Additional requests consume overage credits.   |
++-------------------------+------------------------------------------------+
+| Overage Credit Cost     | Cost per credit depends on your plan.          |
++-------------------------+------------------------------------------------+
+| Overage Billing         | Charged at the start of the next billing cycle.|
++-------------------------+------------------------------------------------+
+
+
+MONTHLY BILLING CYCLE LOGIC
+---------------------------
+
+At the start of each new billing month you will pay:
+
++-------------------------------------------+
+| BILLING COMPONENT                         |
++-------------------------------------------+
+| Your plan’s monthly subscription fee      |
+| Overage credits used in previous month    |
++-------------------------------------------+
+
+
+OVERAGE USAGE EXAMPLE
+---------------------
+
+Plan Allowance:
+- 5,000 credits per month
+
+After allowance is used:
+
++--------------------------------------+------------------+
+| ADDITIONAL REQUESTS                  | OVERAGE CREDITS  |
++--------------------------------------+------------------+
+| 50 General Requests (1 credit each)  | 50 Credits       |
+| 10 Price History Requests (3 each)   | 30 Credits       |
++--------------------------------------+------------------+
+
+Total Overage Used = 80 Credits
+
+Next Billing Cycle Charges:
+
++--------------------------------------+
+| CHARGE TYPE                          |
++--------------------------------------+
+| Monthly Plan Fee                     |
+| 80 Overage Credits (plan rate)       |
++--------------------------------------+
+
+
+CHECKING API USAGE
+------------------
+
+You can check current usage with the following request:
+
+EXAMPLE REQUEST
+---------------
+
+Language: curl
+
+curl -X GET "https://api.scrydex.com/account/v1/usage" \
+  -H "X-API-Key: YOUR_API_KEY" \
+  -H "X-Team-ID: YOUR_TEAM_ID"

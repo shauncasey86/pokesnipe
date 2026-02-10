@@ -1,0 +1,68 @@
++----------------------------------------------------------------------------------+
+|                                   AUTHENTICATION                                 |
++----------------------------------------------------------------------------------+
+
+OVERVIEW
+--------
+Authentication is required to access the Scrydex API.
+
+Follow these steps to get started:
+
++---------+----------------------+------------------------------------------------+
+| STEP    | ACTION               | DESCRIPTION                                    |
++---------+----------------------+------------------------------------------------+
+| Step 1  | Create an Account    | Register at: https://scrydex.com/register      |
+|         |                      | Subscribe to one of the available plans.       |
++---------+----------------------+------------------------------------------------+
+| Step 2  | Create a Team        | A team is a group of users sharing one API key |
+|         |                      | Create teams in the Scrydex Account Hub.       |
+|         |                      | Team IDs are unique. Required for all requests.|
+|         |                      | Even solo users must create a team.            |
++---------+----------------------+------------------------------------------------+
+| Step 3  | Generate API Key     | Generated from dashboard after plan purchase.  |
+|         |                      | Determines credit limits and overage charges.  |
++---------+----------------------+------------------------------------------------+
+| Step 4  | Secure Your API Key  | Never expose publicly (GitHub, frontend code). |
+|         |                      | Rotate immediately if compromised.             |
++---------+----------------------+------------------------------------------------+
+
+
+REQUIRED FOR API ACCESS
+-----------------------
++----------------------+
+| REQUIRED ITEM        |
++----------------------+
+| Scrydex Team ID      |
+| Scrydex API Key      |
+| Scrydex Plan         |
++----------------------+
+
+
+MAKING AUTHENTICATED REQUESTS
+-----------------------------
+Include BOTH headers in every request:
+
++--------------+-----------------------------+
+| HEADER       | PURPOSE                     |
++--------------+-----------------------------+
+| X-Api-Key    | Your API authentication key |
+| X-Team-ID    | Your team identifier        |
++--------------+-----------------------------+
+
+SECURITY REQUIREMENTS
+---------------------
++----------------------+------------------------------------------------+
+| RULE                 | DETAILS                                        |
++----------------------+------------------------------------------------+
+| HTTPS Required       | HTTP requests will fail or auto-redirect.      |
+| Missing Auth Headers | Request allowed but heavily rate-limited.      |
++----------------------+------------------------------------------------+
+
+
+EXAMPLE REQUEST
+---------------
+Language: curl
+
+curl -X GET "https://api.scrydex.com/pokemon/v1/cards" \
+  -H "X-Api-Key: YOUR_API_KEY" \
+  -H "X-Team-ID: YOUR_TEAM_ID"

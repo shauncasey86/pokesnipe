@@ -1,0 +1,224 @@
++----------------------------------------------------------------------------------+
+|                                   PRICING DATA                                   |
++----------------------------------------------------------------------------------+
+
+OVERVIEW
+--------
+The Scrydex API provides detailed trading card pricing data including:
+- Raw card pricing
+- Graded card pricing
+- Historical trends
+- Multi-currency market pricing
+
+To include pricing data in responses, use:
+?include=prices
+
+Example:
+GET /pokemon/v1/cards?include=prices
+
+
+PRICING SUPPORT BY CARD GAME
+----------------------------
+
++----------------------+--------------+----------------+
+| CARD GAME            | RAW PRICES   | GRADED PRICES  |
++----------------------+--------------+----------------+
+| Pokémon              | Supported    | Supported      |
+| Lorcana              | Supported    | Supported      |
+| Magic: The Gathering | Supported    | Coming Soon    |
+| Gundam               | Supported    | Coming Soon    |
+| One Piece            | Supported    | Coming Soon    |
+| Riftbound            | Supported    | Coming Soon    |
++----------------------+--------------+----------------+
+
+Note: Graded pricing support is expanding across all games.
+
+
+GENERAL PRICING INFORMATION
+---------------------------
+
+CURRENCY SUPPORT
+
++----------+----------------------------------+
+| CURRENCY | MARKET                           |
++----------+----------------------------------+
+| USD      | United States market pricing     |
+| JPY      | Japanese market pricing          |
++----------+----------------------------------+
+
+Notes:
+- Japanese cards often priced in JPY.
+- Euro pricing support planned for future.
+
+
+PRICING METRICS
+---------------
+
++----------------+----------------------------------------------+
+| METRIC         | DESCRIPTION                                  |
++----------------+----------------------------------------------+
+| low            | Lowest recorded price                        |
+| market         | Average market price                         |
+| currency       | Currency used (USD, JPY, etc)               |
++----------------+----------------------------------------------+
+
+
+TREND PERIODS
+-------------
+
++-----------+
+| PERIOD    |
++-----------+
+| 1 Day     |
+| 7 Days    |
+| 14 Days   |
+| 30 Days   |
+| 90 Days   |
+| 180 Days  |
++-----------+
+
+TREND METRICS
+
++----------------+----------------------------------------------+
+| FIELD          | DESCRIPTION                                  |
++----------------+----------------------------------------------+
+| price_change   | Absolute price change                        |
+| percent_change | Percentage change from starting price        |
++----------------+----------------------------------------------+
+
+
+
++----------------------------------------------------------------------------------+
+|                                   RAW PRICING                                    |
++----------------------------------------------------------------------------------+
+
+Raw pricing reflects physical card condition value.
+
+CONDITIONS
+
++------+----------------------+
+| CODE | CONDITION            |
++------+----------------------+
+| NM   | Near Mint            |
+| LP   | Lightly Played       |
+| MP   | Moderately Played    |
+| HP   | Heavily Played       |
+| DM   | Damaged              |
++------+----------------------+
+
+
+RAW PRICE FIELDS
+
++--------------+----------------------------------------------+
+| FIELD        | DESCRIPTION                                  |
++--------------+----------------------------------------------+
+| condition    | Card condition code                          |
+| is_perfect   | Always false for raw cards                   |
+| is_signed    | Always false for raw cards                   |
+| is_error     | Always false for raw cards                   |
+| type         | Always "raw"                                 |
+| low          | Lowest known price                           |
+| market       | Average market price                         |
+| currency     | Price currency                               |
+| trends       | Historical trend data                        |
++--------------+----------------------------------------------+
+
+
+SAMPLE RAW PRICE OBJECT
+-----------------------
+
+{
+  "condition": "NM",
+  "is_perfect": false,
+  "is_signed": false,
+  "is_error": false,
+  "type": "raw",
+  "low": 868.0,
+  "market": 915.43,
+  "currency": "USD",
+  "trends": {
+    "days_1": { "price_change": 0.0, "percent_change": 0.0 },
+    "days_7": { "price_change": -16.59, "percent_change": -1.78 },
+    "days_14": { "price_change": -44.32, "percent_change": -4.62 },
+    "days_30": { "price_change": -95.64, "percent_change": -9.46 },
+    "days_90": { "price_change": -365.6, "percent_change": -28.54 },
+    "days_180": { "price_change": -646.65, "percent_change": -41.4 }
+  }
+}
+
+
+
++----------------------------------------------------------------------------------+
+|                                  GRADED PRICING                                  |
++----------------------------------------------------------------------------------+
+
+SUPPORTED GRADING COMPANIES
+
+- PSA (Professional Sports Authenticator)
+- CGC (Certified Guaranty Company)
+- BGS (Beckett Grading Services)
+- TAG, SGC, others (when available per card)
+
+
+GRADED PRICING METRICS
+
++--------------+----------------------------------------------+
+| FIELD        | DESCRIPTION                                  |
++--------------+----------------------------------------------+
+| low          | Lowest recorded price                        |
+| mid          | Median recorded price                        |
+| high         | Highest recorded price                       |
+| market       | Average market price                         |
+| currency     | Price currency                               |
++--------------+----------------------------------------------+
+
+
+GRADED-SPECIFIC FIELDS
+
++--------------+----------------------------------------------+
+| FIELD        | DESCRIPTION                                  |
++--------------+----------------------------------------------+
+| grade        | Numeric grade (ex: 10, 9.5, 9)               |
+| company      | Grading company name                         |
+| is_perfect   | Perfect/pristine designation flag            |
+| is_signed    | Autograph indicator                          |
+| is_error     | Error card indicator                         |
+| type         | Always "graded"                              |
++--------------+----------------------------------------------+
+
+
+SAMPLE GRADED PRICE OBJECT
+--------------------------
+
+{
+  "grade": "10",
+  "company": "PSA",
+  "is_perfect": false,
+  "is_signed": false,
+  "is_error": false,
+  "type": "graded",
+  "low": 2350.0,
+  "mid": 2566.0,
+  "high": 2650.0,
+  "market": 2567.88,
+  "currency": "USD",
+  "trends": {
+    "days_1": { "price_change": 111.75, "percent_change": 4.55 },
+    "days_7": { "price_change": 111.75, "percent_change": 4.55 },
+    "days_14": { "price_change": -11.3, "percent_change": -0.44 },
+    "days_30": { "price_change": -10.93, "percent_change": -0.42 },
+    "days_90": { "price_change": -153.12, "percent_change": -5.63 },
+    "days_180": { "price_change": -1658.19, "percent_change": -39.24 }
+  }
+}
+
+
+
+EXAMPLE REQUEST
+---------------
+
+Language: curl
+
+curl -X GET "https://api.scrydex.com/pokemon/v1/cards?include=prices" \
+  -H "X-Api-Key: YOUR_API_KEY" \
+  -H "X-Team-ID: YOUR_TEAM_ID"

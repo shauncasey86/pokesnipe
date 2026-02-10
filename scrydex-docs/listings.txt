@@ -1,0 +1,138 @@
++----------------------------------------------------------------------------------+
+|                                     LISTINGS                                     |
++----------------------------------------------------------------------------------+
+
+THE LISTING OBJECT
+------------------
+Each field available on a Pokémon listing is described below with its field name and
+corresponding data type.
+
++------------+----------+--------------------------------------------------------------+
+| FIELD      | TYPE     | DESCRIPTION                                                  |
++------------+----------+--------------------------------------------------------------+
+| id         | string   | Unique identifier for the listing.                           |
+| source     | string   | Listing source (e.g., "ebay").                                |
+| card_id    | string   | Card ID associated with the listing.                          |
+| title      | string   | Listing title as shown on the source.                         |
+| variant    | string   | Card variant (e.g., "holofoil").                              |
+| company    | string   | Grading company (e.g., "PSA"), if applicable.                 |
+| grade      | string   | Assigned grade, if applicable.                                |
+| is_perfect | boolean  | True if flawless/perfect condition.                           |
+| is_error   | boolean  | True if recognized error card.                                |
+| is_signed  | boolean  | True if autographed.                                          |
+| url        | string   | Source URL of the original listing.                           |
+| price      | number   | Sold price.                                                   |
+| currency   | string   | Price currency (e.g., "USD").                                 |
+| sold_at    | string   | Sold date (YYYY/MM/DD).                                       |
++------------+----------+--------------------------------------------------------------+
+
+
+
++----------------------------------------------------------------------------------+
+|                           EXAMPLE LISTING OBJECT (JSON)                          |
++----------------------------------------------------------------------------------+
+
+{
+  "id": "6d690f4c-e467-432a-9735-2ecc493ba012",
+  "source": "ebay",
+  "card_id": "zsv10pt5-105",
+  "title": "2025 Pokemon Blk En-Black Bolt Illustration Rare Seismitoad #105 PSA 10",
+  "variant": "holofoil",
+  "company": "PSA",
+  "grade": "10",
+  "is_perfect": false,
+  "is_error": false,
+  "is_signed": false,
+  "url": "https://www.ebay.com/itm/306453556017?nordt=true&rt=nc&orig_cvip=true",
+  "price": 2399.0,
+  "currency": "USD",
+  "sold_at": "2025/08/19"
+}
+
+
+
++----------------------------------------------------------------------------------+
+|                                  ENDPOINTS                                       |
++----------------------------------------------------------------------------------+
+
+GET A LISTING
+-------------
+Retrieves a specific Pokémon listing by its unique identifier.
+
+URL
+---
+GET https://api.scrydex.com/pokemon/v1/listings/<id>
+
+URL PARAMETERS
+--------------
++------+--------+------------------------------------------+
+| NAME | TYPE   | DESCRIPTION                              |
++------+--------+------------------------------------------+
+| id   | string | Required. Listing unique identifier.     |
++------+--------+------------------------------------------+
+
+QUERY PARAMETERS (OPTIONAL)
+---------------------------
++----------+------------------------+------------------------------------------+
+| NAME     | TYPE                   | DESCRIPTION                              |
++----------+------------------------+------------------------------------------+
+| select   | comma-separated string | Fields to return in the response.        |
++----------+------------------------+------------------------------------------+
+
+
+EXAMPLE REQUEST (GET A LISTING)
+-------------------------------
+Language: curl
+
+curl -X GET "https://api.scrydex.com/pokemon/v1/listings/6d690f4c-e467-432a-9735-2ecc493ba012" \
+  -H "X-Api-Key: YOUR_API_KEY" \
+  -H "X-Team-ID: YOUR_TEAM_ID"
+
+
+
+SEARCH LISTINGS (FOR A CARD)
+----------------------------
+Retrieve sold listings for a specific Pokémon card. Useful for historical sold
+prices and market trends.
+
+URL
+---
+GET https://api.scrydex.com/pokemon/v1/cards/<id>/listings
+
+URL PARAMETERS
+--------------
++------+--------+------------------------------------------------------+
+| NAME | TYPE   | DESCRIPTION                                          |
++------+--------+------------------------------------------------------+
+| id   | string | Required. Card ID to retrieve listings for.          |
+|      |        | Example: zsv10pt5-105                                |
++------+--------+------------------------------------------------------+
+
+QUERY PARAMETERS (OPTIONAL)
+---------------------------
++------------+------------------------+-----------------------------------------------+
+| PARAM      | TYPE                   | DESCRIPTION                                   |
++------------+------------------------+-----------------------------------------------+
+| days       | integer                | Listings sold within the last N days.         |
+| source     | string                 | Filter by source (e.g., ebay).                |
+| variant    | string                 | Filter by variant (e.g., holofoil).           |
+| grade      | string                 | Filter by grade.                              |
+| company    | string                 | Filter by grading company (e.g., PSA).        |
+| condition  | string                 | Filter by condition.                          |
+| is_perfect | boolean                | Filter flawless cards (true/false).           |
+| is_error   | boolean                | Filter error cards (true/false).              |
+| is_signed  | boolean                | Filter autographed cards (true/false).        |
+| page       | integer                | Page number.                                  |
+| page_size  | integer                | Max results per page.                         |
+| select     | comma-separated string | Fields to return in the response.             |
+| include    | comma-separated string | Include additional data (if supported).       |
++------------+------------------------+-----------------------------------------------+
+
+
+EXAMPLE REQUEST (LISTINGS FOR A CARD)
+-------------------------------------
+Language: curl
+
+curl -X GET "https://api.scrydex.com/pokemon/v1/cards/zsv10pt5-105/listings?page=1&page_size=10" \
+  -H "X-Api-Key: YOUR_API_KEY" \
+  -H "X-Team-ID: YOUR_TEAM_ID"
