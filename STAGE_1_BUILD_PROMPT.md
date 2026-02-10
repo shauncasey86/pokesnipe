@@ -1,6 +1,26 @@
 # Stage 1 Build Prompt — Foundation
 
 > Paste this entire prompt into a fresh Claude Code session to build Stage 1.
+> **Before pasting:** Fill in your real credentials in the "Your Credentials" section below.
+
+---
+
+## Your Credentials
+
+**Fill these in with your real values before pasting this prompt:**
+
+```
+DATABASE_URL=<your Railway PostgreSQL URL>
+ACCESS_PASSWORD=<your dashboard password, 8+ chars>
+SESSION_SECRET=<random 32+ char string for session signing>
+SCRYDEX_API_KEY=<your Scrydex API key>
+SCRYDEX_TEAM_ID=<your Scrydex team ID>
+EBAY_CLIENT_ID=<your eBay OAuth app ID>
+EBAY_CLIENT_SECRET=<your eBay OAuth secret>
+EXCHANGE_RATE_API_KEY=<your exchange rate API key>
+TELEGRAM_BOT_TOKEN=<optional — your Telegram bot token>
+TELEGRAM_CHAT_ID=<optional — your Telegram chat ID>
+```
 
 ---
 
@@ -10,7 +30,7 @@
 
 This is **Stage 1 of 13**. You are building the foundation: project scaffolding, database migrations, config validation, health endpoint, and boot sequence. Nothing connects to external APIs yet — just the skeleton.
 
-**Development workflow:** Code is written in Claude Code → pushed to GitHub → auto-deployed to Railway. There is no local dev environment beyond the Railway-provided PostgreSQL.
+**How this works:** You (Claude) are building the entire project. Write the code, create the `.env` with the credentials provided above, run `npm run dev` to verify it works, then commit and push to GitHub. Railway auto-deploys from GitHub.
 
 ---
 
@@ -18,11 +38,11 @@ This is **Stage 1 of 13**. You are building the foundation: project scaffolding,
 
 - **Runtime:** Node.js 20, TypeScript
 - **Framework:** Express
-- **Database:** PostgreSQL 16 (Railway-hosted)
+- **Database:** PostgreSQL 16 (Railway-hosted, connection string provided above)
 - **Migrations:** node-pg-migrate
 - **Config:** Zod (validate env vars at startup)
 - **Logging:** Pino + pino-pretty
-- **Testing:** Vitest (pure function tests only) + live curl/psql verification
+- **Testing:** Vitest (pure function tests only) + live verification
 
 ---
 
@@ -423,69 +443,64 @@ Wrap everything in a try/catch. If any step fails, log the error and `process.ex
 
 ## Step 11: Create `.env` file (gitignored)
 
+Use the exact credentials provided in the "Your Credentials" section at the top of this prompt. Write them into `.env`:
+
 ```
-DATABASE_URL=postgresql://...          # Your Railway PostgreSQL URL
-ACCESS_PASSWORD=changeme123            # Any 8+ char password
-SESSION_SECRET=change-this-to-a-real-32-char-secret!!
-SCRYDEX_API_KEY=your-key
-SCRYDEX_TEAM_ID=your-team
-EBAY_CLIENT_ID=your-client-id
-EBAY_CLIENT_SECRET=your-secret
-EXCHANGE_RATE_API_KEY=your-key
+DATABASE_URL=<value from above>
+ACCESS_PASSWORD=<value from above>
+SESSION_SECRET=<value from above>
+SCRYDEX_API_KEY=<value from above>
+SCRYDEX_TEAM_ID=<value from above>
+EBAY_CLIENT_ID=<value from above>
+EBAY_CLIENT_SECRET=<value from above>
+EXCHANGE_RATE_API_KEY=<value from above>
+TELEGRAM_BOT_TOKEN=<value from above, if provided>
+TELEGRAM_CHAT_ID=<value from above, if provided>
 ```
 
 ---
 
-## How to verify (all live, no mocks)
+## Verification — do all of this yourself after building
 
-After everything is built, run these checks:
+After writing all the code, verify everything works by running these checks yourself:
 
-1. **Start the server:**
+1. **Start the server** in the background and verify it boots cleanly:
    ```bash
    npm run dev
    ```
-   ✅ Should see "Server ready on port 3000" in the terminal. No errors.
+   ✅ Should see "Server ready on port 3000" in logs. No errors.
 
-2. **Test missing env vars:** Temporarily remove `DATABASE_URL` from `.env`, restart. ✅ Should see a clear Zod error like `"DATABASE_URL: Required"` and the process should exit with code 1. Restore the var after.
-
-3. **Test health endpoint:**
+2. **Test health endpoint:**
    ```bash
    curl http://localhost:3000/healthz
    ```
    ✅ Should return `{"status":"ok","timestamp":"..."}` with HTTP 200.
 
-4. **Verify migrations ran — check all tables exist:**
+3. **Verify all tables exist** by querying the Railway database directly:
    ```bash
    psql $DATABASE_URL -c "\dt"
    ```
    ✅ Should list: `expansions`, `cards`, `variants`, `deals`, `sales_velocity_cache`, `exchange_rates`, `preferences`, `api_credentials`, `sync_log`, `pgmigrations`.
 
-5. **Verify migrations are idempotent — run them again:**
+4. **Spot-check table schemas:**
    ```bash
-   npm run migrate
-   ```
-   ✅ Should complete with no errors and no changes.
-
-6. **Spot-check table schemas:**
-   ```bash
-   psql $DATABASE_URL -c "\d expansions"
-   psql $DATABASE_URL -c "\d cards"
-   psql $DATABASE_URL -c "\d variants"
    psql $DATABASE_URL -c "\d deals"
    ```
-   ✅ Columns, types, constraints, and indexes should match the migration SQL exactly.
+   ✅ Columns, types, constraints, and indexes should match the migration SQL.
 
-7. **Verify pg_trgm extension:**
+5. **Verify pg_trgm extension:**
    ```bash
    psql $DATABASE_URL -c "SELECT 'charizard' % 'charzard';"
    ```
    ✅ Should return `t` (true).
 
-8. **Test DB connection resilience:** Stop PostgreSQL, hit the health endpoint:
+6. **TypeScript compiles cleanly:**
    ```bash
-   curl http://localhost:3000/healthz
+   npx tsc --noEmit
    ```
-   ✅ Should return HTTP 503 with `{"status":"error"}`. The server itself should NOT crash.
+   ✅ No type errors.
+
+If any check fails, fix the issue before moving on. Once everything passes, commit and push.
 
 ---
 
