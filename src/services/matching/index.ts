@@ -87,6 +87,10 @@ export async function matchListing(
     if (listing.cardName) {
       nameScore = validateName(listing.cardName, candidate.name);
       if (nameScore < NAME_HARD_GATE) continue; // hard gate — skip this candidate
+    } else if (candidates.length > 1) {
+      // Multiple candidates with no name to differentiate — penalize confidence
+      // to prevent wrong-set matches (e.g. 83/78 matching Candela instead of Genesect)
+      nameScore = 0.30;
     }
 
     // Expansion validation

@@ -50,6 +50,40 @@ describe('detectJunk', () => {
     it('detects code cards', () => {
       expect(detectJunk('online code card ptcgo')).toEqual({ isJunk: true, reason: 'non_card' });
     });
+
+    it('detects playing cards', () => {
+      expect(detectJunk('pokemon all star kyogre 9 of hearts playing card 2017')).toEqual({ isJunk: true, reason: 'non_card' });
+    });
+
+    it('detects poker cards', () => {
+      expect(detectJunk('pokemon poker card deck pikachu')).toEqual({ isJunk: true, reason: 'non_card' });
+    });
+
+    it('detects topps products', () => {
+      expect(detectJunk('pokemon topps chrome charizard')).toEqual({ isJunk: true, reason: 'non_card' });
+    });
+
+    it('detects coins', () => {
+      expect(detectJunk('pikachu coin gold metal pokemon')).toEqual({ isJunk: true, reason: 'non_card' });
+    });
+  });
+
+  describe('non_english detection (language words)', () => {
+    it('detects japanese cards by word', () => {
+      expect(detectJunk('pokemon japanese chansey my deck memo card 1997')).toEqual({ isJunk: true, reason: 'non_english' });
+    });
+
+    it('detects korean cards by word', () => {
+      expect(detectJunk('pokemon card genesect ex 083/078 sr 1st edition korean')).toEqual({ isJunk: true, reason: 'non_english' });
+    });
+
+    it('detects chinese cards by word', () => {
+      expect(detectJunk('charizard ex chinese s-chinese pokemon card')).toEqual({ isJunk: true, reason: 'non_english' });
+    });
+
+    it('detects thai cards by word', () => {
+      expect(detectJunk('pikachu vmax thai pokemon card')).toEqual({ isJunk: true, reason: 'non_english' });
+    });
   });
 
   describe('real cards pass through', () => {

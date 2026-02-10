@@ -57,4 +57,34 @@ describe('detectVariant', () => {
   it('prioritizes reverse holo over holo', () => {
     expect(detectVariant('reverse holo charizard holo rare')).toBe('reverseHolofoil');
   });
+
+  // Modern rarity abbreviations
+  it('detects SIR (special illustration rare)', () => {
+    expect(detectVariant('revavroom ex 224/197 obsidian flames sir')).toBe('special illustration rare');
+  });
+
+  it('detects SAR (special art rare)', () => {
+    expect(detectVariant('charizard ex 199/165 sar 151')).toBe('special art rare');
+  });
+
+  it('detects CHR (character rare)', () => {
+    expect(detectVariant('pikachu chr vmax climax')).toBe('character rare');
+  });
+
+  it('detects TG (trainer gallery)', () => {
+    expect(detectVariant('glaceon vmax tg23/tg30 astral radiance')).toBe('trainer gallery');
+  });
+
+  it('detects full text "illustration rare"', () => {
+    expect(detectVariant('espeon ex illustration rare 155/131')).toBe('illustration rare');
+  });
+
+  it('detects full text "art rare"', () => {
+    expect(detectVariant('pikachu art rare 172/165 sv2a')).toBe('art rare');
+  });
+
+  it('does not false-positive SIR inside other words', () => {
+    // "desire" contains "sir" but word boundary prevents match
+    expect(detectVariant('desire pikachu card 001/100')).toBeNull();
+  });
 });
