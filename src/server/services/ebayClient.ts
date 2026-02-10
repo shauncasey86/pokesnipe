@@ -24,6 +24,20 @@ const apiClient = axios.create({
 const limiter = new TokenBucket(5, 1);
 let cachedToken: { accessToken: string; expiresAt: number } | null = null;
 
+// Track real rate-limit headers from eBay API responses
+export let ebayRateLimit: { used: number; limit: number; remaining: number; reset: string | null } = {
+  used: 0, limit: 5000, remaining: 5000, reset: null
+};
+
+const captureRateHeaders = (headers: Record<string, any>) => {
+  const limit = Number(headers["x-ebay-c-ratelimit-limit"] ?? headers["x-ratelimit-limit"]);
+  const remaining = Number(headers["x-ebay-c-ratelimit-remaining"] ?? headers["x-ratelimit-remaining"]);
+  const reset = headers["x-ebay-c-ratelimit-reset"] ?? headers["x-ratelimit-reset"] ?? null;
+  if (!isNaN(limit) && !isNaN(remaining)) {
+    ebayRateLimit = { used: limit - remaining, limit, remaining, reset };
+  }
+};
+
 const getAccessToken = async () => {
   if (cachedToken && Date.now() < cachedToken.expiresAt - 60_000) {
     return cachedToken.accessToken;
@@ -57,10 +71,12 @@ export const getItem = async (itemId: string): Promise<EbayListing> => {
   trackApiCall("ebay").catch(() => {});
   const token = await getAccessToken();
   // Use legacy_item_id endpoint since eBay URLs contain numeric legacy IDs
-  const { data } = await apiClient.get("/item/get_item_by_legacy_id", {
+  const resp = await apiClient.get("/item/get_item_by_legacy_id", {
     headers: { Authorization: `Bearer ${token}` },
     params: { legacy_item_id: itemId }
   });
+  captureRateHeaders(resp.headers);
+  const data = resp.data;
   const specifics: Record<string, string> = {};
   for (const aspect of data.localizedAspects ?? []) {
     if (aspect.name && aspect.value) specifics[aspect.name] = aspect.value;
@@ -84,10 +100,12 @@ export const searchItems = async (query: string, limit = 50, categoryId?: string
   const params: Record<string, string | number> = { q: query, limit };
   // 183454 = CCG Individual Cards (filters out lots, bundles, sealed products)
   if (categoryId) params.category_ids = categoryId;
-  const { data } = await apiClient.get("/item_summary/search", {
+  const resp = await apiClient.get("/item_summary/search", {
     headers: { Authorization: `Bearer ${token}` },
     params
   });
+  captureRateHeaders(resp.headers);
+  const data = resp.data;
   return (data.itemSummaries ?? []).map((item: any) => ({
     itemId: item.itemId,
     title: item.title,
