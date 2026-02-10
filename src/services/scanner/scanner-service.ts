@@ -18,6 +18,9 @@ import { matchListing } from '../matching/index.js';
 import { calculateProfit } from '../pricing/pricing-engine.js';
 import { getValidRate } from '../exchange-rate/exchange-rate-service.js';
 
+// Stage 9 — Liquidity engine
+import { calculateLiquidity, getVelocity, adjustTierForLiquidity } from '../liquidity/index.js';
+
 const log = pino({ name: 'scanner' });
 
 type Condition = 'NM' | 'LP' | 'MP' | 'HP';
@@ -134,6 +137,9 @@ export async function runScanCycle(): Promise<ScanResult> {
 
   log.info({ count: listings.itemSummaries.length }, 'Processing listings from eBay');
 
+  // Track concurrent supply: how many listings match the same card in this batch
+  const cardSupplyMap = new Map<string, number>();
+
   // Step 3: Process each listing
   for (const listing of listings.itemSummaries) {
     stats.listingsProcessed++;
@@ -160,6 +166,10 @@ export async function runScanCycle(): Promise<ScanResult> {
         stats.skippedNoMatch++;
         continue;
       }
+
+      // Track concurrent supply for liquidity scoring
+      const matchedCardId = match.card.scrydexCardId;
+      cardSupplyMap.set(matchedCardId, (cardSupplyMap.get(matchedCardId) || 0) + 1);
 
       // 3d. Quick profit estimate (title-parsed condition or default LP)
       const ebayPriceGBP = parseFloat(listing.price?.value || '0');
@@ -262,12 +272,42 @@ export async function runScanCycle(): Promise<ScanResult> {
       // Confidence gate: spec requires >= 0.65 to create a deal
       if (enrichedMatch.confidence.composite < 0.65) continue;
 
-      // 3g. Classify tier and create deal
-      const tier = classifyTier(
+      // 3g. Classify base tier
+      const baseTier = classifyTier(
         realProfit.profitPercent,
         enrichedMatch.confidence.composite,
-        'unknown', // liquidity — placeholder until Stage 9
+        'unknown',
       );
+
+      // 3h. Calculate liquidity (Tier 1 + 2 — always free)
+      const concurrentSupply = cardSupplyMap.get(enrichedMatch.card.scrydexCardId) || 0;
+      const quantitySold = enriched.quantitySold || listing.quantitySold || 0;
+
+      let liquidity = calculateLiquidity(
+        enrichedMatch.variant,
+        realCondition,
+        { concurrentSupply, quantitySold },
+        null, // velocity data — fetched conditionally below
+      );
+
+      // For high-profit deals (>40%), auto-fetch Tier 3 velocity (3 Scrydex credits)
+      let velocityData = null;
+      if (realProfit.profitPercent > 40) {
+        velocityData = await getVelocity(
+          enrichedMatch.card.scrydexCardId,
+          enrichedMatch.variant.name || 'default',
+        );
+        // Recalculate liquidity with velocity data
+        liquidity = calculateLiquidity(
+          enrichedMatch.variant,
+          realCondition,
+          { concurrentSupply, quantitySold },
+          velocityData,
+        );
+      }
+
+      // Apply tier adjustment based on liquidity
+      const tier = adjustTierForLiquidity(baseTier, liquidity.grade);
 
       const confidenceTier =
         enrichedMatch.confidence.composite >= 0.85
@@ -310,8 +350,16 @@ export async function runScanCycle(): Promise<ScanResult> {
           phaseOneProfit: quickProfit,
           phaseTwoProfit: realProfit,
           enrichmentUsed: true,
+          liquidity: {
+            composite: liquidity.composite,
+            grade: liquidity.grade,
+            signals: liquidity.signals,
+            velocityFetched: velocityData?.fetched || false,
+          },
         },
         conditionComps: buildConditionComps(enrichedMatch.variant.prices, exchangeRate),
+        liquidityScore: liquidity.composite,
+        liquidityGrade: liquidity.grade,
       });
 
       if (deal) {
@@ -322,6 +370,8 @@ export async function runScanCycle(): Promise<ScanResult> {
             tier,
             profit: deal.profitGBP,
             confidence: enrichedMatch.confidence.composite,
+            liquidityGrade: liquidity.grade,
+            liquidityScore: liquidity.composite,
           },
           'New deal found',
         );

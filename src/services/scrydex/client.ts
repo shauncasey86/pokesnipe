@@ -154,6 +154,28 @@ async function scrydexFetch<T>(url: string, retries = 3): Promise<T> {
 
 // --- Public client methods ---
 
+const API_BASE = 'https://api.scrydex.com';
+
+/**
+ * Generic GET request to any Scrydex API endpoint.
+ * Used by tier3-velocity for /pokemon/v1/cards/{id}/listings.
+ *
+ * @param path - API path (e.g. "/pokemon/v1/cards/zsv10pt5-105/listings")
+ * @param params - Query parameters to append
+ */
+export async function scrydexGet<T = any>(
+  path: string,
+  params?: Record<string, string | number>,
+): Promise<T> {
+  const url = new URL(path, API_BASE);
+  if (params) {
+    for (const [key, val] of Object.entries(params)) {
+      url.searchParams.set(key, String(val));
+    }
+  }
+  return limiter.schedule(() => scrydexFetch<T>(url.toString()));
+}
+
 export async function getExpansions(page = 1): Promise<ExpansionResponse> {
   return limiter.schedule(() =>
     scrydexFetch<ExpansionResponse>(

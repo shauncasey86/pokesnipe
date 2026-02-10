@@ -38,6 +38,9 @@ export interface DealInput {
   matchSignals: Record<string, unknown>;
   // Condition comps snapshot (all conditions, not just matched)
   conditionComps?: Record<string, unknown>;
+  // Liquidity assessment (Stage 9)
+  liquidityScore?: number;
+  liquidityGrade?: string;
 }
 
 export interface Deal {
@@ -66,7 +69,8 @@ export async function createDeal(data: DealInput): Promise<Deal | null> {
         confidence, confidence_tier, condition, condition_source,
         is_graded, grading_company, grade,
         match_signals, condition_comps,
-        ebay_image_url, ebay_url, seller_name, seller_feedback, listed_at
+        ebay_image_url, ebay_url, seller_name, seller_feedback, listed_at,
+        liquidity_score, liquidity_grade
       ) VALUES (
         $1, $2, $3, $4,
         $5, $6, $7, $8,
@@ -75,7 +79,8 @@ export async function createDeal(data: DealInput): Promise<Deal | null> {
         $15, $16, $17, $18,
         $19, $20, $21,
         $22, $23,
-        $24, $25, $26, $27, $28
+        $24, $25, $26, $27, $28,
+        $29, $30
       ) RETURNING deal_id, event_id, ebay_item_id, tier, profit_gbp, profit_percent, created_at`,
       [
         data.ebayItemId, data.ebayTitle, data.cardId, data.variantId,
@@ -86,6 +91,7 @@ export async function createDeal(data: DealInput): Promise<Deal | null> {
         data.isGraded, data.gradingCompany || null, data.grade || null,
         JSON.stringify(data.matchSignals), data.conditionComps ? JSON.stringify(data.conditionComps) : null,
         data.ebayImageUrl || null, data.ebayUrl, data.sellerName || null, data.sellerFeedback || null, data.listedAt || null,
+        data.liquidityScore || null, data.liquidityGrade || null,
       ],
     );
 
