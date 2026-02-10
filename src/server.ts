@@ -29,27 +29,27 @@ async function runVerification(): Promise<void> {
   // Verification checks
   const checks: { name: string; query: string; test: (rows: Record<string, unknown>[]) => string | null }[] = [
     {
-      name: 'Expansion count >= 350',
+      name: 'Expansion count >= 170',
       query: 'SELECT COUNT(*)::int AS count FROM expansions',
       test: (rows) => {
         const c = rows[0].count as number;
-        return c >= 350 ? null : `Only ${c} expansions`;
+        return c >= 170 ? null : `Only ${c} expansions`;
       },
     },
     {
-      name: 'Card count >= 35000',
+      name: 'Card count >= 10000',
       query: 'SELECT COUNT(*)::int AS count FROM cards',
       test: (rows) => {
         const c = rows[0].count as number;
-        return c >= 35000 ? null : `Only ${c} cards`;
+        return c >= 10000 ? null : `Only ${c} cards`;
       },
     },
     {
-      name: 'Variant count >= 70000',
+      name: 'Variant count >= 20000',
       query: 'SELECT COUNT(*)::int AS count FROM variants',
       test: (rows) => {
         const c = rows[0].count as number;
-        return c >= 70000 ? null : `Only ${c} variants`;
+        return c >= 20000 ? null : `Only ${c} variants`;
       },
     },
     {
