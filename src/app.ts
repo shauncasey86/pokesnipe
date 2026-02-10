@@ -7,6 +7,7 @@ import pino from 'pino';
 import healthRouter from './routes/health.js';
 import { catalogRouter } from './routes/catalog.js';
 import { debugEbayRouter } from './routes/debug-ebay.js';
+import { debugExtractRouter } from './routes/debug-extract.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const logger = pino({ name: 'http' });
@@ -28,6 +29,7 @@ app.use((req, _res, next) => {
 app.use(healthRouter);
 app.use('/api/catalog', catalogRouter);
 app.use(debugEbayRouter);
+app.use(debugExtractRouter);
 
 // Serve frontend static files
 const clientDist = path.join(__dirname, '../client/dist');
