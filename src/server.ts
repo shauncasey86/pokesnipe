@@ -5,6 +5,7 @@ import { runMigrations } from './db/migrate.js';
 import app from './app.js';
 import { syncAll } from './services/sync/sync-service.js';
 import { refreshRate } from './services/exchange-rate/exchange-rate-service.js';
+import { startScanLoop } from './services/scanner/index.js';
 
 const logger = pino({ name: 'server' });
 
@@ -172,6 +173,10 @@ async function boot(): Promise<void> {
   // Step 5: Start Express
   app.listen(config.PORT, () => {
     logger.info(`Server ready on port ${config.PORT}`);
+
+    // Step 6: Start scanner loop (after server is listening and exchange rate is available)
+    startScanLoop();
+    logger.info('Scanner loop started');
   });
 }
 
