@@ -80,7 +80,16 @@ export async function syncAll(): Promise<SyncResult> {
     );
 
     // Step 3: Upsert expansions
-    const expansionRows = englishExpansions.map(transformExpansion);
+    logger.info('Transforming expansions...');
+    const expansionRows = englishExpansions.map((e) => {
+      try {
+        return transformExpansion(e);
+      } catch (err) {
+        logger.error({ expansionId: e.id, name: e.name, error: String(err) }, 'Failed to transform expansion');
+        throw err;
+      }
+    });
+    logger.info({ count: expansionRows.length }, 'Upserting expansions...');
     const expansionsUpserted = await batchUpsertExpansions(expansionRows);
     logger.info({ expansionsUpserted }, 'Expansions upserted');
 
@@ -138,7 +147,9 @@ export async function syncAll(): Promise<SyncResult> {
     return { expansions: expansionsUpserted, cards: totalCards, variants: totalVariants };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    await failSyncLog(logId, message);
+    const stack = error instanceof Error ? error.stack : '';
+    logger.error({ errorMessage: message, stack }, 'syncAll failed');
+    await failSyncLog(logId, message).catch(() => {});
     throw error;
   }
 }

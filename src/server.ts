@@ -150,6 +150,8 @@ async function boot(): Promise<void> {
 }
 
 boot().catch((err) => {
-  logger.error({ err }, 'Boot failed');
+  const message = err instanceof Error ? err.message : String(err);
+  const stack = err instanceof Error ? err.stack : '';
+  logger.error({ errorMessage: message, stack }, 'Boot failed');
   process.exit(1);
 });

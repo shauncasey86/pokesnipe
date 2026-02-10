@@ -151,17 +151,29 @@ export function buildTrendsJsonb(
 // --- Main transformers ---
 
 export function transformExpansion(apiExpansion: ScrydexExpansion): ExpansionRow {
-  // Convert "YYYY/MM/DD" to Date
-  const dateParts = apiExpansion.release_date.split('/');
-  const releaseDate = new Date(`${dateParts[0]}-${dateParts[1]}-${dateParts[2]}`);
+  // Convert "YYYY/MM/DD" to Date, fallback to epoch if missing
+  let releaseDate: Date;
+  if (apiExpansion.release_date && apiExpansion.release_date.includes('/')) {
+    const dateParts = apiExpansion.release_date.split('/');
+    releaseDate = new Date(`${dateParts[0]}-${dateParts[1]}-${dateParts[2]}`);
+  } else if (apiExpansion.release_date) {
+    releaseDate = new Date(apiExpansion.release_date);
+  } else {
+    releaseDate = new Date('1970-01-01');
+  }
+
+  if (isNaN(releaseDate.getTime())) {
+    logger.warn({ id: apiExpansion.id, release_date: apiExpansion.release_date }, 'Invalid release_date, using epoch');
+    releaseDate = new Date('1970-01-01');
+  }
 
   return {
     scrydex_id: apiExpansion.id,
-    name: apiExpansion.name,
-    code: apiExpansion.code,
-    series: apiExpansion.series,
-    printed_total: apiExpansion.printed_total,
-    total: apiExpansion.total,
+    name: apiExpansion.name || apiExpansion.id,
+    code: apiExpansion.code || apiExpansion.id.toUpperCase(),
+    series: apiExpansion.series || 'Unknown',
+    printed_total: apiExpansion.printed_total ?? 0,
+    total: apiExpansion.total ?? 0,
     release_date: releaseDate,
     language_code: apiExpansion.language_code || 'EN',
     logo_url: apiExpansion.logo || null,
