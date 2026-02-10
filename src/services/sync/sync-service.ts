@@ -51,6 +51,14 @@ async function failSyncLog(id: number, errorMessage: string): Promise<void> {
 
 // --- Fetch all pages of expansions ---
 
+function getPageSize(response: { pageSize?: number; page_size?: number }): number {
+  return response.pageSize ?? response.page_size ?? 100;
+}
+
+function getTotalCount(response: { totalCount?: number; total_count?: number }): number | undefined {
+  return response.totalCount ?? response.total_count ?? undefined;
+}
+
 async function fetchAllExpansions(): Promise<scrydex.ScrydexExpansion[]> {
   const all: scrydex.ScrydexExpansion[] = [];
   let page = 1;
@@ -58,12 +66,25 @@ async function fetchAllExpansions(): Promise<scrydex.ScrydexExpansion[]> {
 
   while (hasMore) {
     const response = await scrydex.getExpansions(page);
+    const pageSize = getPageSize(response);
+    const totalCount = getTotalCount(response);
+
+    if (page === 1) {
+      log(`Expansion API page 1: ${response.data.length} items, pageSize=${pageSize}, totalCount=${totalCount}, raw keys=${Object.keys(response).join(',')}`);
+    }
+
     all.push(...response.data);
-    hasMore = page * response.pageSize < response.totalCount;
+
+    // Use totalCount if available, otherwise keep going while we get full pages
+    if (totalCount != null) {
+      hasMore = page * pageSize < totalCount;
+    } else {
+      hasMore = response.data.length >= pageSize;
+    }
     page++;
   }
 
-  log(`Fetched all expansions: ${all.length} total`);
+  log(`Fetched all expansions: ${all.length} total (${page - 1} pages)`);
   return all;
 }
 
@@ -119,7 +140,13 @@ export async function syncAll(): Promise<SyncResult> {
           expansionCards += cardsUpserted;
           expansionVariants += variantsUpserted;
 
-          hasMore = page * 100 < response.totalCount;
+          const cardTotalCount = getTotalCount(response);
+          const cardPageSize = getPageSize(response);
+          if (cardTotalCount != null) {
+            hasMore = page * cardPageSize < cardTotalCount;
+          } else {
+            hasMore = response.data.length >= cardPageSize;
+          }
           page++;
         }
       } catch (err) {
