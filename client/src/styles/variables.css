@@ -1,0 +1,20 @@
+:root {
+  --bg0: #070a12;
+  --bg1: #0c1019;
+  --bg2: rgba(14,19,32,0.75);
+  --glass: rgba(255,255,255,0.035);
+  --glass2: rgba(255,255,255,0.055);
+  --brd: rgba(255,255,255,0.055);
+  --tMax: #f4f6f9;
+  --tPri: #dce1eb;
+  --tSec: #8290a8;
+  --tMut: #4d5a72;
+  --green: #34d399;
+  --greenB: #6ee7b7;
+  --red: #f87171;
+  --amber: #fbbf24;
+  --blue: #60a5fa;
+  --purple: #c084fc;
+  --radius: 10px;
+  --radius-lg: 14px;
+}

@@ -1,0 +1,82 @@
+.card-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 16px;
+}
+
+.card-tile {
+  display: flex;
+  flex-direction: column;
+  padding: 12px;
+  text-decoration: none;
+  color: var(--tPri);
+  transition: transform 0.15s, box-shadow 0.15s;
+}
+
+.card-tile:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+  text-decoration: none;
+}
+
+.card-tile-img {
+  display: flex;
+  justify-content: center;
+  margin-bottom: 10px;
+}
+
+.card-tile-img img {
+  width: 68px;
+  height: 95px;
+  object-fit: contain;
+  border-radius: 4px;
+}
+
+.card-tile-placeholder {
+  width: 68px;
+  height: 95px;
+  background: var(--bg2);
+  border-radius: 4px;
+}
+
+.card-tile-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  text-align: center;
+}
+
+.card-tile-name {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--tMax);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.card-tile-number {
+  font-size: 0.75rem;
+  color: var(--tSec);
+}
+
+.card-tile-price {
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: var(--green);
+}
+
+.empty-state {
+  text-align: center;
+  padding: 48px 24px;
+  color: var(--tSec);
+  font-size: 0.9375rem;
+}
+
+@media (max-width: 900px) {
+  .card-grid { grid-template-columns: repeat(3, 1fr); }
+}
+
+@media (max-width: 600px) {
+  .card-grid { grid-template-columns: repeat(2, 1fr); }
+}
