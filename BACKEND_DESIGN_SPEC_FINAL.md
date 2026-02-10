@@ -1492,35 +1492,34 @@ Pino JSON logger with correlation IDs tracing listings through the full pipeline
 
 ## 13. Testing Strategy
 
-### 13.1 Four-Layer Test Pyramid
+### 13.1 Live Data Testing
 
-| Layer | Scope | Runner | External Calls |
-|-------|-------|--------|----------------|
-| **Unit** | Domain functions (pure, no I/O) | Vitest | None |
-| **Integration** | Services + PostgreSQL | Vitest + test DB | None (fixtures) |
-| **API** | HTTP endpoints (supertest) | Vitest + test DB | None (fixtures) |
-| **Accuracy** | Match corpus regression | Vitest + test DB | None (fixtures) |
+All testing uses **live data** — real APIs, real database, real eBay listings. No mocks, no fixtures, no recorded responses.
 
-### 13.2 External API Testing
+| Layer | Scope | How to test |
+|-------|-------|-------------|
+| **Pure functions** | Buyer protection calc, tier classifier, confidence scorer, condition mapper | Vitest unit tests — these are pure math/logic, no external calls needed |
+| **API clients** | Scrydex, eBay, exchange rate | Run against live APIs, verify real responses come back correctly |
+| **Services** | Sync, scanner, matching, pricing | Run against live database + live APIs, verify real data flows through |
+| **Endpoints** | REST + SSE | `curl` against running server, verify real responses |
+| **End-to-end** | Full pipeline | Let the scanner run, inspect real deals in the database |
 
-All external APIs (Scrydex, eBay, Telegram) tested via recorded `nock`/`msw` fixtures. Zero live API calls in CI.
+### 13.2 Why Live Data
 
-### 13.3 Accuracy Gate
+- Mocked tests give false confidence — they test your mocks, not your code
+- The eBay API response shape changes; mocks won't catch that
+- Scrydex data structure is complex (nested JSONB); easier to verify with real data
+- The whole point of this app is to process real-world data accurately
 
-```yaml
-# GitHub Actions: PR cannot merge if accuracy < 85%
-- name: Accuracy gate
-  run: |
-    ACCURACY=$(npm run test:accuracy:report --silent | tail -1)
-    if (( $(echo "$ACCURACY < 85" | bc -l) )); then
-      echo "Accuracy $ACCURACY% is below 85% threshold"
-      exit 1
-    fi
-```
+### 13.3 Testing Approach Per Stage
+
+1. **Pure function tests (Vitest):** For functions with no I/O (buyer protection calc, tier classifier, condition ID mapping, Jaro-Winkler scoring). These run fast and don't need external services.
+2. **Live smoke tests:** After deploying each stage, run `curl` commands and `psql` queries against the Railway instance to verify real data.
+3. **Manual verification:** For matching accuracy, visually inspect deals — does the matched card look right? Is the profit calculation correct?
 
 ### 13.4 Match Corpus
 
-200+ entries covering modern sets (30%), legacy (20%), vintage (20%), graded (15%), edge cases (15%). Each entry has `ebayTitle`, `itemSpecifics`, `expectedCardId`, `expectedVariant`, `difficulty`, `tags`.
+200+ entries covering modern sets (30%), legacy (20%), vintage (20%), graded (15%), edge cases (15%). Each entry has `ebayTitle`, `itemSpecifics`, `expectedCardId`, `expectedVariant`, `difficulty`, `tags`. Built from **real eBay listings** encountered during live testing.
 
 ---
 
@@ -1578,12 +1577,15 @@ Each stage is built, tested, and verified before moving to the next. No stage de
 
 **Principle:** Build the data foundation first (card database + catalog), then layer the scanner on top. No point building the matching engine if there's nothing to match against.
 
-**Build workflow:** All code is written in Claude Code, pushed to GitHub, and auto-deployed to Railway. There is no local development environment. Testing happens in two ways:
+**Build workflow:** All code is written in Claude Code, pushed to GitHub, and auto-deployed to Railway.
 
-1. **Automated tests (Vitest):** Run `npm test` in Claude Code before pushing. These use mocked externals and a test database — no live API calls.
-2. **Smoke tests on Railway:** After each push/deploy, manually verify against the live Railway URL using `curl` or the browser. Database checks use `psql $DATABASE_URL` against the Railway PostgreSQL instance.
+**Testing approach:** All tests use **live data** — real APIs, real database, real eBay listings. No mocks, no fixtures, no simulated responses. Each stage lists:
 
-Each stage lists both types of tests. Write the automated tests first, then verify on Railway after deploy.
+1. **Vitest (pure functions only):** For math and logic that has no external dependencies (buyer protection calc, tier classifier, condition mapping). These are the only automated tests.
+2. **Live API tests:** Run real API calls against Scrydex, eBay, exchange rate services. Verify real responses parse correctly and real data flows into the database.
+3. **Live smoke tests:** After deploying to Railway, verify with `curl` and `psql $DATABASE_URL` against real production data.
+
+The goal: if it works with real data on Railway, it works. Period.
 
 ---
 
@@ -1722,12 +1724,6 @@ npx tsc --init  # Generate tsconfig.json
    ```
    ✅ Should return HTTP 503 with `{"status":"error"}`. Start PostgreSQL again, retry — should return 200. The server itself should NOT have crashed.
 
-**Write automated tests (`src/__tests__/stage1/`):**
-
-- `config.test.ts` — Mock `process.env` with missing vars, verify Zod throws. Mock with valid vars, verify config object has correct types and values.
-- `health.test.ts` — Use `supertest` against the Express app. Test 200 response with valid DB, test 503 when pool query fails (mock pool.query to throw).
-- `migrate.test.ts` — Run migrations against a test database, verify tables exist with `SELECT table_name FROM information_schema.tables`.
-
 **Deliverable:** A running Express server with an empty database, ready to receive data.
 
 ---
@@ -1790,46 +1786,10 @@ npm install bottleneck   # Rate limiter (simpler than writing our own token buck
    ```
    Create `src/scripts/run-sync.ts` that imports the sync service and runs `syncAll()`.
 
-**How to test:**
-
-**Automated tests (`src/__tests__/stage2/`):**
-
-- `scrydex-client.test.ts` — Mock HTTP responses using `msw` (Mock Service Worker) or `nock`. Test:
-  - Correct URL construction (`/pokemon/v1/en/expansions`)
-  - Auth headers sent correctly
-  - Rate limiter queues concurrent calls (fire 100 calls, verify they don't all hit at once)
-  - Retry on 429 (mock a 429 then 200, verify it retries and succeeds)
-  - Retry on 500 with backoff
-  - Gives up after 3 retries (mock 4x 500, verify it throws)
-
-- `batch-insert.test.ts` — Use a test database. Test:
-  - Insert 1 row → row exists in table
-  - Insert 250 rows → all 250 exist (tests chunking at 100)
-  - Insert same rows twice → no duplicates (upsert works, count stays same)
-  - Verify JSONB columns stored correctly (query back and parse)
-
-- `transformers.test.ts` — Pure function tests, no DB needed. Test:
-  - Expansion transform: all fields mapped correctly
-  - Card transform: image URLs, rarity, subtypes all preserved
-  - Variant transform: prices JSONB contains all conditions (NM, LP, MP, HP), not just first
-  - Variant transform: trends JSONB contains all time windows
-  - Variant transform: graded prices preserved when present, null when absent
-  - Missing data: graceful handling (null, not crash)
-
-- `sync-service.test.ts` — Integration test with test DB + mocked Scrydex. Test:
-  - Full sync flow: mock 3 expansions with 5 cards each → verify all rows in DB
-  - Sync log created and updated correctly
-  - Re-run sync → no duplicate rows (upsert)
-  - Credits tracked in sync log
+**How to test — all live data:**
 
 ```bash
-npm test -- --run src/__tests__/stage2/
-```
-
-**Smoke tests on Railway (after deploy + running sync):**
-
-```bash
-# Trigger sync (via npm script or temporary API route)
+# Run a full sync against the real Scrydex API
 npm run sync
 
 # Check expansion count
@@ -1996,34 +1956,7 @@ npm install -D @types/react @types/react-dom
     app.get('*', (req, res) => res.sendFile(path.join(__dirname, '../client/dist/index.html')));
     ```
 
-**How to test:**
-
-**Automated tests (`src/__tests__/stage3/`):**
-
-- `catalog-expansions.test.ts` — Using `supertest` against the Express app with a seeded test DB:
-  - `GET /api/catalog/expansions` returns 200 with data array and total count
-  - Default sort is by release date descending
-  - `?sort=name` returns alphabetical order
-  - `?series=Scarlet & Violet` filters correctly
-  - `?page=2&limit=10` returns correct offset
-  - Response shape matches expected (id, name, code, series, logo, cardCount, releaseDate)
-
-- `catalog-cards.test.ts` — Seed test DB with 3 expansions, 10 cards, 15 variants:
-  - `GET /api/catalog/expansions/:id` returns expansion + cards
-  - `GET /api/catalog/cards/:id` returns full card with all variants, prices, trends, graded prices
-  - `GET /api/catalog/cards/search?q=charizard` returns matches
-  - `GET /api/catalog/cards/search?q=charzard` (misspelled) still returns Charizard
-  - `GET /api/catalog/trending?period=7d` returns cards sorted by price change
-
-- `catalog-no-auth.test.ts` — Verify NO auth is required:
-  - All catalog endpoints return 200 WITHOUT any session cookie
-  - This is the key difference from deal endpoints (which will need auth later)
-
-```bash
-npm test -- --run src/__tests__/stage3/
-```
-
-**Smoke tests on Railway (after deploy):**
+**How to test — all against live Railway with real synced data:**
 
 ```bash
 RAILWAY_URL="https://your-app.railway.app"
@@ -2156,75 +2089,54 @@ npm install node-fetch   # Or use built-in fetch if Node 18+
 
 4. **Wire the exchange rate fetching into the boot sequence** — After DB connection and migration, fetch the initial exchange rate. Log a warning if it fails (scanner won't work until a rate exists, but the server can still serve the catalog).
 
-**How to test:**
+**How to test — pure function tests + live API:**
 
-**Automated tests (`src/__tests__/stage4/`):**
+**Vitest (pure functions only — `src/__tests__/stage4/`):**
 
-- `buyer-protection.test.ts` — Pure function tests (no DB, no mocks needed):
+- `buyer-protection.test.ts` — Pure math, no external calls:
   ```typescript
-  // Test exact fee calculations:
-  expect(calculateBuyerProtection(10)).toBeCloseTo(0.40);    // £10 × 3% + £0.10 flat = £0.40
-  expect(calculateBuyerProtection(50)).toBeCloseTo(2.40);    // (£10×3%) + (£40×5%) + £0.10 = £2.40
-  expect(calculateBuyerProtection(500)).toBeCloseTo(20.40);  // (£10×3%) + (£40×5%) + (£450×4%) + £0.10 = £20.40
+  expect(calculateBuyerProtection(10)).toBeCloseTo(0.40);    // £10 × 3% + £0.10 flat
+  expect(calculateBuyerProtection(50)).toBeCloseTo(2.40);    // (£10×3%) + (£40×5%) + £0.10
+  expect(calculateBuyerProtection(500)).toBeCloseTo(20.40);  // + (£450×4%)
   expect(calculateBuyerProtection(1000)).toBeCloseTo(30.40); // + (£500×2%)
-  expect(calculateBuyerProtection(0)).toBe(0);               // Edge case
+  expect(calculateBuyerProtection(0)).toBe(0);
   ```
 
-- `pricing-engine.test.ts` — Pure function tests:
+- `pricing-engine.test.ts` — Pure math:
   ```typescript
-  // Known profitable deal:
+  // Profitable deal
   const result = calculateProfit({
-    ebayPriceGBP: 12.50, shippingGBP: 1.99,
-    condition: 'NM',
-    variantPrices: { NM: { low: 45, market: 52 } },
-    exchangeRate: 0.789
+    ebayPriceGBP: 12.50, shippingGBP: 1.99, condition: 'NM',
+    variantPrices: { NM: { low: 45, market: 52 } }, exchangeRate: 0.789
   });
   expect(result.profitGBP).toBeGreaterThan(0);
-  expect(result.profitPercent).toBeGreaterThan(100);  // Big profit
-  expect(result.totalCostGBP).toBeCloseTo(12.50 + 1.99 + calculateBuyerProtection(12.50));
 
-  // Known loss — eBay price higher than market:
+  // Loss — eBay price higher than market
   const loss = calculateProfit({
-    ebayPriceGBP: 100, shippingGBP: 5,
-    condition: 'NM',
-    variantPrices: { NM: { low: 45, market: 52 } },
-    exchangeRate: 0.789
+    ebayPriceGBP: 100, shippingGBP: 5, condition: 'NM',
+    variantPrices: { NM: { low: 45, market: 52 } }, exchangeRate: 0.789
   });
-  expect(loss.profitGBP).toBeLessThan(0);  // Negative profit = loss
+  expect(loss.profitGBP).toBeLessThan(0);
 
-  // Condition-specific: LP listing should use LP price, not NM
+  // Condition-specific: LP listing uses LP price
   const lpResult = calculateProfit({
-    ebayPriceGBP: 12.50, shippingGBP: 1.99,
-    condition: 'LP',
-    variantPrices: { NM: { low: 45, market: 52 }, LP: { low: 30, market: 38 } },
-    exchangeRate: 0.789
+    ebayPriceGBP: 12.50, shippingGBP: 1.99, condition: 'LP',
+    variantPrices: { NM: { low: 45, market: 52 }, LP: { low: 30, market: 38 } }, exchangeRate: 0.789
   });
-  expect(lpResult.marketValueUSD).toBe(38);  // Used LP market, not NM
+  expect(lpResult.marketValueUSD).toBe(38);
   ```
 
-- `exchange-rate-service.test.ts` — Integration test with test DB + mocked HTTP:
-  - Mock the exchange rate API response
-  - `fetchRate()` returns correct rate
-  - `saveRate()` inserts into DB
-  - `getLatestRate()` returns the saved rate
-  - `isStale()` returns false for fresh rate
-  - `isStale()` returns true for rate >6 hours old (manually update `fetched_at` in test)
-  - `getValidRate()` throws `ExchangeRateStaleError` when stale
+**Live tests on Railway:**
 
 ```bash
-npm test -- --run src/__tests__/stage4/
-```
-
-**Smoke tests on Railway:**
-
-```bash
-# Check exchange rate was fetched on boot
+# Verify exchange rate fetched from real API on boot
 psql $DATABASE_URL -c "SELECT rate, fetched_at FROM exchange_rates ORDER BY fetched_at DESC LIMIT 1;"
-# ✅ Should show a USD→GBP rate (around 0.78-0.82) with recent timestamp
+# ✅ Should show a real USD→GBP rate (around 0.78-0.82) with recent timestamp
 
-# Test the health endpoint still works
+# Verify pricing engine against a real card from the synced database
+# Pick a card with known pricing, manually calculate expected profit, then test via the lookup endpoint (once built)
 curl "$RAILWAY_URL/healthz"
-# ✅ Should return 200
+# ✅ Server still healthy after exchange rate integration
 ```
 
 **Deliverable:** A pricing engine that produces correct profit calculations for any card + condition + eBay price combination.
@@ -2303,70 +2215,33 @@ curl "$RAILWAY_URL/healthz"
    - `EbayConditionDescriptor` — `{ name: string, values: string[] }`
    - `EbayLocalizedAspect` — `{ type: string, name: string, value: string }`
 
-**How to test:**
+**How to test — live eBay API calls:**
 
-**Automated tests (`src/__tests__/stage5/`):**
-
-- `ebay-auth.test.ts` — Mock the token endpoint with `msw`/`nock`:
-  - Valid credentials → returns token
-  - Token is cached (second call doesn't hit the endpoint)
-  - Expired token → auto-refreshes (mock expired timestamp, verify new token request)
-  - Invalid credentials → throws clear error
-
-- `ebay-client.test.ts` — Mock the Browse API endpoints:
-  - `searchItems('pokemon', 200, ...)` constructs correct URL with all query params
-  - Filter string includes all expected filters (price, condition, buying options, delivery country)
-  - `getItem(itemId)` constructs correct URL
-  - Response is parsed into typed objects
-  - Auth header is included in every request
-
-- `ebay-budget.test.ts` — Pure in-memory tests:
-  ```typescript
-  // Start with fresh budget
-  expect(getRemainingBudget()).toBe(5000);
-  trackCall();
-  expect(getRemainingBudget()).toBe(4999);
-
-  // Exhaust budget
-  for (let i = 0; i < 4999; i++) trackCall();
-  expect(canMakeCall()).toBe(false);
-
-  // Reset at midnight
-  resetBudget();
-  expect(canMakeCall()).toBe(true);
-  ```
+Create `src/scripts/test-ebay.ts` — a real test script that calls the live eBay API:
 
 ```bash
-npm test -- --run src/__tests__/stage5/
-```
-
-**Smoke tests on Railway (one-time live API validation):**
-
-Create a temporary test script `src/scripts/test-ebay.ts`:
-```bash
-# Run the test script
 npx tsx src/scripts/test-ebay.ts
 ```
+
 The script should:
-1. Get an OAuth token → print "Token obtained: v^1.1#i..."
-2. Call `searchItems('pokemon', 10, ...)` (limit 10 to save budget) → print item count
-3. Verify results are Buy It Now, £10+, from category 183454
+1. Get a real OAuth token → print "Token obtained: v^1.1#i..."
+2. Call `searchItems('pokemon', 10, ...)` (limit 10 to conserve budget) → print item count
+3. Verify all results are Buy It Now, £10+, from category 183454
 4. Pick one item, call `getItem(itemId)` → print whether `localizedAspects` and `conditionDescriptors` are present
 5. Print budget: "API calls used: 2/5000"
 
 ```bash
-# After running the test script, verify budget tracking
-# Check the console output for:
-# ✅ "Token obtained" (OAuth works)
-# ✅ "Search returned N items" (search works)
-# ✅ "All items are FIXED_PRICE" (filter works)
+# Verify the output:
+# ✅ "Token obtained" (OAuth works with real credentials)
+# ✅ "Search returned N items" (real search works)
+# ✅ "All items are FIXED_PRICE" (filter applied correctly)
 # ✅ "All items are £10+" (price filter works)
-# ✅ "getItem returned localizedAspects: true" (enrichment data available)
-# ✅ "getItem returned conditionDescriptors: true" (condition data available)
+# ✅ "getItem returned localizedAspects: true" (real enrichment data available)
+# ✅ "getItem returned conditionDescriptors: true" (real condition data available)
 # ✅ "Budget: 2/5000" (tracking works)
 ```
 
-**Delete the test script after verification** — don't leave it in production.
+Keep `src/scripts/test-ebay.ts` in the project — it's useful for diagnosing eBay API issues later.
 
 **Deliverable:** Working eBay API client that can search listings and fetch individual item details.
 
@@ -2654,30 +2529,21 @@ npm install jaro-winkler   # String similarity (or use 'string-similarity' / 'na
    }
    ```
 
-**How to test:**
+**How to test — pure function tests + live data:**
 
-**Automated tests (`src/__tests__/stage7/`)** — These need a seeded test database with real card data:
+**Vitest (pure functions only — `src/__tests__/stage7/`):**
 
-Before running tests, create a test seed file (`src/__tests__/fixtures/seed-cards.ts`) that inserts ~50 known cards with their variants into the test database. Include a mix of:
-- Modern cards (Charizard ex 006/197 from Obsidian Flames)
-- Multi-variant cards (Base Set Charizard #4 with holofoil and firstEditionHolofoil)
-- Trainer Gallery cards (TG15/TG30)
-- Cards with similar names (multiple Pikachu variants across different sets)
-
-- `candidate-lookup.test.ts`:
-  ```typescript
-  // Number-based lookup
-  const candidates = await findCandidates({ cardNumber: { number: 6, denominator: 197 } });
-  expect(candidates.length).toBeGreaterThanOrEqual(1);
-  expect(candidates.some(c => c.name === 'Charizard ex')).toBe(true);
-
-  // Name-based fallback (no number)
-  const nameCandidates = await findCandidates({ cardName: 'Charizard' });
-  expect(nameCandidates.length).toBeGreaterThan(0);
-  ```
+These functions take plain data in and return plain data out — no DB, no API:
 
 - `name-validator.test.ts`:
   ```typescript
+  // Build candidate objects inline (plain data, not from DB):
+  const candidates = [
+    { name: 'Charizard ex', id: 'charizard-ex-sv3-6' },
+    { name: 'Charizard VMAX', id: 'charizard-vmax-swsh4-100' },
+    { name: 'Pikachu VMAX', id: 'pikachu-vmax-swsh4-44' },
+  ];
+
   // Exact match → high score
   const exact = validateNames('Charizard ex', candidates);
   expect(exact[0].similarity).toBeGreaterThan(0.95);
@@ -2719,46 +2585,32 @@ Before running tests, create a test seed file (`src/__tests__/fixtures/seed-card
   expect(noKeyword.confidence).toBe(0.50);
   ```
 
-- `matching-integration.test.ts` — End-to-end matching tests with 20+ real eBay title examples:
+- `confidence-scorer.test.ts`:
   ```typescript
-  // Create a test corpus of real eBay titles with expected results:
-  const corpus = [
-    { title: 'Charizard ex 006/197 Obsidian Flames NM', expectedCard: 'charizard-ex-sv3-6', expectedVariant: 'normal' },
-    { title: 'PSA 10 Pikachu VMAX 044/185 Vivid Voltage', expectedCard: 'pikachu-vmax-swsh4-44', isGraded: true },
-    { title: 'Holo Rare Blastoise 2/102 Base Set', expectedCard: 'blastoise-base1-2', expectedVariant: 'holofoil' },
-    // ... 20+ more
-  ];
+  // High confidence (all signals agree)
+  expect(calculateConfidence({ nameScore: 0.95, numberScore: 1.0, denominatorScore: 1.0, expansionScore: 1.0, variantScore: 0.95, extractionScore: 1.0 }).composite).toBeGreaterThan(0.90);
 
-  for (const entry of corpus) {
-    const signals = extractSignals(mockListing(entry.title));
-    const match = await matchListing(signals);
-    expect(match?.candidate.scrydex_card_id).toBe(entry.expectedCard);
-  }
+  // Low confidence (name fuzzy, no number)
+  expect(calculateConfidence({ nameScore: 0.65, numberScore: 0.5, denominatorScore: 0.5, expansionScore: 0.5, variantScore: 0.50, extractionScore: 0.3 }).composite).toBeLessThan(0.60);
+  ```
 
-  // Known bad titles that should NOT match:
-  const badTitles = [
-    'Pokemon Card Lot Bundle x50 Mixed Cards',
-    'Custom Proxy Charizard Full Art Orica',
-    'Pokemon Booster Box Scarlet Violet',
-    'MTG Magic the Gathering Black Lotus',  // Wrong game
-    'Digimon Adventure Card Agumon',        // Wrong game
-  ];
-
-  for (const title of badTitles) {
-    const signals = extractSignals(mockListing(title));
-    expect(signals.rejected || await matchListing(signals) === null).toBe(true);
-  }
+- `gates.test.ts`:
+  ```typescript
+  // High composite → accepted
+  expect(applyGates({ confidence: { composite: 0.90 } }).accepted).toBe(true);
+  // Low composite → rejected
+  expect(applyGates({ confidence: { composite: 0.40 } }).accepted).toBe(false);
   ```
 
 ```bash
 npm test -- --run src/__tests__/stage7/
 ```
 
-**Smoke tests on Railway:**
+**Live data test — run against Railway with real synced database + real eBay listings:**
 
-Create a temporary test script `src/scripts/test-matching.ts` that:
+Create `src/scripts/test-matching.ts` that:
 1. Fetches 10 real eBay listings via `searchItems()`
-2. Runs each through `extractSignals()` + `matchListing()`
+2. Runs each through `extractSignals()` + `matchListing()` (which queries the real synced card database)
 3. Prints: title → matched card name + variant + confidence (or "no match")
 4. You manually verify the matches are correct
 
@@ -2770,6 +2622,8 @@ npx tsx src/scripts/test-matching.ts
 # ✅ "Pikachu VMAX 044/185" → Pikachu VMAX (swsh4-44) normal [0.88]
 # ✅ No wrong matches (false positives)
 ```
+
+Keep `src/scripts/test-matching.ts` in the project — useful for debugging matching issues later.
 
 **Deliverable:** A matching engine that correctly identifies which card an eBay listing is selling.
 
@@ -2913,17 +2767,9 @@ npx tsx src/scripts/test-matching.ts
 
 7. **Wire into boot sequence** — In `src/server.ts`, after DB connection and migrations, call `startScanLoop()`.
 
-**How to test:**
+**How to test — pure function tests + live data:**
 
-**Automated tests (`src/__tests__/stage8/`):**
-
-- `deduplicator.test.ts`:
-  ```typescript
-  expect(await isDuplicate('item-123')).toBe(false);
-  markProcessed('item-123');
-  expect(await isDuplicate('item-123')).toBe(true);
-  // Also test DB dedup: insert a deal with ebay_item_id, then check
-  ```
+**Vitest (pure functions only — `src/__tests__/stage8/`):**
 
 - `enrichment-gate.test.ts`:
   ```typescript
@@ -2944,20 +2790,11 @@ npx tsx src/scripts/test-matching.ts
   expect(classifyTier(10, 0.50, 'high')).toBe('SLEEP');
   ```
 
-- `scanner-integration.test.ts` — Full pipeline test with mocked eBay API:
-  - Mock `searchItems` to return 5 test listings (mix of: profitable card, junk lot, duplicate, low profit, good deal)
-  - Mock `getItem` to return enriched data for the listings that pass the gate
-  - Run `runScanCycle()`
-  - Verify: correct number of deals created (should be 1-2 from 5 listings)
-  - Verify: deals in DB have correct card_id, variant, condition, profit, tier
-  - Verify: match_signals JSONB is populated
-  - Verify: junk lot was rejected, duplicate was skipped, low profit wasn't enriched
-
 ```bash
 npm test -- --run src/__tests__/stage8/
 ```
 
-**Smoke tests on Railway:**
+**Live data test — let the scanner run on Railway with real eBay API:**
 
 ```bash
 # Let the scanner run for 30+ minutes (6+ cycles)
@@ -3081,11 +2918,13 @@ psql $DATABASE_URL -c "SELECT ebay_item_id, COUNT(*) FROM deals GROUP BY ebay_it
    - `GET /api/deals/:id/velocity` — Fetches velocity for the deal's card, caches it, returns updated liquidity data
    - This allows the frontend to show a "Fetch velocity → 3cr" button
 
-**How to test:**
+**How to test — pure function tests + live data:**
 
-**Automated tests (`src/__tests__/stage9/`):**
+**Vitest (pure functions only — `src/__tests__/stage9/`):**
 
-- `tier1-signals.test.ts` — Pure function tests:
+All liquidity scoring functions are pure math — they take numbers in and return numbers out:
+
+- `tier1-signals.test.ts`:
   ```typescript
   // Trend activity: card with movement in 4/6 windows
   expect(scoreTrendActivity({ NM: { '1d': { pct: 1.2 }, '7d': { pct: 4.8 }, '30d': { pct: 0 }, '90d': { pct: 20 }, '180d': { pct: 0 } } })).toBeCloseTo(0.60);
@@ -3126,17 +2965,11 @@ psql $DATABASE_URL -c "SELECT ebay_item_id, COUNT(*) FROM deals GROUP BY ebay_it
   expect(adjustTierForLiquidity('FLIP', 'high')).toBe('FLIP');       // No change
   ```
 
-- `tier3-velocity.test.ts` — Integration test with mocked Scrydex `/listings` endpoint:
-  - Mock response with 8 sold listings in 7 days
-  - Verify score calculation
-  - Verify caching: second call for same card uses cache (no API call)
-  - Verify cache expiry: after 7 days, makes a fresh API call
-
 ```bash
 npm test -- --run src/__tests__/stage9/
 ```
 
-**Smoke tests on Railway:**
+**Live data test — verify on Railway with real deals:**
 
 ```bash
 # Check deals now have liquidity data:
@@ -3167,7 +3000,7 @@ curl "$RAILWAY_URL/api/deals/$DEAL_ID/velocity"
 **Install these packages:**
 ```bash
 npm install express-session connect-pg-simple uuid
-npm install -D @types/express-session @types/uuid supertest @types/supertest
+npm install -D @types/express-session @types/uuid
 ```
 
 **Step-by-step:**
@@ -3253,78 +3086,9 @@ npm install -D @types/express-session @types/uuid supertest @types/supertest
    app.use('/api/preferences', requireAuth, prefsRouter); // Auth required
    ```
 
-**How to test:**
+**How to test — all against live Railway with real data:**
 
-**Automated tests (`src/__tests__/stage10/`):**
-
-- `auth.test.ts` — Using `supertest`:
-  ```typescript
-  // Login with correct password → 200 + session cookie
-  const login = await request(app).post('/auth/login').send({ password: 'test-password' });
-  expect(login.status).toBe(200);
-  expect(login.headers['set-cookie']).toBeDefined();
-  const cookie = login.headers['set-cookie'][0];
-
-  // Access protected endpoint with cookie → 200
-  const deals = await request(app).get('/api/deals').set('Cookie', cookie);
-  expect(deals.status).toBe(200);
-
-  // Access protected endpoint WITHOUT cookie → 401
-  const noCookie = await request(app).get('/api/deals');
-  expect(noCookie.status).toBe(401);
-
-  // Login with wrong password → 401
-  const bad = await request(app).post('/auth/login').send({ password: 'wrong' });
-  expect(bad.status).toBe(401);
-
-  // Logout → cookie cleared
-  await request(app).post('/auth/logout').set('Cookie', cookie);
-  const afterLogout = await request(app).get('/api/deals').set('Cookie', cookie);
-  expect(afterLogout.status).toBe(401);
-  ```
-
-- `deals-api.test.ts` — Seed test DB with 10 deals, authenticated requests:
-  ```typescript
-  // GET /api/deals → returns paginated list
-  const res = await authedRequest(app).get('/api/deals?limit=5');
-  expect(res.body.data.length).toBe(5);
-  expect(res.body.total).toBe(10);
-
-  // GET /api/deals/:id → returns full detail
-  const detail = await authedRequest(app).get(`/api/deals/${dealId}`);
-  expect(detail.body.cardName).toBeDefined();
-  expect(detail.body.matchSignals).toBeDefined();
-
-  // POST /api/deals/:id/review → marks deal reviewed
-  await authedRequest(app).post(`/api/deals/${dealId}/review`).send({ isCorrectMatch: true });
-  const updated = await authedRequest(app).get(`/api/deals/${dealId}`);
-  expect(updated.body.status).toBe('reviewed');
-  ```
-
-- `validation.test.ts`:
-  ```typescript
-  // Invalid body → 400 with Zod error details
-  const res = await authedRequest(app).post('/api/lookup').send({ notAUrl: 123 });
-  expect(res.status).toBe(400);
-  expect(res.body.error).toBe('Validation failed');
-
-  // Valid body → passes through
-  // (mock the pipeline to not actually call eBay)
-  ```
-
-- `sse.test.ts` — Test SSE connection and events:
-  ```typescript
-  // Connect to SSE stream
-  // Emit a mock deal event
-  // Verify the SSE message arrives with correct format
-  // Test Last-Event-Id replay: send header with old ID, verify missed events replayed
-  ```
-
-```bash
-npm test -- --run src/__tests__/stage10/
-```
-
-**Smoke tests on Railway:**
+No automated tests for this stage — auth, API endpoints, and SSE are all integration points that need a running server with real data. Test everything live.
 
 ```bash
 # Test login
@@ -3497,53 +3261,9 @@ npm install -D @types/node-cron
 
 7. **Wire into boot sequence** — Replace the `startScanLoop()` from Stage 8 with `registerAllJobs()`. The scanner is now managed by the job scheduler alongside all other background tasks.
 
-**How to test:**
+**How to test — all against live Railway:**
 
-**Automated tests (`src/__tests__/stage11/`):**
-
-- `deal-expiry.test.ts` — Seed test DB with deals at various ages:
-  ```typescript
-  // Insert deal created 80 hours ago (past 72h TTL)
-  // Run expireOldDeals()
-  // Verify deal status changed to 'expired'
-
-  // Insert deal created 1 hour ago
-  // Run expireOldDeals()
-  // Verify deal status still 'active'
-  ```
-
-- `deal-pruner.test.ts`:
-  ```typescript
-  // Insert unreviewed deal created 35 days ago
-  // Run pruneStaleDeals()
-  // Verify deal is DELETED from DB
-
-  // Insert reviewed deal created 35 days ago
-  // Run pruneStaleDeals()
-  // Verify deal is NOT deleted (preserved for accuracy tracking)
-  ```
-
-- `scheduler.test.ts`:
-  ```typescript
-  // Register a job, trigger it manually
-  // Verify it runs
-  // Trigger it again while first is still "running"
-  // Verify it skips (overlap protection)
-  ```
-
-- `hot-refresh.test.ts` — Mock Scrydex, seed DB:
-  ```typescript
-  // Seed 3 expansions with old prices
-  // Mock Scrydex to return updated prices
-  // Run hot refresh
-  // Verify variant prices updated in DB
-  ```
-
-```bash
-npm test -- --run src/__tests__/stage11/
-```
-
-**Smoke tests on Railway:**
+No automated tests for this stage — deal lifecycle and background jobs run against the real database with real timing. Test everything live on Railway.
 
 ```bash
 # Check deal expiry — look for expired deals
@@ -3677,62 +3397,9 @@ The frontend spec (FRONTEND_DESIGN_SPEC_FINAL.md) is the detailed reference for 
     /catalog/*      → Catalog pages (no auth, from Stage 3)
     ```
 
-**How to test:**
+**How to test — manual browser testing against live Railway:**
 
-**Automated tests (Vitest + Testing Library):**
-
-The frontend tests live in `client/src/__tests__/`:
-
-- `Login.test.tsx`:
-  ```typescript
-  // Render Login, type password, submit
-  // Mock POST /auth/login → 200
-  // Verify redirect to dashboard
-
-  // Mock POST /auth/login → 401
-  // Verify error message shown
-  ```
-
-- `DealFeed.test.tsx`:
-  ```typescript
-  // Mock GET /api/deals with 5 deals
-  // Verify 5 DealCards rendered
-  // Verify sorted by tier then profit (GRAIL first)
-  // Verify SLEEP deals have opacity styling
-  // Verify GRAIL deals have gradient glow
-  ```
-
-- `DealDetailPanel.test.tsx`:
-  ```typescript
-  // Mock GET /api/deals/:id with full deal data
-  // Click a deal card → verify panel opens
-  // Verify profit hero shows correct value
-  // Verify condition comps show real Scrydex prices
-  // Verify "SNAG ON EBAY" button has correct URL
-  // Verify "Correct" / "Wrong" buttons call POST /api/deals/:id/review
-  ```
-
-- `FilterBar.test.tsx`:
-  ```typescript
-  // Render with 10 deals (mix of tiers)
-  // Toggle off 'SLEEP' filter → verify SLEEP deals hidden
-  // Toggle off 'NM' condition → verify only LP/MP/HP deals shown
-  // Verify filtering is instant (no API call made)
-  ```
-
-- `SSE.test.tsx`:
-  ```typescript
-  // Mock EventSource
-  // Emit a 'deal' event → verify new deal appears in feed
-  // Emit a 'status' event → verify footer updates
-  // Simulate disconnect → verify "Reconnecting" banner appears
-  ```
-
-```bash
-cd client && npm test
-```
-
-**Smoke tests on Railway (manual browser testing):**
+No automated frontend tests — the dashboard is tested by using it with real data. Deploy to Railway and test in a real browser.
 
 Open `https://your-app.railway.app/` in a browser and test:
 
@@ -3855,80 +3522,26 @@ npm install pino-pretty   # Already installed from Stage 1, but ensure it's ther
    ```
    - Wire into `/api/status` response
 
-6. **Create match corpus** — `src/__tests__/corpus/`
-   - Create `corpus.json` — a JSON file with 100+ test entries:
-     ```json
-     [
-       {
-         "ebayTitle": "Charizard ex 006/197 Obsidian Flames Pokemon NM",
-         "localizedAspects": [{ "name": "Card Name", "value": "Charizard ex" }],
-         "conditionDescriptors": [{ "name": "40001", "values": ["400010"] }],
-         "expectedCardId": "charizard-ex-sv3-6",
-         "expectedVariant": "holofoil",
-         "expectedCondition": "NM",
-         "difficulty": "easy",
-         "tags": ["modern", "standard_format"]
-       }
-     ]
+6. **Create match accuracy script** — `src/scripts/test-accuracy.ts`
+   - A script that tests matching accuracy against **real eBay listings + real synced database**:
+     ```typescript
+     // Fetch 50 real eBay listings via searchItems()
+     // Run each through extractSignals() + matchListing()
+     // For each match, print: eBay title → matched card + variant + confidence
+     // Manually review and count correct/incorrect matches
+     // Print accuracy: "Accuracy: 42/50 (84%)"
      ```
-   - Mix: modern sets (30%), legacy (20%), vintage (20%), graded (15%), edge cases (15%)
-   - Include known-tricky titles (misspellings, unusual formats, multi-variant cards)
-   - Include negative examples (should NOT match)
+   - Run periodically to track matching quality as the algorithm improves
+   - Keep this script in the project: `src/scripts/test-accuracy.ts`
 
-7. **Create accuracy regression test** — `src/__tests__/corpus/accuracy.test.ts`
-   ```typescript
-   import corpus from './corpus.json';
-
-   describe('Match accuracy corpus', () => {
-     let correct = 0;
-     let total = 0;
-
-     for (const entry of corpus) {
-       test(`${entry.ebayTitle}`, async () => {
-         total++;
-         const listing = buildMockListing(entry);
-         const signals = extractSignals(listing);
-
-         if (entry.expectedCardId === null) {
-           // Should NOT match
-           expect(signals.rejected || await matchListing(signals) === null).toBe(true);
-           correct++;
-           return;
-         }
-
-         const match = await matchListing(signals);
-         expect(match).not.toBeNull();
-         if (match?.candidate.scrydex_card_id === entry.expectedCardId) correct++;
-       });
-     }
-
-     afterAll(() => {
-       const accuracy = (correct / total) * 100;
-       console.log(`Accuracy: ${accuracy.toFixed(1)}% (${correct}/${total})`);
-       process.stdout.write(`${accuracy.toFixed(1)}`);
-     });
-   });
-   ```
-
-8. **Create GitHub Actions CI pipeline** — `.github/workflows/ci.yml`
+7. **Create GitHub Actions CI pipeline** — `.github/workflows/ci.yml`
    ```yaml
    name: CI
    on: [push, pull_request]
 
    jobs:
-     test:
+     build:
        runs-on: ubuntu-latest
-       services:
-         postgres:
-           image: postgres:16
-           env:
-             POSTGRES_USER: test
-             POSTGRES_PASSWORD: test
-             POSTGRES_DB: pokesnipe_test
-           ports: ['5432:5432']
-           options: >-
-             --health-cmd pg_isready --health-interval 10s --health-timeout 5s --health-retries 5
-
        steps:
          - uses: actions/checkout@v4
          - uses: actions/setup-node@v4
@@ -3937,25 +3550,7 @@ npm install pino-pretty   # Already installed from Stage 1, but ensure it's ther
          - run: npm run build
          - run: npx tsc --noEmit
          - run: npm test
-         - name: Accuracy gate
-           run: |
-             ACCURACY=$(npm run test:accuracy --silent 2>&1 | tail -1)
-             echo "Accuracy: $ACCURACY%"
-             if (( $(echo "$ACCURACY < 85" | bc -l) )); then
-               echo "Accuracy $ACCURACY% is below 85% threshold"
-               exit 1
-             fi
-             echo "Accuracy $ACCURACY% passes threshold"
-       env:
-         DATABASE_URL: postgresql://test:test@localhost:5432/pokesnipe_test
-         ACCESS_PASSWORD: test-password-12345678
-         SESSION_SECRET: test-session-secret-must-be-32-chars-long
-         SCRYDEX_API_KEY: test-key
-         SCRYDEX_TEAM_ID: test-team
-         EBAY_CLIENT_ID: test-client
-         EBAY_CLIENT_SECRET: test-secret
-         EXCHANGE_RATE_API_KEY: test-key
-         NODE_ENV: test
+         # Pure function tests only — no DB, no API keys needed
    ```
 
 9. **Create Dockerfile** — Multi-stage build for Railway:
@@ -4002,50 +3597,21 @@ npm install pino-pretty   # Already installed from Stage 1, but ensure it's ther
         "start": "node dist/server.js",
         "test": "vitest run",
         "test:watch": "vitest",
-        "test:accuracy": "vitest run src/__tests__/corpus/accuracy.test.ts",
         "sync": "tsx src/scripts/run-sync.ts",
         "migrate": "tsx src/db/migrate.ts"
       }
     }
     ```
 
-**How to test:**
-
-**Automated tests (`src/__tests__/stage13/`):**
-
-- `telegram.test.ts` — Mock the Telegram API:
-  ```typescript
-  // Mock fetch to Telegram API
-  // Call sendAlert('critical', 'Test', 'Details')
-  // Verify correct URL called with correct body
-  // Verify HTML formatting correct
-
-  // When TELEGRAM_BOT_TOKEN is not set → no API call made (silent skip)
-  ```
-
-- `accuracy-tracker.test.ts` — Seed test DB with reviewed deals:
-  ```typescript
-  // Insert 10 deals: 9 correct, 1 incorrect
-  const stats = await getAccuracyStats();
-  expect(stats.rolling7d).toBe(90);
-  expect(stats.totalReviewed).toBe(10);
-  expect(stats.totalCorrect).toBe(9);
-  ```
-
-- `corpus/accuracy.test.ts` — Run the full match corpus (see step 7 above)
+**How to test — all live:**
 
 ```bash
-# Run all tests
-npm test
-
-# Run just the accuracy corpus
-npm run test:accuracy
-
-# Type check
+# Type check and pure function tests
 npx tsc --noEmit
+npm test
 ```
 
-**Smoke tests on Railway:**
+**Live tests on Railway:**
 
 ```bash
 # 1. Verify structured logs in Railway log viewer
