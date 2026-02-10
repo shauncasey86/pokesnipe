@@ -2,76 +2,96 @@ import { describe, expect, it } from 'vitest';
 import { extractCondition } from '../../services/extraction/condition-mapper.js';
 
 describe('extractCondition', () => {
-  describe('condition descriptors — real eBay format (highest priority)', () => {
-    it('maps NM from "Near Mint or Better" content', () => {
+  describe('ungraded condition descriptors (numeric IDs)', () => {
+    it('maps NM from descriptor 40001/400010', () => {
+      expect(
+        extractCondition({
+          conditionDescriptors: [{ name: '40001', values: ['400010'] }],
+        }).condition,
+      ).toBe('NM');
+    });
+
+    it('maps LP from descriptor 40001/400015', () => {
+      expect(
+        extractCondition({
+          conditionDescriptors: [{ name: '40001', values: ['400015'] }],
+        }).condition,
+      ).toBe('LP');
+    });
+
+    it('maps MP from descriptor 40001/400016', () => {
+      expect(
+        extractCondition({
+          conditionDescriptors: [{ name: '40001', values: ['400016'] }],
+        }).condition,
+      ).toBe('MP');
+    });
+
+    it('maps HP from descriptor 40001/400017', () => {
+      expect(
+        extractCondition({
+          conditionDescriptors: [{ name: '40001', values: ['400017'] }],
+        }).condition,
+      ).toBe('HP');
+    });
+
+    it('returns condition_descriptor as source', () => {
       const result = extractCondition({
-        conditionDescriptors: [
-          { name: 'Card Condition', values: [{ content: 'Near Mint or Better' }] },
-        ],
+        conditionDescriptors: [{ name: '40001', values: ['400010'] }],
       });
-      expect(result.condition).toBe('NM');
       expect(result.source).toBe('condition_descriptor');
       expect(result.isGraded).toBe(false);
     });
-
-    it('maps LP from "Lightly played (Excellent)" content', () => {
-      const result = extractCondition({
-        conditionDescriptors: [
-          {
-            name: 'Card Condition',
-            values: [{
-              content: 'Lightly played (Excellent)',
-              additionalInfo: ['Moderate surface scuffing', 'Fuzzy corners'],
-            }],
-          },
-        ],
-      });
-      expect(result.condition).toBe('LP');
-      expect(result.source).toBe('condition_descriptor');
-    });
-
-    it('maps MP from "Moderately Played (Very Good)" content', () => {
-      const result = extractCondition({
-        conditionDescriptors: [
-          { name: 'Card Condition', values: [{ content: 'Moderately Played (Very Good)' }] },
-        ],
-      });
-      expect(result.condition).toBe('MP');
-    });
-
-    it('maps HP from "Heavily Played (Poor)" content', () => {
-      const result = extractCondition({
-        conditionDescriptors: [
-          { name: 'Card Condition', values: [{ content: 'Heavily Played (Poor)' }] },
-        ],
-      });
-      expect(result.condition).toBe('HP');
-    });
   });
 
-  describe('graded cards', () => {
-    it('extracts PSA graded card with cert number (real eBay format)', () => {
+  describe('graded cards (numeric IDs)', () => {
+    it('extracts PSA grade 10 with cert number', () => {
       const graded = extractCondition({
         conditionDescriptors: [
-          { name: 'Professional Grader', values: [{ content: 'Professional Sports Authenticator (PSA)' }] },
-          { name: 'Grade', values: [{ content: '8' }] },
-          { name: 'Certification Number', values: [{ content: '133380695' }] },
+          { name: '27501', values: ['275010'] }, // PSA
+          { name: '27502', values: ['275020'] }, // Grade 10
+          { name: '27503', values: ['cert-123'] }, // Cert number
         ],
       });
       expect(graded.isGraded).toBe(true);
       expect(graded.gradingCompany).toBe('PSA');
-      expect(graded.grade).toBe('8');
-      expect(graded.certNumber).toBe('133380695');
+      expect(graded.grade).toBe('10');
+      expect(graded.certNumber).toBe('cert-123');
       expect(graded.condition).toBe('NM');
       expect(graded.source).toBe('condition_descriptor');
     });
 
-    it('extracts Ace Grading with cert number', () => {
+    it('extracts CGC grade 9.5', () => {
       const result = extractCondition({
         conditionDescriptors: [
-          { name: 'Professional Grader', values: [{ content: 'Ace Grading (Ace)' }] },
-          { name: 'Grade', values: [{ content: '10' }] },
-          { name: 'Certification Number', values: [{ content: '833867' }] },
+          { name: '27501', values: ['275015'] }, // CGC
+          { name: '27502', values: ['275021'] }, // 9.5
+        ],
+      });
+      expect(result.isGraded).toBe(true);
+      expect(result.gradingCompany).toBe('CGC');
+      expect(result.grade).toBe('9.5');
+      expect(result.certNumber).toBeNull();
+    });
+
+    it('extracts BGS grade 9', () => {
+      const result = extractCondition({
+        conditionDescriptors: [
+          { name: '27501', values: ['275013'] }, // BGS
+          { name: '27502', values: ['275022'] }, // 9
+        ],
+      });
+      expect(result.isGraded).toBe(true);
+      expect(result.gradingCompany).toBe('BGS');
+      expect(result.grade).toBe('9');
+    });
+
+    it('extracts Ace Grading', () => {
+      const result = extractCondition({
+        conditionDescriptors: [
+          { name: '27501', values: ['2750119'] }, // Ace Grading
+          { name: '27502', values: ['275020'] }, // 10
+          { name: '27503', values: ['833867'] },
         ],
       });
       expect(result.isGraded).toBe(true);
@@ -80,29 +100,39 @@ describe('extractCondition', () => {
       expect(result.certNumber).toBe('833867');
     });
 
-    it('detects CGC 9.5 grading', () => {
+    it('maps Authentic grade', () => {
       const result = extractCondition({
         conditionDescriptors: [
-          { name: 'Professional Grader', values: [{ content: 'CGC' }] },
-          { name: 'Grade', values: [{ content: '9.5' }] },
+          { name: '27501', values: ['275010'] }, // PSA
+          { name: '27502', values: ['2750219'] }, // Authentic
         ],
       });
       expect(result.isGraded).toBe(true);
-      expect(result.gradingCompany).toBe('CGC');
-      expect(result.grade).toBe('9.5');
+      expect(result.grade).toBe('Authentic');
     });
 
-    it('detects BGS grading without cert number', () => {
+    it('graded cards always map to NM condition', () => {
       const result = extractCondition({
         conditionDescriptors: [
-          { name: 'Professional Grader', values: [{ content: 'BGS' }] },
-          { name: 'Grade', values: [{ content: '9' }] },
+          { name: '27501', values: ['275016'] }, // SGC
+          { name: '27502', values: ['275026'] }, // 7
         ],
       });
+      expect(result.condition).toBe('NM');
       expect(result.isGraded).toBe(true);
-      expect(result.gradingCompany).toBe('BGS');
-      expect(result.grade).toBe('9');
-      expect(result.certNumber).toBeNull();
+    });
+
+    it('collects rawDescriptorIds for audit trail', () => {
+      const result = extractCondition({
+        conditionDescriptors: [
+          { name: '27501', values: ['275010'] },
+          { name: '27502', values: ['275020'] },
+        ],
+      });
+      expect(result.rawDescriptorIds).toContain('27501');
+      expect(result.rawDescriptorIds).toContain('275010');
+      expect(result.rawDescriptorIds).toContain('27502');
+      expect(result.rawDescriptorIds).toContain('275020');
     });
   });
 
@@ -130,6 +160,14 @@ describe('extractCondition', () => {
         localizedAspects: [{ name: 'Card Condition', value: 'Good' }],
       });
       expect(result.condition).toBe('MP');
+    });
+
+    it('maps Mint to NM', () => {
+      const result = extractCondition({
+        conditionDescriptors: [],
+        localizedAspects: [{ name: 'Card Condition', value: 'Mint' }],
+      });
+      expect(result.condition).toBe('NM');
     });
   });
 

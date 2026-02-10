@@ -32,7 +32,10 @@ debugExtractRouter.get('/api/debug/test-extract', async (req, res) => {
       const listing = {
         itemId: summary.itemId,
         title: summary.title,
-        conditionDescriptors: detail?.conditionDescriptors ?? [],
+        conditionDescriptors: (detail?.conditionDescriptors ?? []).map((d) => ({
+          name: d.name,
+          values: d.values.map((v) => v.content),
+        })),
         localizedAspects: detail?.localizedAspects ?? null,
       };
 

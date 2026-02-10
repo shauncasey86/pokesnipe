@@ -22,7 +22,7 @@ describe('mergeSignals', () => {
         gradingCompany: null,
         grade: null,
         certNumber: null,
-        rawDescriptors: ['400010'],
+        rawDescriptorIds: ['400010'],
       },
       { itemId: '123', title: 'Charizard ex 006/197', cleanedTitle: 'charizard ex 006/197' },
     );
@@ -45,7 +45,7 @@ describe('mergeSignals', () => {
         gradingCompany: null,
         grade: null,
         certNumber: null,
-        rawDescriptors: [],
+        rawDescriptorIds: [],
       },
       { itemId: '456', title: 'Charizard 006/197', cleanedTitle: 'charizard 006/197' },
     );
@@ -68,7 +68,7 @@ describe('mergeSignals', () => {
         gradingCompany: null,
         grade: null,
         certNumber: null,
-        rawDescriptors: [],
+        rawDescriptorIds: [],
       },
       { itemId: '789', title: 'Some Card', cleanedTitle: 'some card' },
     );
@@ -97,7 +97,7 @@ describe('mergeSignals', () => {
         gradingCompany: 'PSA',
         grade: '8',
         certNumber: '133380695',
-        rawDescriptors: [],
+        rawDescriptorIds: [],
       },
       { itemId: 'x', title: "Blaine's Charizard 2/132", cleanedTitle: "blaine's charizard 2/132" },
     );
@@ -125,7 +125,7 @@ describe('mergeSignals', () => {
         gradingCompany: null,
         grade: null,
         certNumber: null,
-        rawDescriptors: [],
+        rawDescriptorIds: [],
       },
       { itemId: 'y', title: 'Charizard 125/094', cleanedTitle: 'charizard 125/094' },
     );
@@ -152,7 +152,7 @@ describe('mergeSignals', () => {
         gradingCompany: null,
         grade: null,
         certNumber: null,
-        rawDescriptors: [],
+        rawDescriptorIds: [],
       },
       { itemId: 'z', title: 'Charizard GX SM60', cleanedTitle: 'charizard gx sm60' },
     );
@@ -171,7 +171,7 @@ describe('mergeSignals', () => {
         gradingCompany: null,
         grade: null,
         certNumber: null,
-        rawDescriptors: [],
+        rawDescriptorIds: [],
       },
       { itemId: '111', title: 'NM Pikachu', cleanedTitle: 'nm pikachu' },
     );
