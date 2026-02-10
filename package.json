@@ -24,9 +24,11 @@
   "license": "ISC",
   "dependencies": {
     "bottleneck": "^2.19.5",
+    "connect-pg-simple": "^10.0.0",
     "cookie-parser": "^1.4.7",
     "dotenv": "^17.2.4",
     "express": "^5.2.1",
+    "express-session": "^1.19.0",
     "helmet": "^8.1.0",
     "node-pg-migrate": "^8.0.4",
     "pg": "^8.18.0",
@@ -35,8 +37,10 @@
     "zod": "^4.3.6"
   },
   "devDependencies": {
+    "@types/connect-pg-simple": "^7.0.3",
     "@types/cookie-parser": "^1.4.10",
     "@types/express": "^5.0.6",
+    "@types/express-session": "^1.18.2",
     "@types/node": "^25.2.2",
     "@types/pg": "^8.16.0",
     "tsx": "^4.21.0",

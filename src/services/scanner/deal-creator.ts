@@ -1,5 +1,6 @@
 import pino from 'pino';
 import { pool } from '../../db/pool.js';
+import { sseEmitter } from '../../routes/sse.js';
 
 const log = pino({ name: 'deal-creator' });
 
@@ -100,6 +101,21 @@ export async function createDeal(data: DealInput): Promise<Deal | null> {
       { dealId: deal.deal_id, eventId: deal.event_id, tier: deal.tier, profit: deal.profit_gbp },
       'Deal created',
     );
+
+    // Push to SSE clients
+    sseEmitter.emit('deal', {
+      dealId: deal.deal_id,
+      eventId: deal.event_id,
+      ebayTitle: data.ebayTitle,
+      tier: data.tier,
+      profitGBP: parseFloat(deal.profit_gbp),
+      profitPercent: parseFloat(deal.profit_percent),
+      confidence: data.confidence,
+      condition: data.condition,
+      ebayImageUrl: data.ebayImageUrl,
+      ebayUrl: data.ebayUrl,
+      createdAt: deal.created_at,
+    });
 
     return {
       dealId: deal.deal_id,
