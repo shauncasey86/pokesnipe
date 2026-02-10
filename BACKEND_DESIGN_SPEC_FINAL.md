@@ -350,7 +350,7 @@ All syncs are idempotent via `ON CONFLICT ... DO UPDATE`.
 eBay supports up to 200 results per request. Same API call cost, 8x more coverage:
 
 ```typescript
-const listings = await searchItems(query, 200, {
+const listings = await searchItems('pokemon', 200, {
   categoryId: '183454',  // Individual Trading Cards
   sort: 'newlyListed',
   filter: buildFilterString()
@@ -372,7 +372,7 @@ Note: `newlyListed` sorts by `itemCreationDate` which is retained if an item is 
 ```typescript
 function buildFilterString(): string {
   const filters = [
-    'price:[5..],priceCurrency:GBP',           // Skip sub-£5 (margins negligible after fees)
+    'price:[10..],priceCurrency:GBP',          // Skip sub-£10 (margins negligible after fees)
     'buyingOptions:{FIXED_PRICE}',              // Skip auctions (can't buy immediately)
     'conditionIds:{2750|4000|1000|1500|2000|2500|3000}', // Graded, Ungraded, New-Acceptable
     'deliveryCountry:GB',                       // UK delivery
