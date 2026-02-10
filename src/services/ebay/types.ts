@@ -48,9 +48,14 @@ export interface EbayLocalizedAspect {
   value: string;
 }
 
+export interface EbayConditionDescriptorValue {
+  content: string;
+  additionalInfo?: string[];
+}
+
 export interface EbayConditionDescriptor {
   name: string;
-  values: string[];
+  values: EbayConditionDescriptorValue[];
 }
 
 // --- Budget ---
