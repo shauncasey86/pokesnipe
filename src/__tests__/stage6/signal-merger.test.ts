@@ -77,6 +77,61 @@ describe('mergeSignals', () => {
     expect(result.cleanedTitle).toBe('some card');
   });
 
+  it('parses structured cardNumber fraction format', () => {
+    const result = mergeSignals(
+      { cardNumber: { number: 2, prefix: null, denominator: 132 }, variant: 'holofoil' },
+      {
+        cardName: "Blaine's Charizard",
+        setName: 'Gym Challenge',
+        cardNumber: '2/132',
+        rarity: null,
+        language: null,
+        gradingCompany: null,
+        grade: null,
+        year: null,
+      },
+      {
+        condition: 'NM',
+        source: 'condition_descriptor',
+        isGraded: true,
+        gradingCompany: 'PSA',
+        grade: '8',
+        certNumber: '133380695',
+        rawDescriptors: [],
+      },
+      { itemId: 'x', title: "Blaine's Charizard 2/132", cleanedTitle: "blaine's charizard 2/132" },
+    );
+    expect(result.cardNumber).toEqual({ number: 2, prefix: null, denominator: 132 });
+    expect(result.signalSources['cardNumber']).toBe('structured');
+  });
+
+  it('parses structured cardNumber with leading zeros', () => {
+    const result = mergeSignals(
+      { cardNumber: null, variant: null },
+      {
+        cardName: 'Charizard ex',
+        setName: 'Obsidian Flames',
+        cardNumber: '125/094',
+        rarity: null,
+        language: null,
+        gradingCompany: null,
+        grade: null,
+        year: null,
+      },
+      {
+        condition: 'LP',
+        source: 'default',
+        isGraded: false,
+        gradingCompany: null,
+        grade: null,
+        certNumber: null,
+        rawDescriptors: [],
+      },
+      { itemId: 'y', title: 'Charizard 125/094', cleanedTitle: 'charizard 125/094' },
+    );
+    expect(result.cardNumber).toEqual({ number: 125, prefix: null, denominator: 94 });
+  });
+
   it('tracks condition source', () => {
     const result = mergeSignals(
       { cardNumber: null, variant: null },
