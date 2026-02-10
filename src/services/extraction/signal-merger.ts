@@ -40,11 +40,21 @@ export function mergeSignals(
     signalSources['cardNumber'] = 'title';
   }
   if (structured?.cardNumber) {
-    // Parse structured card number into a CardNumber if possible
-    const parsed = parseInt(structured.cardNumber, 10);
-    if (!isNaN(parsed)) {
-      cardNumber = { number: parsed, prefix: null, denominator: null };
+    // Parse structured card number — may be "006", "2/132", "125/094", etc.
+    const fractionMatch = structured.cardNumber.match(/^0*(\d+)\s*\/\s*0*(\d+)$/);
+    if (fractionMatch) {
+      cardNumber = {
+        number: parseInt(fractionMatch[1]!, 10),
+        prefix: null,
+        denominator: parseInt(fractionMatch[2]!, 10),
+      };
       signalSources['cardNumber'] = 'structured';
+    } else {
+      const parsed = parseInt(structured.cardNumber, 10);
+      if (!isNaN(parsed)) {
+        cardNumber = { number: parsed, prefix: null, denominator: null };
+        signalSources['cardNumber'] = 'structured';
+      }
     }
   }
 

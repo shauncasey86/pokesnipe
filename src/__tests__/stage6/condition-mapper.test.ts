@@ -50,25 +50,40 @@ describe('extractCondition', () => {
   });
 
   describe('graded cards', () => {
-    it('detects PSA graded card from descriptor content', () => {
+    it('extracts PSA graded card with cert number (real eBay format)', () => {
       const graded = extractCondition({
         conditionDescriptors: [
-          { name: 'Grading Company', values: [{ content: 'PSA' }] },
-          { name: 'Grade', values: [{ content: '10' }] },
-          { name: 'Certification Number', values: [{ content: 'cert-123' }] },
+          { name: 'Professional Grader', values: [{ content: 'Professional Sports Authenticator (PSA)' }] },
+          { name: 'Grade', values: [{ content: '8' }] },
+          { name: 'Certification Number', values: [{ content: '133380695' }] },
         ],
       });
       expect(graded.isGraded).toBe(true);
       expect(graded.gradingCompany).toBe('PSA');
-      expect(graded.grade).toBe('10');
+      expect(graded.grade).toBe('8');
+      expect(graded.certNumber).toBe('133380695');
       expect(graded.condition).toBe('NM');
       expect(graded.source).toBe('condition_descriptor');
+    });
+
+    it('extracts Ace Grading with cert number', () => {
+      const result = extractCondition({
+        conditionDescriptors: [
+          { name: 'Professional Grader', values: [{ content: 'Ace Grading (Ace)' }] },
+          { name: 'Grade', values: [{ content: '10' }] },
+          { name: 'Certification Number', values: [{ content: '833867' }] },
+        ],
+      });
+      expect(result.isGraded).toBe(true);
+      expect(result.gradingCompany).toBe('Ace Grading');
+      expect(result.grade).toBe('10');
+      expect(result.certNumber).toBe('833867');
     });
 
     it('detects CGC 9.5 grading', () => {
       const result = extractCondition({
         conditionDescriptors: [
-          { name: 'Grading Company', values: [{ content: 'CGC' }] },
+          { name: 'Professional Grader', values: [{ content: 'CGC' }] },
           { name: 'Grade', values: [{ content: '9.5' }] },
         ],
       });
@@ -80,7 +95,7 @@ describe('extractCondition', () => {
     it('detects BGS grading without cert number', () => {
       const result = extractCondition({
         conditionDescriptors: [
-          { name: 'Grading Company', values: [{ content: 'BGS' }] },
+          { name: 'Professional Grader', values: [{ content: 'BGS' }] },
           { name: 'Grade', values: [{ content: '9' }] },
         ],
       });

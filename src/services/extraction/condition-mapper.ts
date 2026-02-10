@@ -61,6 +61,12 @@ interface DescriptorValue {
   additionalInfo?: string[];
 }
 
+function getContent(values: DescriptorValue[] | string[]): string | null {
+  const first = values[0];
+  if (!first) return null;
+  return typeof first === 'string' ? first : first.content;
+}
+
 function makeDefault(): ConditionResult {
   return {
     condition: 'LP',
@@ -111,7 +117,6 @@ export function extractCondition(listing: {
 
   // Priority 1: Condition Descriptors
   if (descriptors.length > 0) {
-    // Collect all content strings from descriptor values
     let isGraded = false;
     let gradingCompany: string | null = null;
     let grade: string | null = null;
@@ -119,31 +124,31 @@ export function extractCondition(listing: {
     let detectedCondition: 'NM' | 'LP' | 'MP' | 'HP' | null = null;
 
     for (const descriptor of descriptors) {
-      for (const val of descriptor.values) {
-        const content = typeof val === 'string' ? val : val.content;
-        if (!content) continue;
+      const content = getContent(descriptor.values);
+      if (!content) continue;
 
-        // Check for grading company
+      const nameLower = descriptor.name.toLowerCase();
+
+      // Route by descriptor name first (most reliable)
+      if (nameLower === 'professional grader') {
+        isGraded = true;
+        gradingCompany = detectGradingCompany(content) ?? content;
+      } else if (nameLower === 'grade') {
+        grade = content;
+      } else if (nameLower === 'certification number') {
+        certNumber = content;
+      } else if (nameLower === 'card condition') {
+        const cond = parseConditionFromText(content);
+        if (cond) detectedCondition = cond;
+      } else {
+        // Fallback: scan content for grading company or condition
         const company = detectGradingCompany(content);
         if (company) {
           isGraded = true;
           gradingCompany = company;
-          continue;
-        }
-
-        // Check for grade value (numeric like "10", "9.5")
-        if (isGraded && !grade) {
-          const gradeVal = extractGradeFromText(content);
-          if (gradeVal) {
-            grade = gradeVal;
-            continue;
-          }
-        }
-
-        // Check for condition text
-        const cond = parseConditionFromText(content);
-        if (cond) {
-          detectedCondition = cond;
+        } else {
+          const cond = parseConditionFromText(content);
+          if (cond) detectedCondition = cond;
         }
       }
     }
