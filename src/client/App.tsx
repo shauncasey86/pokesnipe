@@ -357,6 +357,9 @@ export default function App() {
   const [saved, setSaved] = useState(false);
   const [sseStatus, setSseStatus] = useState<string>("connected");
   const [showHelp, setShowHelp] = useState(false);
+  const [showTests, setShowTests] = useState(false);
+  const [testResults, setTestResults] = useState<Record<string, any>>({});
+  const [testRunning, setTestRunning] = useState<Record<string, boolean>>({});
   const feedRef = useRef<HTMLDivElement>(null);
   const sseRef = useRef<EventSource | null>(null);
   const selDeal = deals.find(d => d.id === selId) || null;
@@ -475,6 +478,37 @@ export default function App() {
     } catch { /* ignore */ }
   };
 
+  const TEST_DEFS = [
+    { key: "db", label: "Database", desc: "Connectivity, tables, extensions, migrations" },
+    { key: "ebay", label: "eBay API", desc: "Auth + search test (3 results)" },
+    { key: "ebay-lookup", label: "eBay Lookup", desc: "Item fetch via legacy ID" },
+    { key: "scrydex", label: "Scrydex API", desc: "Cards page fetch + key check" },
+    { key: "exchange", label: "Exchange Rate", desc: "USD → GBP live rate" },
+    { key: "match", label: "Card Matching", desc: "Simulate matcher on sample title" },
+    { key: "pipeline", label: "Full Pipeline", desc: "eBay search → match → price" },
+    { key: "usage", label: "API Usage", desc: "Calls today, scan/sync history" },
+    { key: "integrity", label: "Data Integrity", desc: "Orphans, dupes, rarity, pg_trgm" },
+  ];
+
+  const runTest = async (key: string) => {
+    setTestRunning(p => ({ ...p, [key]: true }));
+    setTestResults(p => ({ ...p, [key]: undefined }));
+    try {
+      const r = await fetch(`/api/test/${key}`);
+      const data = await r.json();
+      setTestResults(p => ({ ...p, [key]: { ...data, _status: r.status } }));
+    } catch (err: any) {
+      setTestResults(p => ({ ...p, [key]: { ok: false, error: err.message, _status: 0 } }));
+    }
+    setTestRunning(p => ({ ...p, [key]: false }));
+  };
+
+  const runAllTests = async () => {
+    for (const t of TEST_DEFS) {
+      await runTest(t.key);
+    }
+  };
+
   if (!loggedIn) return <Login onLogin={() => {
     setLoggedIn(true);
     fetch("/api/deals?limit=50").then(r => r.json()).then(d => setDeals(d.deals || [])).catch(() => {});
@@ -519,6 +553,7 @@ export default function App() {
             </button>
           </GradBorder>
           <button onClick={() => { setShowSettings(true); setSettingsTab("general"); }} style={{ width: 34, height: 34, display: "flex", alignItems: "center", justifyContent: "center", borderRadius: "var(--r-pill)", background: "var(--glass)", border: "1px solid var(--brd)", color: "var(--tMut)", fontSize: 14 }}>⚙</button>
+          <button onClick={() => { setShowTests(true); setTestResults({}); setTestRunning({}); }} title="Test Suite" style={{ width: 34, height: 34, display: "flex", alignItems: "center", justifyContent: "center", borderRadius: "var(--r-pill)", background: "var(--glass)", border: "1px solid var(--brd)", color: "var(--tMut)", fontFamily: "var(--fm)", fontSize: 11, fontWeight: 700 }}>⚡</button>
           <button onClick={() => setShowHelp(true)} style={{ width: 34, height: 34, display: "flex", alignItems: "center", justifyContent: "center", borderRadius: "var(--r-pill)", background: "var(--glass)", border: "1px solid var(--brd)", color: "var(--tMut)", fontSize: 14, fontWeight: 700 }}>?</button>
           <button onClick={toggleScanner} title={status?.scannerPaused ? "Scanner paused - click to resume" : "Scanner active - click to pause"} style={{ display: "flex", alignItems: "center", gap: 5, padding: "0 10px", height: 34, borderRadius: "var(--r-pill)", background: status?.scannerPaused ? "rgba(248,113,113,0.06)" : "var(--glass)", border: `1px solid ${status?.scannerPaused ? "rgba(248,113,113,0.2)" : "var(--brd)"}`, cursor: "pointer" }}>
             <div style={{ width: 6, height: 6, borderRadius: "50%", background: status?.scannerPaused ? "var(--red)" : sseStatus === "connected" ? "var(--green)" : sseStatus === "reconnecting" ? "var(--amber)" : "var(--red)", boxShadow: `0 0 6px ${status?.scannerPaused ? "rgba(248,113,113,0.5)" : "rgba(52,211,153,0.5)"}`, animation: status?.scannerPaused ? "none" : "pulse 3s ease infinite" }} />
@@ -670,6 +705,160 @@ export default function App() {
                 {[["GRAIL deals", "Instant push", "var(--green)"], ["HIT deals", "Instant push", "var(--green)"], ["FLIP deals", "OFF", "var(--tMut)"], ["System warnings", "Push on error", "var(--amber)"]].map(([l, v, c], i) => <div key={i} style={{ display: "flex", justifyContent: "space-between", padding: "7px 0", fontSize: 13 }}><span style={{ fontWeight: 600, color: "var(--tPri)" }}>{l}</span><span style={{ fontFamily: "var(--fm)", fontSize: 10, fontWeight: 600, color: c }}>{v}</span></div>)}
               </div>
             </>}
+          </div>
+        </div>
+      </div>}
+
+      {/* TEST SUITE */}
+      {showTests && <div onClick={(e: any) => { if (e.target === e.currentTarget) setShowTests(false); }} style={{ position: "fixed", inset: 0, zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(7,10,18,0.85)", backdropFilter: "blur(16px)" }}>
+        <div style={{ width: 700, maxWidth: "94vw", maxHeight: "85vh", borderRadius: "var(--r-xl)", background: "rgba(12,16,25,0.96)", border: "1px solid var(--brd2)", display: "flex", flexDirection: "column", overflow: "hidden" }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 22px", borderBottom: "1px solid var(--brd)", flexShrink: 0 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+              <span style={{ fontWeight: 300, fontSize: 12, letterSpacing: 3, color: "var(--tMut)", textTransform: "uppercase" as const }}>Test Suite</span>
+              {(() => {
+                const done = TEST_DEFS.filter(t => testResults[t.key] != null).length;
+                const passed = TEST_DEFS.filter(t => testResults[t.key]?.ok).length;
+                const failed = TEST_DEFS.filter(t => testResults[t.key] != null && !testResults[t.key]?.ok).length;
+                return done > 0 ? (
+                  <div style={{ display: "flex", gap: 8, fontFamily: "var(--fm)", fontSize: 10 }}>
+                    <span style={{ color: "var(--green)", fontWeight: 600 }}>{passed} passed</span>
+                    {failed > 0 && <span style={{ color: "var(--red)", fontWeight: 600 }}>{failed} failed</span>}
+                    <span style={{ color: "var(--tMut)" }}>{done}/{TEST_DEFS.length}</span>
+                  </div>
+                ) : null;
+              })()}
+            </div>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button onClick={runAllTests} disabled={Object.values(testRunning).some(Boolean)} style={{ height: 30, padding: "0 16px", borderRadius: "var(--r-pill)", background: Object.values(testRunning).some(Boolean) ? "var(--glass)" : "linear-gradient(135deg, rgba(52,211,153,0.15), rgba(96,165,250,0.1))", border: "1px solid rgba(52,211,153,0.25)", fontFamily: "var(--fm)", fontSize: 10, fontWeight: 700, color: Object.values(testRunning).some(Boolean) ? "var(--tMut)" : "var(--green)", letterSpacing: 1.5 }}>{Object.values(testRunning).some(Boolean) ? "RUNNING..." : "RUN ALL"}</button>
+              <button onClick={() => setShowTests(false)} style={{ width: 30, height: 30, borderRadius: "var(--r-pill)", background: "var(--glass)", border: "1px solid var(--brd)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, color: "var(--tMut)" }}>✕</button>
+            </div>
+          </div>
+          <div style={{ flex: 1, overflowY: "auto", padding: "8px 0" }}>
+            {TEST_DEFS.map(t => {
+              const result = testResults[t.key];
+              const running = testRunning[t.key];
+              const statusColor = running ? "var(--amber)" : result?.ok ? "var(--green)" : result ? "var(--red)" : "var(--tGho)";
+              const statusLabel = running ? "RUNNING" : result?.ok ? "PASS" : result ? "FAIL" : "PENDING";
+              return (
+                <div key={t.key} style={{ padding: "10px 22px", borderBottom: "1px solid var(--brd)" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                    <div style={{ width: 8, height: 8, borderRadius: "50%", background: statusColor, boxShadow: running ? `0 0 8px rgba(251,191,36,0.5)` : result?.ok ? `0 0 8px rgba(52,211,153,0.4)` : result ? `0 0 8px rgba(248,113,113,0.4)` : "none", animation: running ? "pulse 1.5s ease infinite" : "none", flexShrink: 0 }} />
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                        <span style={{ fontWeight: 700, fontSize: 13, color: "var(--tMax)" }}>{t.label}</span>
+                        <span style={{ fontFamily: "var(--fm)", fontSize: 9, fontWeight: 600, color: statusColor, letterSpacing: 1 }}>{statusLabel}</span>
+                        {result?.elapsed_ms != null && <span style={{ fontFamily: "var(--fm)", fontSize: 9, color: "var(--tMut)" }}>{result.elapsed_ms}ms</span>}
+                      </div>
+                      <div style={{ fontFamily: "var(--fm)", fontSize: 10, color: "var(--tMut)", marginTop: 2 }}>{t.desc}</div>
+                    </div>
+                    <button onClick={() => runTest(t.key)} disabled={running} style={{ height: 26, padding: "0 12px", borderRadius: "var(--r-pill)", background: "var(--glass)", border: "1px solid var(--brd)", fontFamily: "var(--fm)", fontSize: 9, fontWeight: 600, color: running ? "var(--tGho)" : "var(--tSec)", letterSpacing: 1 }}>{running ? "..." : "RUN"}</button>
+                  </div>
+                  {/* Result details */}
+                  {result && !running && (
+                    <div style={{ marginTop: 8, marginLeft: 20, padding: "10px 14px", borderRadius: "var(--r-md)", background: result.ok ? "rgba(52,211,153,0.04)" : "rgba(248,113,113,0.04)", border: `1px solid ${result.ok ? "rgba(52,211,153,0.12)" : "rgba(248,113,113,0.12)"}` }}>
+                      {result.error && <div style={{ fontFamily: "var(--fm)", fontSize: 11, color: "var(--red)", marginBottom: 6, wordBreak: "break-all" as const }}>Error: {typeof result.error === "string" ? result.error : JSON.stringify(result.error)}</div>}
+                      {/* DB test */}
+                      {t.key === "db" && result.ok && (
+                        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                          <div style={{ fontFamily: "var(--fm)", fontSize: 10, color: "var(--tSec)" }}>
+                            {(result.tables || []).map((tb: any) => <span key={tb.table || tb.relname} style={{ display: "inline-block", marginRight: 12, marginBottom: 4 }}><span style={{ color: "var(--tMut)" }}>{tb.table || tb.relname}:</span> <span style={{ color: "var(--green)", fontWeight: 600 }}>{tb.row_count}</span></span>)}
+                          </div>
+                          {result.extensions && <div style={{ fontFamily: "var(--fm)", fontSize: 9, color: "var(--tMut)" }}>Extensions: {result.extensions.map((e: any) => `${e.extname} v${e.extversion}`).join(", ")}</div>}
+                          {result.migrations && <div style={{ fontFamily: "var(--fm)", fontSize: 9, color: "var(--tMut)" }}>Migrations: {result.migrations.length} applied</div>}
+                        </div>
+                      )}
+                      {/* eBay test */}
+                      {t.key === "ebay" && result.ok && (
+                        <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                          <div style={{ fontFamily: "var(--fm)", fontSize: 10, color: "var(--tSec)" }}>{result.results_count} results found · {result.diagnostics?.environment}</div>
+                          {(result.sample || []).map((s: any, i: number) => (
+                            <div key={i} style={{ fontFamily: "var(--fm)", fontSize: 10, color: "var(--tMut)", display: "flex", gap: 8, alignItems: "center" }}>
+                              {s.image && <img src={s.image} alt="" style={{ width: 24, height: 33, borderRadius: 3, objectFit: "cover", flexShrink: 0 }} />}
+                              <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" as const }}>{s.title}</span>
+                              <span style={{ color: "var(--green)", fontWeight: 600, flexShrink: 0 }}>{s.price?.currency} {s.price?.value}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      {/* eBay lookup */}
+                      {t.key === "ebay-lookup" && result.ok && (
+                        <div style={{ fontFamily: "var(--fm)", fontSize: 10, color: "var(--tSec)" }}>
+                          <div style={{ fontWeight: 600, marginBottom: 2 }}>{result.title}</div>
+                          <div style={{ color: "var(--tMut)" }}>ID: {result.item_id} · {result.condition} · {result.specifics_count} specifics · {result.price?.currency} {result.price?.value}</div>
+                        </div>
+                      )}
+                      {/* Scrydex test */}
+                      {t.key === "scrydex" && result.ok && (
+                        <div style={{ fontFamily: "var(--fm)", fontSize: 10, color: "var(--tSec)" }}>
+                          <div>{result.cards_page1_count} cards on page 1 · hasMore: {String(result.has_more_cards)}</div>
+                          {(result.sample_cards || []).map((c: any, i: number) => <div key={i} style={{ color: "var(--tMut)", marginTop: 2 }}>{c.name} #{c.number} — {c.expansion}</div>)}
+                        </div>
+                      )}
+                      {/* Exchange test */}
+                      {t.key === "exchange" && result.ok && (
+                        <div style={{ fontFamily: "var(--fm)", fontSize: 10, color: "var(--tSec)" }}>1 USD = <span style={{ color: "var(--green)", fontWeight: 700, fontSize: 13 }}>{result.usd_to_gbp}</span> GBP</div>
+                      )}
+                      {/* Match test */}
+                      {t.key === "match" && result.ok && (
+                        <div style={{ fontFamily: "var(--fm)", fontSize: 10, color: "var(--tSec)" }}>
+                          {result.matched ? (
+                            <>
+                              <div style={{ fontWeight: 600 }}>Matched: {result.card?.name} #{result.card?.card_number}</div>
+                              <div style={{ color: "var(--tMut)", marginTop: 2 }}>{result.card?.expansion_name} · Confidence: <span style={{ color: CONF_C(result.confidence), fontWeight: 600 }}>{(result.confidence * 100).toFixed(0)}%</span></div>
+                              {result.breakdown && <div style={{ color: "var(--tGho)", marginTop: 2 }}>{Object.entries(result.breakdown).map(([k, v]) => `${k}: ${typeof v === "number" ? v.toFixed(2) : v}`).join(" · ")}</div>}
+                            </>
+                          ) : <div style={{ color: "var(--amber)" }}>No match found — {result.message}</div>}
+                        </div>
+                      )}
+                      {/* Pipeline test */}
+                      {t.key === "pipeline" && result.ok && (
+                        <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                          {(result.steps || []).map((s: any, i: number) => (
+                            <div key={i} style={{ fontFamily: "var(--fm)", fontSize: 10, display: "flex", gap: 8, alignItems: "center" }}>
+                              <span style={{ color: s.matched === false ? "var(--amber)" : "var(--green)", fontWeight: 600, minWidth: 70 }}>{s.step}</span>
+                              {s.step === "ebay_search" && <span style={{ color: "var(--tSec)" }}>{s.count} listings</span>}
+                              {s.step === "exchange_rate" && <span style={{ color: "var(--tSec)" }}>×{s.usd_to_gbp}</span>}
+                              {s.step === "match" && <span style={{ color: s.matched ? "var(--tSec)" : "var(--tMut)" }}>{s.matched ? `${s.title}` : `No match: ${s.title}`}</span>}
+                              {s.step === "pipeline" && <span style={{ color: "var(--tSec)" }}>{s.matched_card} · {s.confidence} · <span style={{ color: "var(--green)", fontWeight: 600 }}>{s.profit} ({s.profit_pct})</span> · <span style={{ fontWeight: 600 }}>{s.tier?.toUpperCase()}</span></span>}
+                              {s.elapsed_ms != null && <span style={{ color: "var(--tGho)", marginLeft: "auto", flexShrink: 0 }}>{s.elapsed_ms}ms</span>}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      {/* Usage test */}
+                      {t.key === "usage" && result.ok && (
+                        <div style={{ fontFamily: "var(--fm)", fontSize: 10, color: "var(--tSec)" }}>
+                          <div style={{ display: "flex", gap: 16, marginBottom: 4 }}>
+                            <span>eBay today: <span style={{ color: "var(--green)", fontWeight: 600 }}>{result.today?.ebay ?? 0}</span>/5K</span>
+                            <span>Scrydex today: <span style={{ color: "var(--green)", fontWeight: 600 }}>{result.today?.scrydex ?? 0}</span>/50K</span>
+                          </div>
+                          {result.recent_scans?.length > 0 && <div style={{ color: "var(--tMut)", marginTop: 4 }}>Recent scans: {result.recent_scans.slice(0, 3).map((s: any) => `${s.status}${s.deals_found != null ? ` (${s.deals_found} deals)` : ""}`).join(", ")}</div>}
+                          {result.recent_syncs?.length > 0 && <div style={{ color: "var(--tMut)", marginTop: 2 }}>Recent syncs: {result.recent_syncs.slice(0, 3).map((s: any) => `${s.type}: ${s.status}`).join(", ")}</div>}
+                        </div>
+                      )}
+                      {/* Integrity test */}
+                      {t.key === "integrity" && result.ok && (
+                        <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                          {(result.checks || []).map((c: any, i: number) => (
+                            <div key={i} style={{ fontFamily: "var(--fm)", fontSize: 10, display: "flex", gap: 8, alignItems: "center" }}>
+                              <span style={{ width: 6, height: 6, borderRadius: "50%", background: c.status === "ok" ? "var(--green)" : c.status === "warn" ? "var(--amber)" : c.status === "fail" ? "var(--red)" : "var(--tGho)", flexShrink: 0 }} />
+                              <span style={{ color: "var(--tSec)", minWidth: 160 }}>{c.check}</span>
+                              {c.count != null && <span style={{ color: c.status === "warn" ? "var(--amber)" : "var(--tMut)", fontWeight: 600 }}>{c.count}</span>}
+                              {c.similarity_score != null && <span style={{ color: "var(--green)", fontWeight: 600 }}>{c.similarity_score}</span>}
+                              {c.data && <span style={{ color: "var(--tGho)" }}>{c.data.length} entries</span>}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      {/* Generic fallback for unknown keys */}
+                      {!["db", "ebay", "ebay-lookup", "scrydex", "exchange", "match", "pipeline", "usage", "integrity"].includes(t.key) && (
+                        <pre style={{ fontFamily: "var(--fm)", fontSize: 10, color: "var(--tMut)", whiteSpace: "pre-wrap" as const, wordBreak: "break-all" as const, margin: 0 }}>{JSON.stringify(result, null, 2)}</pre>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
         </div>
       </div>}
