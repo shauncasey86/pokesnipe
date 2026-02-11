@@ -204,7 +204,7 @@ export default function Dashboard() {
   const scannerStatus = scannerPaused ? 'paused' : (status?.scanner?.status || 'running');
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', overflow: 'hidden' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', overflow: 'hidden', position: 'relative', zIndex: 1 }}>
       <Header
         sseConnected={sseState === 'connected'}
         scannerStatus={scannerStatus}

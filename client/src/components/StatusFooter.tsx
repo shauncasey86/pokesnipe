@@ -53,7 +53,7 @@ export default function StatusFooter({ status }: { status: SystemStatus | null }
         padding: '0 16px',
         borderTop: '1px solid var(--brd)',
         background: 'var(--bg1)',
-        fontFamily: "'DM Mono', monospace",
+        fontFamily: "var(--font-mono)",
         fontSize: 10,
         color: 'var(--tSec)',
         flexShrink: 0,

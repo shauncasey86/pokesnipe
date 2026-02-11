@@ -23,15 +23,28 @@
   --blue: #60a5fa;
   --purple: #c084fc;
 
+  /* Tier accents */
+  --tier-grail: #ff6b35;
+  --tier-grail-alt: #ff3b6f;
+  --tier-hit: #38bdf8;
+  --tier-hit-alt: #22d3ee;
+  --tier-flip: #f97316;
+  --tier-flip-alt: #fb923c;
+  --tier-sleep: #3a4060;
+
   /* Gradients */
   --grad-accent: linear-gradient(90deg, #34d399, #60a5fa, #c084fc, #ff6b6b);
   --grad-grail: linear-gradient(135deg, #ff6b35, #ff3b6f);
-  --grad-hit: linear-gradient(135deg, #ffd60a, #ffaa00);
-  --grad-flip: linear-gradient(135deg, #6b7fa0, #4a5a78);
+  --grad-hit: linear-gradient(135deg, #38bdf8, #22d3ee);
+  --grad-flip: linear-gradient(135deg, #f97316, #fb923c);
   --grad-sleep: linear-gradient(135deg, #3a4060, #2a3050);
   --grad-cta: linear-gradient(135deg, #34d399, #2dd4bf);
 
   /* Radius */
   --radius: 10px;
   --radius-lg: 14px;
+
+  /* Fonts */
+  --font-display: 'Bricolage Grotesque', system-ui, -apple-system, sans-serif;
+  --font-mono: 'JetBrains Mono', 'DM Mono', monospace;
 }

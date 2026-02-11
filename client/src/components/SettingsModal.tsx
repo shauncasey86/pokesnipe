@@ -86,7 +86,7 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
           <span className="section-header">SETTINGS</span>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            {saved && <span style={{ fontFamily: "'DM Mono', monospace", fontSize: 10, color: 'var(--green)' }}>Saved</span>}
+            {saved && <span style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: 'var(--green)' }}>Saved</span>}
             <button onClick={onClose} style={{ background: 'none', border: 'none', color: 'var(--tMut)', fontSize: 18 }}>×</button>
           </div>
         </div>
@@ -115,7 +115,7 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
             {/* Tier thresholds (read-only reference) */}
             <div>
               <span className="section-header">TIER THRESHOLDS</span>
-              <div style={{ marginTop: 6, fontFamily: "'DM Mono', monospace", fontSize: 11, color: 'var(--tSec)', display: 'flex', flexDirection: 'column', gap: 2 }}>
+              <div style={{ marginTop: 6, fontFamily: "var(--font-mono)", fontSize: 11, color: 'var(--tSec)', display: 'flex', flexDirection: 'column', gap: 2 }}>
                 <span>GRAIL — &gt;40% profit</span>
                 <span>HIT — 25-40% profit</span>
                 <span>FLIP — 15-25% profit</span>
@@ -129,7 +129,7 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
               <div style={{ marginTop: 6, display: 'flex', flexDirection: 'column', gap: 8 }}>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                   <span style={{ fontSize: 13, color: 'var(--tPri)' }}>Currency</span>
-                  <span style={{ fontFamily: "'DM Mono', monospace", fontSize: 12, color: 'var(--tSec)' }}>GBP (£)</span>
+                  <span style={{ fontFamily: "var(--font-mono)", fontSize: 12, color: 'var(--tSec)' }}>GBP (£)</span>
                 </div>
               </div>
             </div>
@@ -170,7 +170,7 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
                       width: 56, height: 28, textAlign: 'right',
                       background: 'var(--glass)', border: '1px solid var(--brd)',
                       borderRadius: 4, padding: '0 6px', color: 'var(--tMax)',
-                      fontFamily: "'DM Mono', monospace", fontSize: 12, outline: 'none',
+                      fontFamily: "var(--font-mono)", fontSize: 12, outline: 'none',
                     }}
                   />
                 </div>
@@ -189,7 +189,7 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
                       width: 56, height: 28, textAlign: 'right',
                       background: 'var(--glass)', border: '1px solid var(--brd)',
                       borderRadius: 4, padding: '0 6px', color: 'var(--tMax)',
-                      fontFamily: "'DM Mono', monospace", fontSize: 12, outline: 'none',
+                      fontFamily: "var(--font-mono)", fontSize: 12, outline: 'none',
                     }}
                   />
                 </div>
@@ -246,14 +246,14 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
                     {testResult === 'sending' ? 'Sending...' : 'Test Message'}
                   </button>
                   {testResult === 'success' && (
-                    <span style={{ fontFamily: "'DM Mono', monospace", fontSize: 10, color: 'var(--green)' }}>Sent</span>
+                    <span style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: 'var(--green)' }}>Sent</span>
                   )}
                   {testResult === 'error' && (
-                    <span style={{ fontFamily: "'DM Mono', monospace", fontSize: 10, color: 'var(--red)' }}>Failed</span>
+                    <span style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: 'var(--red)' }}>Failed</span>
                   )}
                 </div>
                 {!telegramToken && !telegramChatId && (
-                  <span style={{ fontFamily: "'DM Mono', monospace", fontSize: 10, color: 'var(--tMut)' }}>
+                  <span style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: 'var(--tMut)' }}>
                     Configure bot token and chat ID to enable Telegram alerts
                   </span>
                 )}
@@ -301,7 +301,7 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
                       width: 56, height: 28, textAlign: 'right',
                       background: 'var(--glass)', border: '1px solid var(--brd)',
                       borderRadius: 4, padding: '0 6px', color: 'var(--tMax)',
-                      fontFamily: "'DM Mono', monospace", fontSize: 12, outline: 'none',
+                      fontFamily: "var(--font-mono)", fontSize: 12, outline: 'none',
                     }}
                   />
                 </div>
@@ -320,7 +320,7 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
                       width: 56, height: 28, textAlign: 'right',
                       background: 'var(--glass)', border: '1px solid var(--brd)',
                       borderRadius: 4, padding: '0 6px', color: 'var(--tMax)',
-                      fontFamily: "'DM Mono', monospace", fontSize: 12, outline: 'none',
+                      fontFamily: "var(--font-mono)", fontSize: 12, outline: 'none',
                     }}
                   />
                 </div>

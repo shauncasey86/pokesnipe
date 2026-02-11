@@ -28,7 +28,7 @@ export default function LiqPill({ grade }: { grade: LiquidityGrade | null }) {
         borderRadius: 4,
         border: `1px solid ${color}`,
         color,
-        fontFamily: "'DM Mono', monospace",
+        fontFamily: "var(--font-mono)",
         fontSize: 10,
         fontWeight: 500,
         lineHeight: '16px',

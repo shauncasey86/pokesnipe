@@ -1,22 +1,25 @@
 import { useState } from 'react';
 import type { FilterState, Tier, Condition, LiquidityGrade } from '../types/deals';
 
+const FONT_MONO = "var(--font-mono)";
+
 function Seg({ label, active, color, onClick }: { label: string; active: boolean; color?: string; onClick: () => void }) {
   return (
     <button
       onClick={onClick}
       style={{
-        padding: '3px 8px',
+        padding: '3px 9px',
         borderRadius: 4,
-        border: `1px solid ${active ? (color || 'var(--tSec)') : 'var(--brd)'}`,
-        background: active ? `${color || 'var(--tSec)'}15` : 'transparent',
+        border: active ? `1px solid ${color || 'var(--tSec)'}` : '1px solid transparent',
+        background: active ? `${color || 'var(--tSec)'}18` : 'transparent',
         color: active ? (color || 'var(--tMax)') : 'var(--tMut)',
-        fontFamily: "'DM Mono', monospace",
+        fontFamily: FONT_MONO,
         fontSize: 10,
-        fontWeight: 500,
+        fontWeight: active ? 700 : 400,
         cursor: 'pointer',
         transition: 'all 0.12s',
         lineHeight: '16px',
+        letterSpacing: 0.5,
       }}
     >
       {label}
@@ -24,24 +27,37 @@ function Seg({ label, active, color, onClick }: { label: string; active: boolean
   );
 }
 
+function GroupLabel({ label }: { label: string }) {
+  return (
+    <span style={{
+      fontFamily: FONT_MONO, fontSize: 8, fontWeight: 200,
+      textTransform: 'uppercase', letterSpacing: 2,
+      color: 'var(--tMut)', flexShrink: 0, userSelect: 'none',
+    }}>
+      {label}
+    </span>
+  );
+}
+
 function FilterGroup({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div style={{
-      display: 'flex', alignItems: 'center', gap: 4,
-      padding: '3px 8px',
-      background: 'var(--glass)',
-      borderRadius: 6,
-      border: '1px solid var(--brd)',
+      display: 'flex', alignItems: 'center', gap: 3,
     }}>
-      <span style={{
-        fontFamily: "'DM Mono', monospace", fontSize: 9,
-        textTransform: 'uppercase', letterSpacing: 1.5,
-        color: 'var(--tMut)', marginRight: 2, flexShrink: 0,
-      }}>
-        {label}
-      </span>
-      {children}
+      <GroupLabel label={label} />
+      <div style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+        {children}
+      </div>
     </div>
+  );
+}
+
+function Divider() {
+  return (
+    <div style={{
+      width: 1, height: 18, background: 'var(--brd)',
+      margin: '0 6px', flexShrink: 0,
+    }} />
   );
 }
 
@@ -53,23 +69,28 @@ function Stepper({ value, onChange, min = 0, max = 100, step = 5 }: {
       <button
         onClick={() => onChange(Math.max(min, value - step))}
         style={{
-          width: 20, height: 20, borderRadius: 3,
+          width: 18, height: 18, borderRadius: 3,
           background: 'transparent', border: '1px solid var(--brd)',
-          color: 'var(--tSec)', fontSize: 12, display: 'flex',
+          color: 'var(--tSec)', fontSize: 11, display: 'flex',
           alignItems: 'center', justifyContent: 'center', cursor: 'pointer',
+          fontFamily: FONT_MONO, fontWeight: 200,
+          transition: 'all 0.12s',
         }}
-      >−</button>
+      >{'\u2212'}</button>
       <span style={{
-        fontFamily: "'DM Mono', monospace", fontSize: 10,
-        color: 'var(--tMax)', minWidth: 28, textAlign: 'center',
+        fontFamily: FONT_MONO, fontSize: 10, fontWeight: 700,
+        color: 'var(--tMax)', minWidth: 30, textAlign: 'center',
+        fontFeatureSettings: "'tnum' 1",
       }}>{value}%</span>
       <button
         onClick={() => onChange(Math.min(max, value + step))}
         style={{
-          width: 20, height: 20, borderRadius: 3,
+          width: 18, height: 18, borderRadius: 3,
           background: 'transparent', border: '1px solid var(--brd)',
-          color: 'var(--tSec)', fontSize: 12, display: 'flex',
+          color: 'var(--tSec)', fontSize: 11, display: 'flex',
           alignItems: 'center', justifyContent: 'center', cursor: 'pointer',
+          fontFamily: FONT_MONO, fontWeight: 200,
+          transition: 'all 0.12s',
         }}
       >+</button>
     </div>
@@ -77,7 +98,7 @@ function Stepper({ value, onChange, min = 0, max = 100, step = 5 }: {
 }
 
 const TIER_COLORS: Record<Tier, string> = {
-  GRAIL: '#ff6b35', HIT: '#ffd60a', FLIP: '#6b7fa0', SLEEP: '#3a4060',
+  GRAIL: 'var(--tier-grail)', HIT: 'var(--tier-hit)', FLIP: 'var(--tier-flip)', SLEEP: 'var(--tier-sleep)',
 };
 const COND_COLORS: Record<Condition, string> = {
   NM: 'var(--green)', LP: 'var(--amber)', MP: '#f97316', HP: 'var(--red)', DM: '#991b1b',
@@ -110,13 +131,14 @@ export default function FilterBar({
       style={{
         display: 'flex',
         alignItems: 'center',
-        gap: 6,
-        padding: '6px 16px',
+        padding: '5px 16px',
         flexWrap: 'wrap',
         borderBottom: '1px solid var(--brd)',
         flexShrink: 0,
+        gap: 0,
       }}
     >
+      {/* Tier */}
       <FilterGroup label="TIER">
         {(['GRAIL', 'HIT', 'FLIP', 'SLEEP'] as Tier[]).map(t => (
           <Seg
@@ -129,6 +151,9 @@ export default function FilterBar({
         ))}
       </FilterGroup>
 
+      <Divider />
+
+      {/* Condition */}
       <FilterGroup label="COND">
         {(['NM', 'LP', 'MP', 'HP'] as Condition[]).map(c => (
           <Seg
@@ -141,7 +166,10 @@ export default function FilterBar({
         ))}
       </FilterGroup>
 
-      <div className="filter-extended" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+      <div className="filter-extended" style={{ display: 'contents' }}>
+        <Divider />
+
+        {/* Liquidity */}
         <FilterGroup label="LIQ">
           {(['high', 'medium', 'low'] as LiquidityGrade[]).map(g => (
             <Seg
@@ -154,6 +182,9 @@ export default function FilterBar({
           ))}
         </FilterGroup>
 
+        <Divider />
+
+        {/* Confidence */}
         <FilterGroup label="CONF">
           {['HI', 'MD'].map(c => (
             <Seg
@@ -166,6 +197,9 @@ export default function FilterBar({
           ))}
         </FilterGroup>
 
+        <Divider />
+
+        {/* Time */}
         <FilterGroup label="TIME">
           {['1H', '6H', '24H', 'ALL'].map(t => (
             <Seg
@@ -177,6 +211,9 @@ export default function FilterBar({
           ))}
         </FilterGroup>
 
+        <Divider />
+
+        {/* Graded toggle */}
         <FilterGroup label="GRADED">
           <Seg
             label={filters.gradedOnly ? 'ON' : 'OFF'}
@@ -187,6 +224,9 @@ export default function FilterBar({
         </FilterGroup>
       </div>
 
+      <Divider />
+
+      {/* Min% */}
       <FilterGroup label="MIN%">
         <Stepper
           value={filters.minProfitPercent}
@@ -194,18 +234,21 @@ export default function FilterBar({
         />
       </FilterGroup>
 
+      <div style={{ marginLeft: 'auto' }} />
+
+      {/* Save button */}
       <button
         onClick={handleSave}
         style={{
-          padding: '4px 10px',
+          padding: '3px 10px',
           borderRadius: 4,
-          background: saved ? 'rgba(52,211,153,0.15)' : 'var(--glass)',
+          background: saved ? 'rgba(52,211,153,0.15)' : 'transparent',
           border: `1px solid ${saved ? 'var(--green)' : 'var(--brd)'}`,
-          color: saved ? 'var(--green)' : 'var(--tSec)',
-          fontFamily: "'DM Mono', monospace",
+          color: saved ? 'var(--green)' : 'var(--tMut)',
+          fontFamily: FONT_MONO,
           fontSize: 9,
-          fontWeight: 600,
-          letterSpacing: 1,
+          fontWeight: saved ? 700 : 200,
+          letterSpacing: 1.5,
           cursor: 'pointer',
           flexShrink: 0,
           transition: 'all 0.15s',

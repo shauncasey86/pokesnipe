@@ -19,7 +19,7 @@ export default function CondPill({ condition }: { condition: Condition }) {
         borderRadius: 4,
         border: `1px solid ${color}`,
         color,
-        fontFamily: "'DM Mono', monospace",
+        fontFamily: "var(--font-mono)",
         fontSize: 10,
         fontWeight: 500,
         lineHeight: '16px',

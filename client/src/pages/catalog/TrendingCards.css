@@ -51,7 +51,7 @@
   color: var(--tPri);
   width: 60px;
   font-size: 0.8125rem;
-  font-family: 'DM Mono', monospace;
+  font-family: var(--font-mono);
 }
 
 .trending-list {

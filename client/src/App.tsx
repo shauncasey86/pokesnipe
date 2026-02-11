@@ -16,7 +16,7 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
       <div style={{
         minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center',
         background: 'var(--bg0)', color: 'var(--tMut)',
-        fontFamily: "'DM Mono', monospace", fontSize: 12,
+        fontFamily: "var(--font-mono)", fontSize: 12,
       }}>
         Loading...
       </div>

@@ -10,7 +10,9 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@fontsource/bricolage-grotesque": "^5.2.10",
     "@fontsource/dm-mono": "^5.2.7",
+    "@fontsource/jetbrains-mono": "^5.2.8",
     "@fontsource/plus-jakarta-sans": "^5.2.8",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",

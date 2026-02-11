@@ -30,7 +30,7 @@
 }
 
 .expansion-card-code {
-  font-family: 'DM Mono', monospace;
+  font-family: var(--font-mono);
   font-size: 1rem;
   font-weight: 500;
   color: var(--tSec);

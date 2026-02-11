@@ -97,7 +97,7 @@ export default function DealDetailPanel({
           <div style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%,-50%)', width: 12, height: 12, borderRadius: 12, background: 'var(--bg1)', border: '2px solid var(--tMut)' }} />
           <div style={{ position: 'absolute', top: '50%', left: 0, right: 0, height: 2, background: 'var(--tMut)', transform: 'translateY(-50%)' }} />
         </div>
-        <span style={{ fontFamily: "'DM Mono', monospace", fontSize: 11, letterSpacing: 1, textAlign: 'center' }}>
+        <span style={{ fontFamily: "var(--font-mono)", fontSize: 11, letterSpacing: 1, textAlign: 'center' }}>
           SELECT A DEAL<br />TO INSPECT
         </span>
       </div>
@@ -111,7 +111,7 @@ export default function DealDetailPanel({
         display: 'flex', alignItems: 'center', justifyContent: 'center',
         color: 'var(--tMut)', flexShrink: 0,
       }}>
-        <span style={{ fontFamily: "'DM Mono', monospace", fontSize: 11, animation: 'pulse 1.5s infinite' }}>Loading...</span>
+        <span style={{ fontFamily: "var(--font-mono)", fontSize: 11, animation: 'pulse 1.5s infinite' }}>Loading...</span>
       </div>
     );
   }
@@ -144,7 +144,7 @@ export default function DealDetailPanel({
             {deal.card_name || deal.cardName || deal.ebay_title}
           </div>
           {deal.card_number && (
-            <span style={{ fontFamily: "'DM Mono', monospace", fontSize: 11, color: 'var(--tMut)' }}>#{deal.card_number}</span>
+            <span style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: 'var(--tMut)' }}>#{deal.card_number}</span>
           )}
         </div>
         <button onClick={onClose} style={{
@@ -160,7 +160,7 @@ export default function DealDetailPanel({
           border: '1px solid var(--brd)',
         }}>
           <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
-            <span style={{ fontFamily: "'DM Mono', monospace", fontSize: 9, color: 'var(--tMut)', letterSpacing: 1 }}>EBAY LISTING</span>
+            <span style={{ fontFamily: "var(--font-mono)", fontSize: 9, color: 'var(--tMut)', letterSpacing: 1 }}>EBAY LISTING</span>
             {deal.ebay_image_url ? (
               <img src={deal.ebay_image_url} alt="eBay listing" style={{
                 width: '100%', height: 160, objectFit: 'contain', borderRadius: 4,
@@ -170,14 +170,14 @@ export default function DealDetailPanel({
               <div style={{
                 width: '100%', height: 160, borderRadius: 4,
                 background: 'var(--bg1)', display: 'flex', alignItems: 'center', justifyContent: 'center',
-                color: 'var(--tMut)', fontSize: 10, fontFamily: "'DM Mono', monospace",
+                color: 'var(--tMut)', fontSize: 10, fontFamily: "var(--font-mono)",
               }}>
                 No image
               </div>
             )}
           </div>
           <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
-            <span style={{ fontFamily: "'DM Mono', monospace", fontSize: 9, color: 'var(--tMut)', letterSpacing: 1 }}>SCRYDEX REF</span>
+            <span style={{ fontFamily: "var(--font-mono)", fontSize: 9, color: 'var(--tMut)', letterSpacing: 1 }}>SCRYDEX REF</span>
             {deal.card_image_url ? (
               <img src={deal.card_image_url} alt="Scrydex reference" style={{
                 width: '100%', height: 160, objectFit: 'contain', borderRadius: 4,
@@ -187,7 +187,7 @@ export default function DealDetailPanel({
               <div style={{
                 width: '100%', height: 160, borderRadius: 4,
                 background: 'var(--bg1)', display: 'flex', alignItems: 'center', justifyContent: 'center',
-                color: 'var(--tMut)', fontSize: 10, fontFamily: "'DM Mono', monospace",
+                color: 'var(--tMut)', fontSize: 10, fontFamily: "var(--font-mono)",
               }}>
                 No ref
               </div>
@@ -210,7 +210,7 @@ export default function DealDetailPanel({
             <span style={{
               padding: '1px 5px', borderRadius: 4, fontSize: 10,
               border: '1px solid var(--blue)', color: 'var(--blue)',
-              fontFamily: "'DM Mono', monospace", fontWeight: 500,
+              fontFamily: "var(--font-mono)", fontWeight: 500,
             }}>
               {deal.grading_company ? `${deal.grading_company} ${deal.grade}` : 'GRADED'}
             </span>
@@ -222,7 +222,7 @@ export default function DealDetailPanel({
           <GradBorder>
             <div style={{ padding: '16px 18px', textAlign: 'center' }}>
               <div style={{
-                fontFamily: "'DM Mono', monospace", fontSize: 42, fontWeight: 800,
+                fontFamily: "var(--font-mono)", fontSize: 42, fontWeight: 800,
                 color: 'var(--greenB)',
                 textShadow: '0 0 20px rgba(110,231,183,0.5)',
                 lineHeight: 1,
@@ -230,7 +230,7 @@ export default function DealDetailPanel({
                 +£{profitGbp.toFixed(2)}
               </div>
               <div style={{
-                fontFamily: "'DM Mono', monospace", fontSize: 14, marginTop: 4,
+                fontFamily: "var(--font-mono)", fontSize: 14, marginTop: 4,
                 color: 'var(--green)', fontWeight: 600,
               }}>
                 +{profitPct.toFixed(1)}% · {TIER_CONTEXT[deal.tier] || deal.tier}
@@ -265,7 +265,7 @@ export default function DealDetailPanel({
           <>
             <SectionHeader text="MATCH CONFIDENCE" />
             <div style={{
-              fontFamily: "'DM Mono', monospace", fontSize: 28, fontWeight: 800,
+              fontFamily: "var(--font-mono)", fontSize: 28, fontWeight: 800,
               color: (confidence.composite ?? 0) >= 0.85 ? 'var(--green)' : (confidence.composite ?? 0) >= 0.65 ? 'var(--amber)' : 'var(--red)',
               textShadow: `0 0 12px ${(confidence.composite ?? 0) >= 0.85 ? 'rgba(52,211,153,0.3)' : 'rgba(251,191,36,0.3)'}`,
               marginBottom: 6,
@@ -287,7 +287,7 @@ export default function DealDetailPanel({
             <SectionHeader text="LIQUIDITY" />
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
               <span style={{
-                fontFamily: "'DM Mono', monospace", fontSize: 22, fontWeight: 800,
+                fontFamily: "var(--font-mono)", fontSize: 22, fontWeight: 800,
                 color: (liquidity?.composite ?? deal.liquidity_score ?? 0) >= 0.7 ? 'var(--green)' : 'var(--amber)',
               }}>
                 {((liquidity?.composite ?? deal.liquidity_score ?? 0) * 100).toFixed(0)}%
@@ -313,7 +313,7 @@ export default function DealDetailPanel({
                         padding: '2px 8px', borderRadius: 4,
                         background: 'var(--glass)', border: '1px solid var(--brd)',
                         color: 'var(--blue)',
-                        fontFamily: "'DM Mono', monospace", fontSize: 9,
+                        fontFamily: "var(--font-mono)", fontSize: 9,
                         cursor: 'pointer', flexShrink: 0,
                         opacity: velocityLoading ? 0.5 : 1,
                       }}
@@ -331,7 +331,7 @@ export default function DealDetailPanel({
         {variantPrices && Object.keys(variantPrices).length > 0 && (
           <>
             <SectionHeader text="COMPS BY CONDITION" />
-            <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 11 }}>
+            <div style={{ fontFamily: "var(--font-mono)", fontSize: 11 }}>
               <div style={{ display: 'grid', gridTemplateColumns: '20px 30px 1fr 1fr', gap: 4, padding: '3px 0', color: 'var(--tMut)' }}>
                 <span />
                 <span />
@@ -365,7 +365,7 @@ export default function DealDetailPanel({
             return (
               <>
                 <SectionHeader text="PRICE TRENDS" />
-                <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 11, display: 'flex', flexDirection: 'column', gap: 2 }}>
+                <div style={{ fontFamily: "var(--font-mono)", fontSize: 11, display: 'flex', flexDirection: 'column', gap: 2 }}>
                   {(['1d', '7d', '30d', '90d'] as const).map(period => {
                     const entry = (condTrends as Record<string, { price_change: number; percent_change: number } | undefined>)[period];
                     if (entry == null) return null;
@@ -413,7 +413,7 @@ export default function DealDetailPanel({
             padding: '8px 12px', borderRadius: 6,
             background: reviewState === 'correct' ? 'rgba(52,211,153,0.08)' : 'rgba(248,113,113,0.08)',
             border: `1px solid ${reviewState === 'correct' ? 'rgba(52,211,153,0.2)' : 'rgba(248,113,113,0.2)'}`,
-            fontFamily: "'DM Mono', monospace", fontSize: 11,
+            fontFamily: "var(--font-mono)", fontSize: 11,
             color: reviewState === 'correct' ? 'var(--green)' : 'var(--red)',
           }}>
             {reviewState === 'correct' ? '✓ Marked correct' : '✗ Marked wrong'}
@@ -435,7 +435,7 @@ export default function DealDetailPanel({
               <button key={reason.key} onClick={() => handleReview(false, reason.key)} style={{
                 padding: '4px 10px', borderRadius: 4,
                 background: 'rgba(248,113,113,0.06)', border: '1px solid rgba(248,113,113,0.2)',
-                color: 'var(--red)', fontFamily: "'DM Mono', monospace", fontSize: 10,
+                color: 'var(--red)', fontFamily: "var(--font-mono)", fontSize: 10,
                 cursor: 'pointer',
               }}>
                 {reason.label}
@@ -481,7 +481,7 @@ function PricingBreakdown({ deal, profitGbp }: { deal: DealDetail; profitGbp: nu
   const [showFx, setShowFx] = useState(false);
 
   return (
-    <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 12 }}>
+    <div style={{ fontFamily: "var(--font-mono)", fontSize: 12 }}>
       <PriceRow label="eBay price" value={`£${deal.ebay_price_gbp.toFixed(2)}`} />
       <PriceRow label="Shipping" value={`£${deal.ebay_shipping_gbp.toFixed(2)}`} />
       <PriceRow label="Fees (inc.)" value={`£${(deal.buyer_prot_fee ?? 0).toFixed(2)}`} />
@@ -499,7 +499,7 @@ function PricingBreakdown({ deal, profitGbp }: { deal: DealDetail; profitGbp: nu
                 style={{
                   background: 'none', border: 'none', padding: 0,
                   color: 'var(--tMut)', fontSize: 10, cursor: 'pointer',
-                  fontFamily: "'DM Mono', monospace",
+                  fontFamily: "var(--font-mono)",
                 }}
               >
                 {showFx ? '▾' : 'ⓘ'}
