@@ -118,6 +118,7 @@
   background: transparent;
   border: 1px solid var(--brd);
   color: var(--tSec);
+  cursor: pointer;
   transition: all 0.15s;
 }
 
