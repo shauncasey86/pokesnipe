@@ -117,7 +117,7 @@ Shutdown:
 
 **Problem identified:** The beta throttled at 5 req/sec. Scrydex allows 100 req/sec.
 
-From `scrydex-docs/rate-limits.txt`:
+From `docs/scrydex-docs/rate-limits.txt`:
 > Per-Second Limit: 100 requests per second across all endpoints.
 
 **Corrected implementation:**
@@ -140,7 +140,7 @@ const limiter = new TokenBucket({
 
 ### 2.2 URL Path Language Scoping
 
-From `scrydex-docs/pokemon-api-reference.txt:26-34`, language scoping uses URL path, not query param:
+From `docs/scrydex-docs/pokemon-api-reference.txt:26-34`, language scoping uses URL path, not query param:
 
 ```
 CORRECT:  /pokemon/v1/en/cards
@@ -250,7 +250,7 @@ Scrydex pricing includes trend objects. These MUST be stored, not discarded.
 
 ### 2.5 Scrydex Listings Endpoint — Systematic Use
 
-From `scrydex-docs/listings.txt`, the `/cards/<id>/listings` endpoint returns actual sold eBay listings already matched to cards:
+From `docs/scrydex-docs/listings.txt`, the `/cards/<id>/listings` endpoint returns actual sold eBay listings already matched to cards:
 
 ```
 Fields: card_id, source ("ebay"), title, variant, price, currency, sold_at,

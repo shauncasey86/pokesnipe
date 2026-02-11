@@ -2,6 +2,11 @@ import { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { getPreferences, updatePreferences } from '../api/deals';
 
+async function testTelegram(): Promise<{ success: boolean; error?: string }> {
+  const res = await fetch('/api/notifications/telegram/test', { method: 'POST' });
+  return res.json();
+}
+
 export default function SettingsModal({ onClose }: { onClose: () => void }) {
   const { logout } = useAuth();
   const [tab, setTab] = useState<'general' | 'notifications'>('general');
@@ -9,6 +14,7 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
   const [telegramToken, setTelegramToken] = useState('');
   const [telegramChatId, setTelegramChatId] = useState('');
   const [saved, setSaved] = useState(false);
+  const [testResult, setTestResult] = useState<'idle' | 'sending' | 'success' | 'error'>('idle');
   const debounceRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   useEffect(() => {
@@ -41,6 +47,23 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
     await logout();
     onClose();
   };
+
+  const handleTestTelegram = async () => {
+    setTestResult('sending');
+    try {
+      const result = await testTelegram();
+      setTestResult(result.success ? 'success' : 'error');
+    } catch {
+      setTestResult('error');
+    }
+    setTimeout(() => setTestResult('idle'), 3000);
+  };
+
+  const inputStyle = {
+    height: 38, background: 'var(--glass)', border: '1px solid var(--brd)',
+    borderRadius: 6, padding: '0 12px', color: 'var(--tMax)',
+    fontSize: 12, outline: 'none', width: '100%',
+  } as const;
 
   return (
     <div
@@ -89,7 +112,7 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
 
         {tab === 'general' && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-            {/* Tier thresholds (read-only) */}
+            {/* Tier thresholds (read-only reference) */}
             <div>
               <span className="section-header">TIER THRESHOLDS</span>
               <div style={{ marginTop: 6, fontFamily: "'DM Mono', monospace", fontSize: 11, color: 'var(--tSec)', display: 'flex', flexDirection: 'column', gap: 2 }}>
@@ -103,9 +126,11 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
             {/* Display settings */}
             <div>
               <span className="section-header">DISPLAY</span>
-              <div style={{ marginTop: 6, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                <span style={{ fontSize: 13, color: 'var(--tPri)' }}>Currency</span>
-                <span style={{ fontFamily: "'DM Mono', monospace", fontSize: 12, color: 'var(--tSec)' }}>GBP (£)</span>
+              <div style={{ marginTop: 6, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <span style={{ fontSize: 13, color: 'var(--tPri)' }}>Currency</span>
+                  <span style={{ fontFamily: "'DM Mono', monospace", fontSize: 12, color: 'var(--tSec)' }}>GBP (£)</span>
+                </div>
               </div>
             </div>
 
@@ -123,6 +148,51 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
                   checked={prefs.soundGrailOnly as boolean ?? true}
                   onChange={v => savePrefs({ soundGrailOnly: v })}
                 />
+              </div>
+            </div>
+
+            {/* Default filter settings */}
+            <div>
+              <span className="section-header">DEFAULT FILTERS</span>
+              <div style={{ marginTop: 6, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <span style={{ fontSize: 13, color: 'var(--tPri)' }}>Min profit %</span>
+                  <input
+                    type="number"
+                    min={0}
+                    max={100}
+                    value={prefs.defaultMinProfit as number ?? 10}
+                    onChange={e => {
+                      const val = Math.max(0, Math.min(100, parseInt(e.target.value) || 0));
+                      savePrefs({ defaultMinProfit: val });
+                    }}
+                    style={{
+                      width: 56, height: 28, textAlign: 'right',
+                      background: 'var(--glass)', border: '1px solid var(--brd)',
+                      borderRadius: 4, padding: '0 6px', color: 'var(--tMax)',
+                      fontFamily: "'DM Mono', monospace", fontSize: 12, outline: 'none',
+                    }}
+                  />
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <span style={{ fontSize: 13, color: 'var(--tPri)' }}>Min confidence %</span>
+                  <input
+                    type="number"
+                    min={0}
+                    max={100}
+                    value={Math.round((prefs.defaultMinConfidence as number ?? 0.65) * 100)}
+                    onChange={e => {
+                      const val = Math.max(0, Math.min(100, parseInt(e.target.value) || 0));
+                      savePrefs({ defaultMinConfidence: val / 100 });
+                    }}
+                    style={{
+                      width: 56, height: 28, textAlign: 'right',
+                      background: 'var(--glass)', border: '1px solid var(--brd)',
+                      borderRadius: 4, padding: '0 6px', color: 'var(--tMax)',
+                      fontFamily: "'DM Mono', monospace", fontSize: 12, outline: 'none',
+                    }}
+                  />
+                </div>
               </div>
             </div>
 
@@ -151,33 +221,42 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
                   placeholder="Bot Token"
                   value={telegramToken}
                   onChange={e => { setTelegramToken(e.target.value); savePrefs({ telegramToken: e.target.value }); }}
-                  style={{
-                    height: 38, background: 'var(--glass)', border: '1px solid var(--brd)',
-                    borderRadius: 6, padding: '0 12px', color: 'var(--tMax)',
-                    fontSize: 12, outline: 'none',
-                  }}
+                  style={inputStyle}
                 />
                 <input
                   type="password"
                   placeholder="Chat ID"
                   value={telegramChatId}
                   onChange={e => { setTelegramChatId(e.target.value); savePrefs({ telegramChatId: e.target.value }); }}
-                  style={{
-                    height: 38, background: 'var(--glass)', border: '1px solid var(--brd)',
-                    borderRadius: 6, padding: '0 12px', color: 'var(--tMax)',
-                    fontSize: 12, outline: 'none',
-                  }}
+                  style={inputStyle}
                 />
-                <button
-                  style={{
-                    padding: '8px 16px', borderRadius: 6,
-                    background: 'var(--glass)', border: '1px solid var(--brd)',
-                    color: 'var(--tSec)', fontWeight: 500, fontSize: 12,
-                    alignSelf: 'flex-start',
-                  }}
-                >
-                  Test Message
-                </button>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <button
+                    onClick={handleTestTelegram}
+                    disabled={testResult === 'sending' || !telegramToken || !telegramChatId}
+                    style={{
+                      padding: '8px 16px', borderRadius: 6,
+                      background: 'var(--glass)', border: '1px solid var(--brd)',
+                      color: !telegramToken || !telegramChatId ? 'var(--tMut)' : 'var(--tSec)',
+                      fontWeight: 500, fontSize: 12,
+                      opacity: testResult === 'sending' ? 0.6 : 1,
+                      cursor: !telegramToken || !telegramChatId ? 'not-allowed' : 'pointer',
+                    }}
+                  >
+                    {testResult === 'sending' ? 'Sending...' : 'Test Message'}
+                  </button>
+                  {testResult === 'success' && (
+                    <span style={{ fontFamily: "'DM Mono', monospace", fontSize: 10, color: 'var(--green)' }}>Sent</span>
+                  )}
+                  {testResult === 'error' && (
+                    <span style={{ fontFamily: "'DM Mono', monospace", fontSize: 10, color: 'var(--red)' }}>Failed</span>
+                  )}
+                </div>
+                {!telegramToken && !telegramChatId && (
+                  <span style={{ fontFamily: "'DM Mono', monospace", fontSize: 10, color: 'var(--tMut)' }}>
+                    Configure bot token and chat ID to enable Telegram alerts
+                  </span>
+                )}
               </div>
             </div>
 
@@ -203,17 +282,47 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
               </div>
             </div>
 
-            {/* Thresholds */}
+            {/* Notification thresholds */}
             <div>
-              <span className="section-header">THRESHOLDS</span>
-              <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 8, fontFamily: "'DM Mono', monospace", fontSize: 12, color: 'var(--tSec)' }}>
+              <span className="section-header">NOTIFICATION THRESHOLDS</span>
+              <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 8 }}>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                  <span>Min profit %</span>
-                  <span>{prefs.minNotifyProfit as number ?? 20}%</span>
+                  <span style={{ fontSize: 13, color: 'var(--tPri)' }}>Min profit %</span>
+                  <input
+                    type="number"
+                    min={0}
+                    max={100}
+                    value={prefs.minNotifyProfit as number ?? 20}
+                    onChange={e => {
+                      const val = Math.max(0, Math.min(100, parseInt(e.target.value) || 0));
+                      savePrefs({ minNotifyProfit: val });
+                    }}
+                    style={{
+                      width: 56, height: 28, textAlign: 'right',
+                      background: 'var(--glass)', border: '1px solid var(--brd)',
+                      borderRadius: 4, padding: '0 6px', color: 'var(--tMax)',
+                      fontFamily: "'DM Mono', monospace", fontSize: 12, outline: 'none',
+                    }}
+                  />
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                  <span>Min confidence</span>
-                  <span>{((prefs.minNotifyConfidence as number ?? 0.7) * 100).toFixed(0)}%</span>
+                  <span style={{ fontSize: 13, color: 'var(--tPri)' }}>Min confidence %</span>
+                  <input
+                    type="number"
+                    min={0}
+                    max={100}
+                    value={Math.round((prefs.minNotifyConfidence as number ?? 0.7) * 100)}
+                    onChange={e => {
+                      const val = Math.max(0, Math.min(100, parseInt(e.target.value) || 0));
+                      savePrefs({ minNotifyConfidence: val / 100 });
+                    }}
+                    style={{
+                      width: 56, height: 28, textAlign: 'right',
+                      background: 'var(--glass)', border: '1px solid var(--brd)',
+                      borderRadius: 4, padding: '0 6px', color: 'var(--tMax)',
+                      fontFamily: "'DM Mono', monospace", fontSize: 12, outline: 'none',
+                    }}
+                  />
                 </div>
               </div>
             </div>

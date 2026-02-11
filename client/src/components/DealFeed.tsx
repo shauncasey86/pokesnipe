@@ -92,10 +92,11 @@ export default function DealFeed({
               key={deal.deal_id}
               deal={deal}
               selected={deal.deal_id === selectedDealId}
+              isNew={newDealIds.has(deal.deal_id)}
               onClick={() => onSelectDeal(deal.deal_id)}
               style={{
                 animation: newDealIds.has(deal.deal_id)
-                  ? `fadeSlide 0.3s ease ${Math.min(i * 30, 300)}ms both`
+                  ? `shimmerIn 0.5s ease ${Math.min(i * 50, 300)}ms both`
                   : undefined,
               }}
             />
@@ -107,6 +108,21 @@ export default function DealFeed({
         @keyframes fadeSlide {
           from { opacity: 0; transform: translateY(-8px); }
           to { opacity: 1; transform: translateY(0); }
+        }
+        @keyframes shimmerIn {
+          0% { opacity: 0; transform: translateY(-8px); background-position: -200px 0; }
+          50% { opacity: 1; transform: translateY(0); }
+          100% { opacity: 1; transform: translateY(0); }
+        }
+        .deal-card-new {
+          background-size: 200px 100%;
+          background-repeat: no-repeat;
+          background-image: linear-gradient(90deg, transparent, rgba(52,211,153,0.06), transparent);
+          animation: shimmerSweep 0.8s ease-out 0.3s both;
+        }
+        @keyframes shimmerSweep {
+          0% { background-position: -200px 0; }
+          100% { background-position: calc(100% + 200px) 0; }
         }
       `}</style>
     </div>

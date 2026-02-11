@@ -91,8 +91,8 @@ export async function createDeal(data: DealInput): Promise<Deal | null> {
         data.confidence, data.confidenceTier, data.condition, data.conditionSource,
         data.isGraded, data.gradingCompany || null, data.grade || null,
         JSON.stringify(data.matchSignals), data.conditionComps ? JSON.stringify(data.conditionComps) : null,
-        data.ebayImageUrl || null, data.ebayUrl, data.sellerName || null, data.sellerFeedback || null, data.listedAt || null,
-        data.liquidityScore || null, data.liquidityGrade || null,
+        data.ebayImageUrl || null, data.ebayUrl, data.sellerName || null, data.sellerFeedback ?? null, data.listedAt || null,
+        data.liquidityScore ?? null, data.liquidityGrade || null,
       ],
     );
 
@@ -128,12 +128,12 @@ export async function createDeal(data: DealInput): Promise<Deal | null> {
       is_graded: data.isGraded,
       grading_company: data.gradingCompany || null,
       grade: data.grade || null,
-      liquidity_score: data.liquidityScore || null,
+      liquidity_score: data.liquidityScore ?? null,
       liquidity_grade: data.liquidityGrade || null,
       ebay_image_url: data.ebayImageUrl || null,
       ebay_url: data.ebayUrl,
       seller_name: data.sellerName || null,
-      seller_feedback: data.sellerFeedback || null,
+      seller_feedback: data.sellerFeedback ?? null,
       listed_at: data.listedAt || null,
       created_at: deal.created_at,
     });

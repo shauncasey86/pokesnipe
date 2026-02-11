@@ -153,20 +153,56 @@ export default function DealDetailPanel({
       </div>
 
       <div style={{ padding: '0 16px 20px', display: 'flex', flexDirection: 'column' }}>
-        {/* Images */}
-        {deal.ebay_image_url && (
-          <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
-            <img src={deal.ebay_image_url} alt="eBay" style={{
-              flex: 1, height: 180, objectFit: 'contain', borderRadius: 6,
-              background: 'var(--glass)',
-            }} />
+        {/* Side-by-side image comparison */}
+        <div style={{
+          display: 'flex', gap: 8, marginTop: 12,
+          background: 'var(--glass)', borderRadius: 8, padding: 8,
+          border: '1px solid var(--brd)',
+        }}>
+          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
+            <span style={{ fontFamily: "'DM Mono', monospace", fontSize: 9, color: 'var(--tMut)', letterSpacing: 1 }}>EBAY LISTING</span>
+            {deal.ebay_image_url ? (
+              <img src={deal.ebay_image_url} alt="eBay listing" style={{
+                width: '100%', height: 160, objectFit: 'contain', borderRadius: 4,
+                background: 'var(--bg1)',
+              }} />
+            ) : (
+              <div style={{
+                width: '100%', height: 160, borderRadius: 4,
+                background: 'var(--bg1)', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                color: 'var(--tMut)', fontSize: 10, fontFamily: "'DM Mono', monospace",
+              }}>
+                No image
+              </div>
+            )}
           </div>
-        )}
+          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
+            <span style={{ fontFamily: "'DM Mono', monospace", fontSize: 9, color: 'var(--tMut)', letterSpacing: 1 }}>SCRYDEX REF</span>
+            {deal.card_image_url ? (
+              <img src={deal.card_image_url} alt="Scrydex reference" style={{
+                width: '100%', height: 160, objectFit: 'contain', borderRadius: 4,
+                background: 'var(--bg1)',
+              }} />
+            ) : (
+              <div style={{
+                width: '100%', height: 160, borderRadius: 4,
+                background: 'var(--bg1)', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                color: 'var(--tMut)', fontSize: 10, fontFamily: "'DM Mono', monospace",
+              }}>
+                No ref
+              </div>
+            )}
+          </div>
+        </div>
 
         {/* Card info */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 10, flexWrap: 'wrap' }}>
           {deal.expansion_name && (
-            <span style={{ fontSize: 12, color: 'var(--tMut)' }}>{deal.expansion_name}</span>
+            <span style={{ fontSize: 12, color: 'var(--tMut)' }}>
+              {deal.expansion_name}
+              {deal.expansion_code && <span> ({deal.expansion_code})</span>}
+              {deal.card_number && <span> · #{deal.card_number}</span>}
+            </span>
           )}
           <CondPill condition={deal.condition as Condition} />
           <LiqPill grade={deal.liquidity_grade as LiquidityGrade} />
@@ -220,34 +256,9 @@ export default function DealDetailPanel({
           SNAG ON EBAY →
         </button>
 
-        {/* 8.4 No BS Pricing */}
+        {/* 8.4 No BS Pricing (Simplified GBP-only) */}
         <SectionHeader text="NO BS PRICING" />
-        <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 12 }}>
-          <PriceRow label="eBay price" value={`£${deal.ebay_price_gbp.toFixed(2)}`} />
-          <PriceRow label="Shipping" value={`£${deal.ebay_shipping_gbp.toFixed(2)}`} />
-          <PriceRow label="Fees (inc.)" value={`£${(deal.buyer_prot_fee ?? 0).toFixed(2)}`} />
-          <div style={{ borderTop: '1px solid var(--brd)', margin: '4px 0' }} />
-          <PriceRow label="Total cost" value={`£${deal.total_cost_gbp.toFixed(2)}`} bold />
-          <div style={{ height: 8 }} />
-          {deal.market_price_usd != null && (
-            <PriceRow label="Market (USD)" value={`$${deal.market_price_usd.toFixed(2)}`} />
-          )}
-          {deal.exchange_rate != null && (
-            <PriceRow label="FX rate" value={`×${deal.exchange_rate.toFixed(3)}`} />
-          )}
-          {deal.market_price_gbp != null && (
-            <PriceRow label="Market (GBP)" value={`£${deal.market_price_gbp.toFixed(2)}`} bold />
-          )}
-          <div style={{
-            marginTop: 6, padding: '6px 10px', borderRadius: 6,
-            border: '1px solid rgba(110,231,183,0.2)',
-            background: 'rgba(110,231,183,0.04)',
-            display: 'flex', justifyContent: 'space-between',
-          }}>
-            <span style={{ color: 'var(--tSec)' }}>Profit</span>
-            <span style={{ color: 'var(--greenB)', fontWeight: 700 }}>+£{profitGbp.toFixed(2)}</span>
-          </div>
-        </div>
+        <PricingBreakdown deal={deal} profitGbp={profitGbp} />
 
         {/* 8.5 Match Confidence */}
         {confidence && (
@@ -414,14 +425,20 @@ export default function DealDetailPanel({
           </div>
         ) : reviewState === 'picking' ? (
           <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-            {['wrong_card', 'wrong_set', 'wrong_variant', 'wrong_price'].map(reason => (
-              <button key={reason} onClick={() => handleReview(false, reason)} style={{
+            {[
+              { key: 'wrong_card', label: 'Wrong card' },
+              { key: 'wrong_set', label: 'Wrong set' },
+              { key: 'wrong_condition', label: 'Wrong condition' },
+              { key: 'wrong_price', label: 'Price outdated' },
+              { key: 'bad_image', label: 'Bad image' },
+            ].map(reason => (
+              <button key={reason.key} onClick={() => handleReview(false, reason.key)} style={{
                 padding: '4px 10px', borderRadius: 4,
                 background: 'rgba(248,113,113,0.06)', border: '1px solid rgba(248,113,113,0.2)',
                 color: 'var(--red)', fontFamily: "'DM Mono', monospace", fontSize: 10,
                 cursor: 'pointer',
               }}>
-                {reason.replace('wrong_', 'Wrong ').replace(/^\w/, c => c.toUpperCase())}
+                {reason.label}
               </button>
             ))}
           </div>
@@ -456,6 +473,65 @@ function PriceRow({ label, value, bold }: { label: string; value: string; bold?:
     }}>
       <span>{label}</span>
       <span>{value}</span>
+    </div>
+  );
+}
+
+function PricingBreakdown({ deal, profitGbp }: { deal: DealDetail; profitGbp: number }) {
+  const [showFx, setShowFx] = useState(false);
+
+  return (
+    <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 12 }}>
+      <PriceRow label="eBay price" value={`£${deal.ebay_price_gbp.toFixed(2)}`} />
+      <PriceRow label="Shipping" value={`£${deal.ebay_shipping_gbp.toFixed(2)}`} />
+      <PriceRow label="Fees (inc.)" value={`£${(deal.buyer_prot_fee ?? 0).toFixed(2)}`} />
+      <div style={{ borderTop: '1px solid var(--brd)', margin: '4px 0' }} />
+      <PriceRow label="Total cost" value={`£${deal.total_cost_gbp.toFixed(2)}`} bold />
+      <div style={{ height: 8 }} />
+      {deal.market_price_gbp != null && (
+        <div style={{ display: 'flex', justifyContent: 'space-between', padding: '2px 0', fontWeight: 600, color: 'var(--tMax)' }}>
+          <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+            Market price
+            {deal.market_price_usd != null && (
+              <button
+                onClick={() => setShowFx(!showFx)}
+                title="Show USD source + FX rate"
+                style={{
+                  background: 'none', border: 'none', padding: 0,
+                  color: 'var(--tMut)', fontSize: 10, cursor: 'pointer',
+                  fontFamily: "'DM Mono', monospace",
+                }}
+              >
+                {showFx ? '▾' : 'ⓘ'}
+              </button>
+            )}
+          </span>
+          <span>£{deal.market_price_gbp.toFixed(2)}</span>
+        </div>
+      )}
+      {showFx && deal.market_price_usd != null && (
+        <div style={{ padding: '4px 12px', marginBottom: 2, fontSize: 10, color: 'var(--tMut)' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+            <span>USD source</span>
+            <span>${deal.market_price_usd.toFixed(2)}</span>
+          </div>
+          {deal.exchange_rate != null && (
+            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+              <span>FX rate</span>
+              <span>×{deal.exchange_rate.toFixed(3)}</span>
+            </div>
+          )}
+        </div>
+      )}
+      <div style={{
+        marginTop: 6, padding: '6px 10px', borderRadius: 6,
+        border: '1px solid rgba(110,231,183,0.2)',
+        background: 'rgba(110,231,183,0.04)',
+        display: 'flex', justifyContent: 'space-between',
+      }}>
+        <span style={{ color: 'var(--tSec)' }}>Profit</span>
+        <span style={{ color: 'var(--greenB)', fontWeight: 700 }}>+£{profitGbp.toFixed(2)}</span>
+      </div>
     </div>
   );
 }

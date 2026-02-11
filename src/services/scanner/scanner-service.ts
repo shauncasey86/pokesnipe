@@ -90,6 +90,7 @@ function toExtractionInput(
     title: summary.title,
     conditionDescriptors: toExtractionDescriptors(detail?.conditionDescriptors),
     localizedAspects: detail?.localizedAspects ?? null,
+    conditionText: detail?.condition ?? summary.condition ?? null,
   };
 }
 
