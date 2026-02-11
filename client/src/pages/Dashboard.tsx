@@ -1,25 +1,33 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import SSEBanner from '../components/ui/SSEBanner';
-import FilterBar from '../components/FilterBar';
-import DealTable from '../components/DealTable';
-import DealPanel from '../components/DealPanel';
-import Sidebar from '../components/Sidebar';
-import TopBar from '../components/TopBar';
-import SystemStatusBar from '../components/SystemStatusBar';
+import Rail from '../components/Rail';
+import HeroDeal from '../components/HeroDeal';
+import QueuePanel from '../components/QueuePanel';
+import FilterPopover from '../components/FilterPopover';
 import LookupModal from '../components/LookupModal';
 import SettingsModal from '../components/SettingsModal';
 import ToastContainer, { showToast } from '../components/ui/Toast';
-import { getDeals, getStatus, getPreferences, updatePreferences, toggleScanner } from '../api/deals';
-import type { Deal, SystemStatus, FilterState, Tier, Condition, LiquidityGrade } from '../types/deals';
+import {
+  getDeals,
+  getDealDetail,
+  getStatus,
+  getPreferences,
+  updatePreferences,
+  toggleScanner,
+  reviewDeal,
+  fetchVelocity,
+} from '../api/deals';
+import type { Deal, DealDetail, SystemStatus, FilterState, Tier, Condition, LiquidityGrade } from '../types/deals';
+import '../styles/dashboard-v3.css';
 
 /* ─── Font injection ─── */
 
-const FONT_LINK = document.querySelector('link[data-pokesnipe-ibm]');
+const FONT_LINK = document.querySelector('link[data-pokesnipe-fonts]');
 if (!FONT_LINK) {
   const link = document.createElement('link');
   link.rel = 'stylesheet';
-  link.href = 'https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@300;400;500;600;700;800&display=swap';
-  link.setAttribute('data-pokesnipe-ibm', '1');
+  link.href =
+    'https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=JetBrains+Mono:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&display=swap';
+  link.setAttribute('data-pokesnipe-fonts', '1');
   document.head.appendChild(link);
 }
 
@@ -47,7 +55,6 @@ function applyFilters(deals: Deal[], filters: FilterState): Deal[] {
   };
   const windowMs = timeMs[filters.timeWindow] || Infinity;
 
-  // Empty tiers/conditions arrays mean "ALL"
   const hasTierFilter = filters.tiers.length > 0;
   const hasCondFilter = filters.conditions.length > 0;
 
@@ -61,21 +68,16 @@ function applyFilters(deals: Deal[], filters: FilterState): Deal[] {
     )
       return false;
 
-    // Confidence filter
     const conf = d.confidence ?? 0;
     const confLevel = conf >= 0.85 ? 'HI' : conf >= 0.65 ? 'MD' : 'LO';
     if (!filters.confidenceLevels.includes(confLevel) && confLevel !== 'LO') return false;
 
-    // Time filter
     if (windowMs < Infinity) {
       const age = now - new Date(d.created_at).getTime();
       if (age > windowMs) return false;
     }
 
-    // Min profit
     if ((d.profit_percent ?? 0) < filters.minProfitPercent) return false;
-
-    // Graded only
     if (filters.gradedOnly && !d.is_graded) return false;
 
     return true;
@@ -89,9 +91,9 @@ function sortDeals(deals: Deal[], sort: string): Deal[] {
   switch (sort) {
     case 'profit':
       return sorted.sort((a, b) => (b.profit_gbp ?? 0) - (a.profit_gbp ?? 0));
-    case 'profitPct':
+    case 'roi':
       return sorted.sort((a, b) => (b.profit_percent ?? 0) - (a.profit_percent ?? 0));
-    case 'confidence':
+    case 'match':
       return sorted.sort((a, b) => (b.confidence ?? 0) - (a.confidence ?? 0));
     case 'recent':
     default:
@@ -112,18 +114,132 @@ function searchDeals(deals: Deal[], query: string): Deal[] {
   });
 }
 
-/* ─── Dashboard Component ─── */
+/* ─── SSE Banner (inline — lightweight) ─── */
+
+function SSEBannerInline({
+  state,
+  onRetry,
+}: {
+  state: 'connected' | 'reconnecting' | 'lost' | 'restored';
+  onRetry: () => void;
+}) {
+  const [showRestored, setShowRestored] = useState(false);
+
+  useEffect(() => {
+    if (state === 'restored') {
+      setShowRestored(true);
+      const t = setTimeout(() => setShowRestored(false), 3000);
+      return () => clearTimeout(t);
+    }
+  }, [state]);
+
+  if (state === 'connected' && !showRestored) return null;
+
+  if (showRestored) {
+    return (
+      <div className="sse-banner sse-banner--restored">Connection restored</div>
+    );
+  }
+
+  if (state === 'reconnecting') {
+    return (
+      <div className="sse-banner sse-banner--reconnecting">Reconnecting…</div>
+    );
+  }
+
+  if (state === 'lost') {
+    return (
+      <div className="sse-banner sse-banner--lost">
+        Connection lost
+        <button className="sse-banner__retry" onClick={onRetry}>
+          Retry
+        </button>
+      </div>
+    );
+  }
+
+  return null;
+}
+
+/* ─── Status Bar (inline — lightweight) ─── */
+
+function StatusBar({
+  status,
+  isLive,
+  sseState,
+}: {
+  status: SystemStatus | null;
+  isLive: boolean;
+  sseState: string;
+}) {
+  return (
+    <div className="status-bar">
+      <span
+        className={`status-bar__dot ${isLive ? 'status-bar__dot--live' : 'status-bar__dot--paused'}`}
+      />
+      <span>{isLive ? 'Live' : 'Paused'}</span>
+      <span className="status-bar__sep" />
+      <span className="status-bar__item">
+        <span className="status-bar__label">Deals today</span>
+        <span className="status-bar__value">{status?.scanner?.dealsToday ?? 0}</span>
+      </span>
+      <span className="status-bar__sep" />
+      <span className="status-bar__item">
+        <span className="status-bar__label">eBay API</span>
+        <span className="status-bar__value">
+          {status?.ebay?.callsToday ?? 0}/{status?.ebay?.dailyLimit ?? '—'}
+        </span>
+      </span>
+      <span className="status-bar__sep" />
+      <span className="status-bar__item">
+        <span className="status-bar__label">Cards indexed</span>
+        <span className="status-bar__value">
+          {status?.sync?.totalCards?.toLocaleString() ?? '—'}
+        </span>
+      </span>
+      <span className="status-bar__sep" />
+      <span className="status-bar__item">
+        <span className="status-bar__label">SSE</span>
+        <span className="status-bar__value">{sseState}</span>
+      </span>
+    </div>
+  );
+}
+
+/* ─── Catalog Placeholder ─── */
+
+function CatalogPlaceholder() {
+  return (
+    <div className="placeholder-page">
+      <span className="placeholder-page__icon">📚</span>
+      <p className="placeholder-page__text">
+        Catalog — use <code>/catalog</code> route for full experience
+      </p>
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════
+   DASHBOARD COMPONENT
+   ═══════════════════════════════════════════════ */
 
 export default function Dashboard() {
-  // Core state
+  // ─── Core state ───
   const [deals, setDeals] = useState<Deal[]>([]);
-  const [selectedDealId, setSelectedDealId] = useState<string | null>(null);
   const [filters, setFilters] = useState<FilterState>(DEFAULT_FILTERS);
-  const [sort, setSort] = useState('recent');
+  const [sort, setSort] = useState('profit');
   const [searchQuery, setSearchQuery] = useState('');
   const [status, setStatus] = useState<SystemStatus | null>(null);
 
-  // SSE
+  // ─── Hero triage state ───
+  const [curIdx, setCurIdx] = useState(0);
+  const [skipped, setSkipped] = useState<Set<string>>(new Set());
+  const [snagged, setSnagged] = useState<Set<string>>(new Set());
+  const [heroDetail, setHeroDetail] = useState<DealDetail | null>(null);
+  const [reviewState, setReviewState] = useState<'none' | 'correct' | 'wrong'>('none');
+  const [velocityLoading, setVelocityLoading] = useState(false);
+
+  // ─── SSE ───
   const [sseState, setSseState] = useState<'connected' | 'reconnecting' | 'lost' | 'restored'>(
     'reconnecting',
   );
@@ -131,22 +247,14 @@ export default function Dashboard() {
   const eventSourceRef = useRef<EventSource | null>(null);
   const sseTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
-  // UI state
+  // ─── UI state ───
   const [showLookup, setShowLookup] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
-  const [newDealIds, setNewDealIds] = useState<Set<string>>(new Set());
+  const [showFilters, setShowFilters] = useState(false);
   const [scannerPaused, setScannerPaused] = useState(false);
-  const [activeView, setActiveView] = useState('dashboard');
-  const [isMobile, setIsMobile] = useState(window.innerWidth <= 920);
+  const [nav, setNav] = useState('dashboard');
 
-  // Responsive
-  useEffect(() => {
-    const handler = () => setIsMobile(window.innerWidth <= 920);
-    window.addEventListener('resize', handler);
-    return () => window.removeEventListener('resize', handler);
-  }, []);
-
-  // Load initial data
+  // ─── Load initial data ───
   useEffect(() => {
     getDeals({ limit: 50, sort: 'createdAt', order: 'desc' })
       .then((res) => setDeals(res.data))
@@ -166,7 +274,7 @@ export default function Dashboard() {
       .catch(() => {});
   }, []);
 
-  // SSE connection
+  // ─── SSE connection (unchanged logic) ───
   const connectSSE = useCallback(() => {
     if (eventSourceRef.current) {
       eventSourceRef.current.close();
@@ -193,16 +301,7 @@ export default function Dashboard() {
           if (prev.some((d) => d.deal_id === deal.deal_id)) return prev;
           return [deal, ...prev];
         });
-        setNewDealIds((prev) => new Set(prev).add(deal.deal_id));
-        setTimeout(() => {
-          setNewDealIds((prev) => {
-            const next = new Set(prev);
-            next.delete(deal.deal_id);
-            return next;
-          });
-        }, 1000);
 
-        // Toast for GRAILs
         if (deal.tier === 'GRAIL') {
           showToast({
             id: deal.deal_id,
@@ -249,7 +348,7 @@ export default function Dashboard() {
     };
   }, [connectSSE]);
 
-  // Periodic status refresh
+  // ─── Periodic status refresh ───
   useEffect(() => {
     const interval = setInterval(() => {
       getStatus()
@@ -262,49 +361,109 @@ export default function Dashboard() {
     return () => clearInterval(interval);
   }, []);
 
-  // Derived data
-  const filteredAndSorted = useMemo(() => {
+  // ─── Derived: filtered + sorted visible deals (excluding skipped/snagged) ───
+  const visible = useMemo(() => {
     const filtered = applyFilters(deals, filters);
     const searched = searchDeals(filtered, searchQuery);
-    return sortDeals(searched, sort);
-  }, [deals, filters, sort, searchQuery]);
+    const sorted = sortDeals(searched, sort);
+    return sorted.filter((d) => !skipped.has(d.deal_id) && !snagged.has(d.deal_id));
+  }, [deals, filters, sort, searchQuery, skipped, snagged]);
 
-  // Summary stats for TopBar
+  // ─── Current hero deal ───
+  const cur = visible[curIdx] || visible[0] || null;
+
+  // ─── Fetch detail for current hero deal ───
+  useEffect(() => {
+    if (!cur) {
+      setHeroDetail(null);
+      return;
+    }
+    setReviewState('none');
+    getDealDetail(cur.deal_id)
+      .then((d) => setHeroDetail(d))
+      .catch(() => setHeroDetail(null));
+  }, [cur?.deal_id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ─── Summary stats ───
   const stats = useMemo(() => {
-    const totalProfit = filteredAndSorted.reduce((sum, d) => sum + (d.profit_gbp ?? 0), 0);
-    const avgRoi =
-      filteredAndSorted.length > 0
-        ? filteredAndSorted.reduce((sum, d) => sum + (d.profit_percent ?? 0), 0) /
-          filteredAndSorted.length
-        : 0;
+    const totalProfit = visible.reduce((sum, d) => sum + (d.profit_gbp ?? 0), 0);
     return {
-      count: filteredAndSorted.length,
-      totalProfit: Math.round(totalProfit * 100) / 100,
-      avgRoi: Math.round(avgRoi * 10) / 10,
+      count: visible.length,
+      snagged: snagged.size,
+      potential: Math.round(totalProfit * 100) / 100,
     };
-  }, [filteredAndSorted]);
+  }, [visible, snagged]);
 
-  // Session stats for Sidebar — derived from live deal stream + status endpoint
+  const snagTotal = useMemo(
+    () =>
+      deals
+        .filter((d) => snagged.has(d.deal_id))
+        .reduce((s, d) => s + (d.profit_gbp ?? 0), 0),
+    [deals, snagged],
+  );
+
+  // ─── Session stats for Queue panel ───
   const sessionStats = useMemo(
     () => ({
       scanned: status?.ebay?.callsToday ?? 0,
       dealsFound: deals.length,
       totalProfit: deals.reduce((sum, d) => sum + (d.profit_gbp ?? 0), 0),
+      snagged: snagged.size,
+      skipped: skipped.size,
+      snagTotal,
     }),
-    [status, deals],
+    [status, deals, snagged, skipped, snagTotal],
   );
 
-  // Handlers
+  // ─── Handlers ───
+  const doSnag = useCallback(() => {
+    if (cur) {
+      setSnagged((p) => new Set(p).add(cur.deal_id));
+      setCurIdx(0);
+    }
+  }, [cur]);
+
+  const doSkip = useCallback(() => {
+    if (cur) {
+      setSkipped((p) => new Set(p).add(cur.deal_id));
+      setCurIdx(0);
+    }
+  }, [cur]);
+
+  const handleReview = useCallback(
+    async (correct: boolean) => {
+      if (!cur) return;
+      setReviewState(correct ? 'correct' : 'wrong');
+      try {
+        await reviewDeal(cur.deal_id, correct);
+      } catch {
+        /* silent */
+      }
+    },
+    [cur],
+  );
+
+  const handleFetchVelocity = useCallback(async () => {
+    if (!cur) return;
+    setVelocityLoading(true);
+    try {
+      await fetchVelocity(cur.deal_id);
+      // Refetch detail to get updated liquidity data
+      const d = await getDealDetail(cur.deal_id);
+      setHeroDetail(d);
+    } catch {
+      /* silent */
+    } finally {
+      setVelocityLoading(false);
+    }
+  }, [cur]);
+
   const handleSaveFilters = async () => {
     try {
       await updatePreferences({ defaultFilters: filters });
     } catch {
       /* silent */
     }
-  };
-
-  const handleRetrySSE = () => {
-    connectSSE();
   };
 
   const handleToggleScanner = async () => {
@@ -317,186 +476,239 @@ export default function Dashboard() {
     }
   };
 
+  const handleRetrySSE = () => {
+    connectSSE();
+  };
+
+  const handleNav = (id: string) => {
+    if (id === 'settings') {
+      setShowSettings(true);
+      return;
+    }
+    setNav(id);
+  };
+
+  const handleSelectQueueDeal = (dealId: string) => {
+    const idx = visible.findIndex((d) => d.deal_id === dealId);
+    if (idx >= 0) setCurIdx(idx);
+  };
+
+  // ─── Keyboard shortcuts ───
+  useEffect(() => {
+    if (nav !== 'dashboard') return;
+    const handler = (e: KeyboardEvent) => {
+      if (
+        e.target instanceof HTMLInputElement ||
+        e.target instanceof HTMLSelectElement ||
+        e.target instanceof HTMLTextAreaElement
+      )
+        return;
+      if (e.key === 's' || e.key === 'ArrowRight') {
+        e.preventDefault();
+        doSnag();
+      }
+      if (e.key === 'x' || e.key === 'ArrowLeft') {
+        e.preventDefault();
+        doSkip();
+      }
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        setCurIdx((i) => Math.min(i + 1, visible.length - 1));
+      }
+      if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        setCurIdx((i) => Math.max(i - 1, 0));
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [doSnag, doSkip, visible.length, nav]);
+
+  // Close filter popover on outside click
+  useEffect(() => {
+    if (!showFilters) return;
+    const handler = (e: MouseEvent) => {
+      const target = e.target as HTMLElement;
+      if (!target.closest('.fpop') && !target.closest('.tb')) {
+        setShowFilters(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [showFilters]);
+
   const isLive = sseState === 'connected' && !scannerPaused;
+  const isDashboard = nav === 'dashboard';
+  const hasActiveFilters =
+    filters.tiers.length !== DEFAULT_FILTERS.tiers.length ||
+    filters.conditions.length !== DEFAULT_FILTERS.conditions.length ||
+    filters.timeWindow !== DEFAULT_FILTERS.timeWindow;
 
   return (
-    <div
-      style={{
-        display: 'flex',
-        height: '100vh',
-        overflow: 'hidden',
-        position: 'relative',
-        zIndex: 1,
-        background: 'linear-gradient(180deg, #08061a 0%, #0c0a1a 100%)',
-        fontFamily: "'IBM Plex Sans', 'Plus Jakarta Sans', system-ui, sans-serif",
-      }}
-    >
-      {/* ═══ SIDEBAR ═══ */}
-      {!isMobile && (
-        <Sidebar
-          activeView={activeView}
-          onViewChange={setActiveView}
-          sessionStats={sessionStats}
-          onOpenSettings={() => setShowSettings(true)}
-        />
-      )}
-
-      {/* ═══ MAIN CONTENT ═══ */}
-      <div
-        style={{
-          flex: 1,
-          display: 'flex',
-          flexDirection: 'column',
-          minWidth: 0,
-          overflow: 'hidden',
-        }}
-      >
-        {/* TopBar */}
-        <TopBar
-          isLive={isLive}
-          onToggleLive={handleToggleScanner}
-          searchQuery={searchQuery}
-          onSearchChange={setSearchQuery}
-          dealCount={stats.count}
-          totalProfit={stats.totalProfit}
-          avgRoi={stats.avgRoi}
-          onOpenLookup={() => setShowLookup(true)}
+    <>
+      <div className={`shell ${isDashboard ? '' : 'shell--wide'}`}>
+        {/* ═══ RAIL ═══ */}
+        <Rail
+          active={nav}
+          onNav={handleNav}
+          isPaused={scannerPaused}
+          onPause={handleToggleScanner}
         />
 
-        {/* SSE Banner */}
-        <SSEBanner state={sseState} onRetry={handleRetrySSE} />
-
-        {/* FilterBar */}
-        <FilterBar
-          filters={filters}
-          onChange={setFilters}
-          onSave={handleSaveFilters}
-          sort={sort}
-          onSortChange={setSort}
-        />
-
-        {/* Content area: table + panel */}
-        <div
-          style={{
-            flex: 1,
-            display: 'flex',
-            minHeight: 0,
-            position: 'relative',
-          }}
-        >
-          {/* Deal Table */}
-          <div
-            style={{
-              flex: 1,
-              display: 'flex',
-              flexDirection: 'column',
-              minWidth: 0,
-              overflow: 'hidden',
-            }}
-          >
-            <DealTable
-              deals={filteredAndSorted}
-              selectedId={selectedDealId}
-              onSelect={setSelectedDealId}
-              newDealIds={newDealIds}
-            />
+        {/* ═══ CATALOG (or other nav) ═══ */}
+        {nav === 'catalog' && <CatalogPlaceholder />}
+        {nav === 'alerts' && (
+          <div className="placeholder-page">
+            <span className="placeholder-page__icon">🔔</span>
+            <p className="placeholder-page__text">Alerts — coming soon</p>
           </div>
+        )}
 
-          {/* Detail Panel — desktop sidebar */}
-          {!isMobile && (
-            <div
-              style={{
-                width: 380,
-                flexShrink: 0,
-                borderLeft: '1px solid rgba(255,255,255,0.04)',
-                background: 'rgba(0,0,0,0.15)',
-                overflow: 'hidden',
-                display: 'flex',
-                flexDirection: 'column',
-              }}
-            >
-              <DealPanel
-                dealId={selectedDealId}
-                onClose={() => setSelectedDealId(null)}
-              />
-            </div>
-          )}
+        {/* ═══ DASHBOARD CENTER ═══ */}
+        {isDashboard && (
+          <>
+            <div className="center">
+              {/* Header */}
+              <header className="center__hdr">
+                <h1 className="center__title">Deals</h1>
+                <div className="center__stats">
+                  <div className="cs">
+                    <span className="cs__l">Queue</span>
+                    <span className="cs__v">{stats.count}</span>
+                  </div>
+                  <div className="cs">
+                    <span className="cs__l">Snagged</span>
+                    <span className="cs__v cs__v--g">{stats.snagged}</span>
+                  </div>
+                  <div className="cs">
+                    <span className="cs__l">Potential</span>
+                    <span className="cs__v cs__v--g">£{stats.potential.toFixed(0)}</span>
+                  </div>
+                </div>
+              </header>
 
-          {/* Detail Panel — mobile bottom sheet */}
-          {isMobile && selectedDealId && (
-            <div
-              style={{
-                position: 'fixed',
-                bottom: 0,
-                left: 0,
-                right: 0,
-                height: '75vh',
-                background: '#0c0a1a',
-                borderTop: '1px solid rgba(255,255,255,0.06)',
-                borderRadius: '14px 14px 0 0',
-                zIndex: 50,
-                display: 'flex',
-                flexDirection: 'column',
-                overflow: 'hidden',
-                animation: 'slideUp 0.3s ease',
-              }}
-            >
-              <div
-                style={{
-                  display: 'flex',
-                  justifyContent: 'center',
-                  padding: '8px 0 4px',
-                }}
-              >
-                <div
-                  style={{
-                    width: 32,
-                    height: 4,
-                    borderRadius: 2,
-                    background: 'rgba(255,255,255,0.15)',
-                  }}
-                />
+              {/* Toolbar */}
+              <div className="center__toolbar">
+                <div style={{ position: 'relative' }}>
+                  <button
+                    className={`tb ${showFilters ? 'tb--on' : ''}`}
+                    onClick={() => setShowFilters((f) => !f)}
+                  >
+                    <svg width="13" height="13" viewBox="0 0 14 14" fill="none">
+                      <path
+                        d="M1 3h12M3 7h8M5 11h4"
+                        stroke="currentColor"
+                        strokeWidth="1.2"
+                        strokeLinecap="round"
+                      />
+                    </svg>
+                    Filter
+                    {hasActiveFilters && <span className="tb__dot" />}
+                  </button>
+                  <FilterPopover
+                    show={showFilters}
+                    filters={filters}
+                    onChange={setFilters}
+                    onSave={handleSaveFilters}
+                  />
+                </div>
+                <button
+                  className="tb"
+                  onClick={() => setShowLookup(true)}
+                  title="Manual eBay lookup"
+                >
+                  <svg width="13" height="13" viewBox="0 0 14 14" fill="none">
+                    <circle
+                      cx="6"
+                      cy="6"
+                      r="4.5"
+                      stroke="currentColor"
+                      strokeWidth="1.3"
+                    />
+                    <path
+                      d="M9.5 9.5L13 13"
+                      stroke="currentColor"
+                      strokeWidth="1.3"
+                      strokeLinecap="round"
+                    />
+                  </svg>
+                  Lookup
+                </button>
+                <div className="sort-m">
+                  <label htmlFor="ss">Sort</label>
+                  <select
+                    id="ss"
+                    value={sort}
+                    onChange={(e) => setSort(e.target.value)}
+                  >
+                    <option value="profit">Profit</option>
+                    <option value="roi">ROI</option>
+                    <option value="match">Match</option>
+                    <option value="recent">Recent</option>
+                  </select>
+                </div>
               </div>
-              <div style={{ flex: 1, overflow: 'auto' }}>
-                <DealPanel
-                  dealId={selectedDealId}
-                  onClose={() => setSelectedDealId(null)}
-                />
+
+              {/* Keyboard hints */}
+              <div className="kbd-bar" aria-hidden="true">
+                <span className="kh">
+                  <span className="kk">S</span> Snag
+                </span>
+                <span className="kh">
+                  <span className="kk">X</span> Skip
+                </span>
+                <span className="kh">
+                  <span className="kk">↑↓</span> Nav
+                </span>
+              </div>
+
+              {/* SSE Banner */}
+              <SSEBannerInline state={sseState} onRetry={handleRetrySSE} />
+
+              {/* Hero scroll area */}
+              <div className="hero-scroll">
+                {cur ? (
+                  <HeroDeal
+                    key={cur.deal_id}
+                    deal={cur}
+                    detail={heroDetail}
+                    onSnag={doSnag}
+                    onSkip={doSkip}
+                    onReview={handleReview}
+                    reviewState={reviewState}
+                    onFetchVelocity={handleFetchVelocity}
+                    velocityLoading={velocityLoading}
+                  />
+                ) : (
+                  <div className="hero-empty">
+                    <span className="hero-empty__icon">✓</span>
+                    <p className="hero-empty__text">Queue clear</p>
+                    <p className="hero-empty__sub">
+                      {snagged.size} snagged · {skipped.size} skipped
+                    </p>
+                  </div>
+                )}
               </div>
             </div>
-          )}
-        </div>
 
-        {/* System Status Bar */}
-        <SystemStatusBar status={status} isLive={isLive} sseState={sseState} />
+            {/* ═══ QUEUE PANEL ═══ */}
+            <QueuePanel
+              deals={visible}
+              currentDealId={cur?.deal_id ?? null}
+              onSelectDeal={handleSelectQueueDeal}
+              sessionStats={sessionStats}
+            />
+          </>
+        )}
+
+        {/* ═══ STATUS BAR (spans all columns) ═══ */}
+        <StatusBar status={status} isLive={isLive} sseState={sseState} />
       </div>
 
       {/* ═══ MODALS ═══ */}
       {showLookup && <LookupModal onClose={() => setShowLookup(false)} />}
       {showSettings && <SettingsModal onClose={() => setShowSettings(false)} />}
       <ToastContainer />
-
-      <style>{`
-        @keyframes slideUp {
-          from { transform: translateY(100%); }
-          to { transform: translateY(0); }
-        }
-        @keyframes pulse {
-          0%, 100% { opacity: 1; }
-          50% { opacity: 0.3; }
-        }
-        @keyframes fadeSlide {
-          from { opacity: 0; transform: translateY(-8px); }
-          to { opacity: 1; transform: translateY(0); }
-        }
-        @keyframes panelSlide {
-          from { opacity: 0; transform: translateX(12px); }
-          to { opacity: 1; transform: translateX(0); }
-        }
-        @media (max-width: 640px) {
-          .deal-card-img { display: none !important; }
-        }
-      `}</style>
-    </div>
+    </>
   );
 }
