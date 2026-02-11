@@ -64,6 +64,7 @@ export default function Dashboard() {
   const [sseState, setSseState] = useState<'connected' | 'reconnecting' | 'lost'>('reconnecting');
   const [showLookup, setShowLookup] = useState(false);
   const [newDealIds, setNewDealIds] = useState<Set<string>>(new Set());
+  const [scannerPaused, setScannerPaused] = useState(false);
   const [isMobile, setIsMobile] = useState(window.innerWidth <= 920);
   const eventSourceRef = useRef<EventSource | null>(null);
   const sseTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -78,7 +79,10 @@ export default function Dashboard() {
   // Load initial data
   useEffect(() => {
     getDeals({ limit: 50, sort: 'createdAt', order: 'desc' }).then(res => setDeals(res.data)).catch(() => {});
-    getStatus().then(s => setStatus(s)).catch(() => {});
+    getStatus().then(s => {
+      setStatus(s);
+      setScannerPaused(s.scanner?.status === 'paused');
+    }).catch(() => {});
     getPreferences().then(p => {
       if (p.data?.defaultFilters) {
         setFilters(prev => ({ ...prev, ...(p.data.defaultFilters as Partial<FilterState>) }));
@@ -156,7 +160,10 @@ export default function Dashboard() {
   // Periodic status refresh
   useEffect(() => {
     const interval = setInterval(() => {
-      getStatus().then(s => setStatus(s)).catch(() => {});
+      getStatus().then(s => {
+      setStatus(s);
+      setScannerPaused(s.scanner?.status === 'paused');
+    }).catch(() => {});
     }, 30000);
     return () => clearInterval(interval);
   }, []);
@@ -174,17 +181,18 @@ export default function Dashboard() {
   };
 
   const handleToggleScanner = async () => {
-    const currentStatus = status?.scanner?.status || 'running';
-    const action = currentStatus === 'paused' ? 'start' : 'stop';
+    const action = scannerPaused ? 'start' : 'stop';
+    // Optimistic UI update
+    setScannerPaused(!scannerPaused);
     try {
       await toggleScanner(action);
-      // Refresh full status so UI updates even if status was null
-      const s = await getStatus();
-      setStatus(s);
-    } catch { /* silent */ }
+    } catch {
+      // Revert on failure
+      setScannerPaused(scannerPaused);
+    }
   };
 
-  const scannerStatus = status?.scanner?.status || 'running';
+  const scannerStatus = scannerPaused ? 'paused' : 'running';
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', overflow: 'hidden' }}>
