@@ -28,6 +28,16 @@ vi.mock('../../services/scanner/deal-creator.js', () => ({
   createDeal: vi.fn(),
 }));
 
+vi.mock('../../services/liquidity/index.js', () => ({
+  calculateLiquidity: vi.fn(),
+  getVelocity: vi.fn(),
+  adjustTierForLiquidity: vi.fn(),
+}));
+
+vi.mock('../../services/notifications/deal-alerts.js', () => ({
+  sendDealAlert: vi.fn(),
+}));
+
 // Suppress pino log noise in tests
 vi.mock('pino', () => ({
   default: () => ({
@@ -46,6 +56,8 @@ import { matchListing } from '../../services/matching/index.js';
 import { getValidRate } from '../../services/exchange-rate/exchange-rate-service.js';
 import { isDuplicate, markProcessed } from '../../services/scanner/deduplicator.js';
 import { createDeal } from '../../services/scanner/deal-creator.js';
+import { calculateLiquidity, getVelocity, adjustTierForLiquidity } from '../../services/liquidity/index.js';
+import { sendDealAlert } from '../../services/notifications/deal-alerts.js';
 
 // ── Import module under test ─────────────────────────────────────────────
 
@@ -142,6 +154,18 @@ beforeEach(() => {
   vi.mocked(getBudgetStatus).mockReturnValue(makeBudgetStatus());
   vi.mocked(isDuplicate).mockResolvedValue(false);
   vi.mocked(getValidRate).mockResolvedValue(EXCHANGE_RATE);
+
+  // Defaults: liquidity and notifications
+  vi.mocked(calculateLiquidity).mockReturnValue({
+    composite: 0.7,
+    grade: 'B' as any,
+    signals: {} as any,
+  });
+  vi.mocked(getVelocity).mockResolvedValue({
+    sales7d: 0, sales30d: 0, medianPrice: null, avgDaysBetweenSales: null, fetched: false,
+  });
+  vi.mocked(adjustTierForLiquidity).mockImplementation((tier: any) => tier);
+  vi.mocked(sendDealAlert).mockResolvedValue(undefined as any);
 });
 
 // ── Tests ────────────────────────────────────────────────────────────────
