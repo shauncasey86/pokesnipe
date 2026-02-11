@@ -76,6 +76,13 @@ export async function lookupEbayUrl(ebayUrl: string): Promise<LookupResult> {
   });
 }
 
+export async function toggleScanner(action: 'start' | 'stop'): Promise<{ status: string }> {
+  return apiFetch<{ status: string }>('/api/status/scanner', {
+    method: 'POST',
+    body: JSON.stringify({ action }),
+  });
+}
+
 export async function login(password: string): Promise<void> {
   const res = await fetch('/auth/login', {
     method: 'POST',

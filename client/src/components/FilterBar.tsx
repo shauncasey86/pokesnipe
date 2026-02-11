@@ -103,10 +103,8 @@ export default function FilterBar({
         alignItems: 'center',
         gap: 6,
         padding: '6px 16px',
-        height: 44,
+        flexWrap: 'wrap',
         borderBottom: '1px solid var(--brd)',
-        overflowX: 'auto',
-        overflowY: 'hidden',
         flexShrink: 0,
       }}
     >
@@ -134,7 +132,7 @@ export default function FilterBar({
         ))}
       </FilterGroup>
 
-      <div className="filter-extended">
+      <div className="filter-extended" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
         <FilterGroup label="LIQ">
           {(['HIGH', 'MED', 'LOW'] as LiquidityGrade[]).map(g => (
             <Seg

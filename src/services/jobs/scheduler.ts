@@ -6,6 +6,7 @@ const log = pino({ name: 'scheduler' });
 interface JobEntry {
   task: cron.ScheduledTask;
   isRunning: boolean;
+  isPaused: boolean;
   lastRun: Date | null;
   lastError: string | null;
   runCount: number;
@@ -57,6 +58,7 @@ export function registerJob(name: string, schedule: string, fn: () => Promise<vo
   jobs.set(name, {
     task,
     isRunning: false,
+    isPaused: false,
     lastRun: null,
     lastError: null,
     runCount: 0,
@@ -78,12 +80,37 @@ export function getJobStatuses(): Record<string, {
   for (const [name, entry] of jobs) {
     statuses[name] = {
       isRunning: entry.isRunning,
+      isPaused: entry.isPaused,
       lastRun: entry.lastRun,
       lastError: entry.lastError,
       runCount: entry.runCount,
     };
   }
   return statuses;
+}
+
+/**
+ * Pause a single job (stop its cron schedule).
+ */
+export function pauseJob(name: string): boolean {
+  const job = jobs.get(name);
+  if (!job) return false;
+  job.task.stop();
+  job.isPaused = true;
+  log.info({ job: name }, 'Job paused');
+  return true;
+}
+
+/**
+ * Resume a paused job (restart its cron schedule).
+ */
+export function resumeJob(name: string): boolean {
+  const job = jobs.get(name);
+  if (!job) return false;
+  job.task.start();
+  job.isPaused = false;
+  log.info({ job: name }, 'Job resumed');
+  return true;
 }
 
 /**
