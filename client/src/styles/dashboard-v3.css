@@ -230,6 +230,31 @@
   border-radius: 50%;
   background: var(--blue);
 }
+.tb-search {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  border: 1px solid var(--b2);
+  border-radius: var(--r-s);
+  color: var(--t3);
+  transition: 0.15s;
+}
+.tb-search:focus-within {
+  border-color: var(--blue);
+  color: var(--t2);
+}
+.tb-search input {
+  background: none;
+  border: none;
+  outline: none;
+  color: var(--t1);
+  font: 400 11px var(--mono);
+  width: 100px;
+}
+.tb-search input::placeholder {
+  color: var(--t4);
+}
 .sort-m {
   margin-left: auto;
   display: flex;

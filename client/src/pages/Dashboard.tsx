@@ -612,6 +612,19 @@ export default function Dashboard() {
                     onSave={handleSaveFilters}
                   />
                 </div>
+                <div className="tb-search">
+                  <svg width="13" height="13" viewBox="0 0 14 14" fill="none">
+                    <circle cx="6" cy="6" r="4.5" stroke="currentColor" strokeWidth="1.3" />
+                    <path d="M9.5 9.5L13 13" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+                  </svg>
+                  <input
+                    type="search"
+                    placeholder="Search…"
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    aria-label="Search deals"
+                  />
+                </div>
                 <button
                   className="tb"
                   onClick={() => setShowLookup(true)}
