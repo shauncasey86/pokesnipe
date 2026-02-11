@@ -7,6 +7,7 @@ import { trackCall, canMakeCall } from '../services/ebay/budget.js';
 import { extractSignals } from '../services/extraction/index.js';
 import { matchListing } from '../services/matching/index.js';
 import { calculateProfit } from '../services/pricing/pricing-engine.js';
+import { classifyTier } from '../services/pricing/tier-classifier.js';
 import { getValidRate } from '../services/exchange-rate/exchange-rate-service.js';
 import { calculateLiquidity } from '../services/liquidity/index.js';
 
@@ -131,7 +132,15 @@ router.post('/', validate(lookupSchema), async (req: Request, res: Response) => 
             confidence: match.confidence,
           }
         : null,
-      profit,
+      profit: profit
+        ? {
+            profitGBP: profit.profitGBP,
+            profitPercent: profit.profitPercent,
+            tier: classifyTier(profit.profitPercent),
+            totalCostGBP: profit.totalCostGBP,
+            marketPriceGBP: profit.marketValueGBP,
+          }
+        : null,
       liquidity: liquidity
         ? {
             composite: liquidity.composite,
