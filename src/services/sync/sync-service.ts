@@ -85,7 +85,7 @@ export async function syncAll(): Promise<SyncResult> {
   try {
     // Step 1: Check credits
     const usage = await scrydex.getAccountUsage();
-    log(`Scrydex credits: ${usage.remaining_credits} remaining of ${usage.total_credits}`);
+    log(`Scrydex credits: ${usage.total_credits_consumed} consumed this period (${usage.overage_credits_consumed} overage)`);
 
     // Step 2: Fetch all expansions (paginated)
     const allExpansions = await fetchAllExpansions();

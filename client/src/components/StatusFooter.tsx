@@ -88,7 +88,7 @@ export default function StatusFooter({ status }: { status: SystemStatus | null }
         {scrydex && (
           <>
             <span>
-              Scrydex <StatusDot status={scrydex.status} /> {formatCredits(scrydex.usedCredits)}/{formatCredits(scrydex.totalCredits)}
+              Scrydex <StatusDot status={scrydex.status} /> {formatCredits(scrydex.creditsConsumed)} used
             </span>
             <span style={{ color: 'var(--tMut)' }}>|</span>
           </>
