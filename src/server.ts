@@ -5,9 +5,9 @@ import { runMigrations } from './db/migrate.js';
 import app from './app.js';
 import { syncAll } from './services/sync/sync-service.js';
 import { refreshRate } from './services/exchange-rate/exchange-rate-service.js';
-import { startScanLoop } from './services/scanner/index.js';
+import { runScanCycle } from './services/scanner/scanner-service.js';
+import { registerAllJobs, stopAllJobs } from './services/jobs/index.js';
 
-const ONE_HOUR_MS = 60 * 60 * 1000;
 const STALE_SYNC_HOURS = 48;
 
 const logger = pino({ name: 'server' });
@@ -22,6 +22,19 @@ process.on('unhandledRejection', (reason) => {
   console.error(`UNHANDLED REJECTION: ${reason}`);
   process.exit(1);
 });
+
+// Graceful shutdown handler
+function shutdown(signal: string) {
+  logger.info({ signal }, 'Shutdown signal received');
+  stopAllJobs();
+  pool.end().then(() => {
+    logger.info('Database pool closed');
+    process.exit(0);
+  });
+}
+
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGINT', () => shutdown('SIGINT'));
 
 async function runVerification(): Promise<void> {
   logger.info('=== SYNC + VERIFY MODE ===');
@@ -203,40 +216,14 @@ async function boot(): Promise<void> {
   app.listen(config.PORT, () => {
     logger.info(`Server ready on port ${config.PORT}`);
 
-    // Step 7: Start scanner loop (after server is listening and exchange rate is available)
-    startScanLoop();
-    logger.info('Scanner loop started');
+    // Step 7: Register all background jobs (replaces startScanLoop + setInterval jobs)
+    registerAllJobs();
+    logger.info('Background job scheduler started');
 
-    // Step 8: Schedule hourly exchange rate refresh
-    setInterval(async () => {
-      try {
-        const rate = await refreshRate();
-        logger.info({ rate }, 'Hourly exchange rate refresh');
-      } catch (err) {
-        logger.error({ error: err instanceof Error ? err.message : String(err) }, 'Hourly exchange rate refresh failed');
-      }
-    }, ONE_HOUR_MS);
-    logger.info('Exchange rate hourly refresh scheduled');
-
-    // Step 9: Schedule hourly deal cleanup (mark expired, delete old)
-    setInterval(async () => {
-      try {
-        // Mark expired deals
-        const { rowCount: expired } = await pool.query(
-          `UPDATE deals SET status = 'expired' WHERE status = 'active' AND expires_at < NOW()`,
-        );
-        // Delete deals older than 30 days that aren't reviewed
-        const { rowCount: deleted } = await pool.query(
-          `DELETE FROM deals WHERE status IN ('expired', 'sold') AND created_at < NOW() - INTERVAL '30 days'`,
-        );
-        if ((expired ?? 0) > 0 || (deleted ?? 0) > 0) {
-          logger.info({ expired, deleted }, 'Deal cleanup complete');
-        }
-      } catch (err) {
-        logger.error({ error: err instanceof Error ? err.message : String(err) }, 'Deal cleanup failed');
-      }
-    }, ONE_HOUR_MS);
-    logger.info('Deal cleanup hourly job scheduled');
+    // Step 8: Kick off the first scan immediately (don't wait 5 minutes for cron)
+    runScanCycle().catch(err =>
+      logger.error({ error: err instanceof Error ? err.message : String(err) }, 'Initial scan failed'),
+    );
   });
 }
 

@@ -3,6 +3,7 @@ import pino from 'pino';
 import { pool } from '../db/pool.js';
 import { getBudgetStatus } from '../services/ebay/budget.js';
 import { getDedupStats } from '../services/scanner/deduplicator.js';
+import { getJobStatuses } from '../services/jobs/index.js';
 
 const log = pino({ name: 'status' });
 const router = Router();
@@ -86,6 +87,7 @@ router.get('/', async (req: Request, res: Response) => {
         totalReviewed: parseInt(accuracy.total_reviewed) || 0,
         totalCorrect: parseInt(accuracy.total_correct) || 0,
       },
+      jobs: getJobStatuses(),
     });
   } catch (err) {
     log.error({ err }, 'Failed to fetch status');
