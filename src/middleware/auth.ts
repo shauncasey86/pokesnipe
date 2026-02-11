@@ -54,8 +54,15 @@ authRouter.post('/login', (req: Request, res: Response) => {
 
   if (isMatch) {
     (req.session as any).authenticated = true;
-    log.info('Login successful');
-    return res.json({ success: true });
+    req.session.save((err) => {
+      if (err) {
+        log.error({ err }, 'Failed to save session');
+        return res.status(500).json({ error: 'Session save failed' });
+      }
+      log.info('Login successful');
+      return res.json({ success: true });
+    });
+    return;
   }
 
   log.warn('Login failed — invalid password');
