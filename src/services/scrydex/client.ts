@@ -196,7 +196,7 @@ export async function getAccountUsage(): Promise<UsageResponse> {
   const raw: any = await limiter.schedule(() =>
     scrydexFetch<any>(`${ACCOUNT_URL}/usage`),
   );
-  logger.info({ scrydexUsageRaw: JSON.stringify(raw).slice(0, 500) }, 'Scrydex usage API response');
+  logger.info(`Scrydex usage raw: ${JSON.stringify(raw).slice(0, 500)}`);
   const d = raw.data ?? raw;
   return {
     total_credits: d.total_credits ?? d.totalCredits,
