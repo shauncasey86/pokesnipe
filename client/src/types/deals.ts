@@ -127,9 +127,9 @@ export interface SystemStatus {
     totalCorrect: number;
   };
   scrydex: {
-    totalCredits: number;
-    usedCredits: number;
-    remainingCredits: number;
+    creditsConsumed: number;
+    overageConsumed: number;
+    periodEnd: string;
     status: string;
   } | null;
   jobs: Record<string, unknown>;

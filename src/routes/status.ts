@@ -94,10 +94,10 @@ router.get('/', async (req: Request, res: Response) => {
         incorrectReasons: accuracyStats.incorrectReasons,
       },
       scrydex: scrydexUsage ? {
-        totalCredits: scrydexUsage.total_credits,
-        usedCredits: scrydexUsage.used_credits,
-        remainingCredits: scrydexUsage.remaining_credits,
-        status: scrydexUsage.remaining_credits > 1000 ? 'healthy' : scrydexUsage.remaining_credits > 100 ? 'low' : 'critical',
+        creditsConsumed: scrydexUsage.total_credits_consumed,
+        overageConsumed: scrydexUsage.overage_credits_consumed,
+        periodEnd: scrydexUsage.period_end,
+        status: scrydexUsage.overage_credits_consumed > 0 ? 'critical' : 'healthy',
       } : null,
       jobs: getJobStatuses(),
     });

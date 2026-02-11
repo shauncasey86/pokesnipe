@@ -137,7 +137,7 @@ export default function SystemStatusBar({ status, isLive }: SystemStatusBarProps
               }}
             />
             {' '}
-            {formatCredits(status.scrydex.usedCredits)}/{formatCredits(status.scrydex.totalCredits)}
+            {formatCredits(status.scrydex.creditsConsumed)} used
           </span>
 
           {/* Separator */}

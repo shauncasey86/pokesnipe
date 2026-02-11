@@ -104,10 +104,10 @@ export interface CardResponse {
 }
 
 export interface UsageResponse {
-  total_credits: number;
-  remaining_credits: number;
-  used_credits: number;
-  overage_credit_rate: number;
+  total_credits_consumed: number;
+  overage_credits_consumed: number;
+  period_start: string;
+  period_end: string;
 }
 
 // --- Rate limiter ---
@@ -196,12 +196,11 @@ export async function getAccountUsage(): Promise<UsageResponse> {
   const raw: any = await limiter.schedule(() =>
     scrydexFetch<any>(`${ACCOUNT_URL}/usage`),
   );
-  logger.info({ scrydexUsageRaw: JSON.stringify(raw).slice(0, 500) }, 'Scrydex usage API response');
   const d = raw.data ?? raw;
   return {
-    total_credits: d.total_credits ?? d.totalCredits,
-    remaining_credits: d.remaining_credits ?? d.remainingCredits,
-    used_credits: d.used_credits ?? d.usedCredits,
-    overage_credit_rate: d.overage_credit_rate ?? d.overageCreditRate,
+    total_credits_consumed: d.total_credits_consumed,
+    overage_credits_consumed: d.overage_credits_consumed,
+    period_start: d.period_start,
+    period_end: d.period_end,
   };
 }
