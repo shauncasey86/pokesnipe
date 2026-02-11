@@ -24,7 +24,6 @@ interface NavItem {
 const navItems: NavItem[] = [
   { id: 'dashboard', label: 'Dashboard', icon: '\u229E' },
   { id: 'catalog', label: 'Catalog', icon: '\u229F' },
-  { id: 'portfolio', label: 'Portfolio', icon: '\u25C8' },
   { id: 'alerts', label: 'Alerts', icon: '\u25C9', badge: 3 },
   { id: 'settings', label: 'Settings', icon: '\u229B' },
 ];
@@ -282,7 +281,7 @@ const Sidebar: React.FC<SidebarProps> = ({
         <div style={{ ...statRowStyle, marginBottom: 0 }}>
           <span style={statLabelStyle}>Total profit</span>
           <span style={statProfitStyle}>
-            ${stats.totalProfit.toFixed(2)}
+            £{stats.totalProfit.toFixed(2)}
           </span>
         </div>
       </div>

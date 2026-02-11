@@ -18,6 +18,21 @@ const TIER_COLORS: Record<string, { bg: string; text: string; border: string }> 
   SLEEP: { bg: "rgba(58, 64, 96, 0.15)",   text: "#8290a8", border: "#3a4060" },
 };
 
+const TIER_TOOLTIPS: Record<string, string> = {
+  GRAIL: "Grail — High-value rare find, large profit margin",
+  HIT:   "Hit — Strong deal with good profit potential",
+  FLIP:  "Flip — Quick flip opportunity, moderate profit",
+  SLEEP: "Sleep — Low-priority deal, minimal profit",
+};
+
+const COND_TOOLTIPS: Record<string, string> = {
+  NM: "Near Mint — Excellent condition, minimal wear",
+  LP: "Lightly Played — Minor edge/surface wear",
+  MP: "Moderately Played — Noticeable wear, fully playable",
+  HP: "Heavily Played — Significant wear and creasing",
+  DM: "Damaged — Major damage, heavy creasing or tears",
+};
+
 const CONDITION_ORDER = ["DM", "HP", "MP", "LP", "NM"];
 
 const REVIEW_REASONS = [
@@ -75,12 +90,13 @@ function MiniBar({ value, max = 100, color = "#7c3aed" }: { value: number; max?:
 function PanelTierBadge({ tier }: { tier: string }) {
   const t = TIER_COLORS[tier] || TIER_COLORS.HIT;
   return (
-    <span style={{
+    <span title={TIER_TOOLTIPS[tier] ?? tier} style={{
       display: "inline-flex", alignItems: "center", gap: 4,
       padding: "2px 10px", borderRadius: 4,
       background: t.bg, color: t.text, border: `1px solid ${t.border}`,
       fontSize: 10, fontWeight: 700, letterSpacing: "0.08em",
       fontFamily: "'JetBrains Mono', monospace", textTransform: "uppercase",
+      cursor: "help",
     }}>
       {tier}
     </span>
@@ -90,12 +106,13 @@ function PanelTierBadge({ tier }: { tier: string }) {
 function ConditionBadge({ condition }: { condition: string }) {
   const c = COND_COLORS[condition] || COND_COLORS.NM;
   return (
-    <span style={{
+    <span title={COND_TOOLTIPS[condition] ?? condition} style={{
       display: "inline-flex", alignItems: "center", gap: 4,
       padding: "2px 10px", borderRadius: 4,
       background: c.bg, color: c.text, border: `1px solid ${c.border}`,
       fontSize: 10, fontWeight: 700, letterSpacing: "0.08em",
       fontFamily: "'JetBrains Mono', monospace", textTransform: "uppercase",
+      cursor: "help",
     }}>
       {condition}
     </span>
@@ -752,10 +769,10 @@ export default function DealPanel({ dealId, onClose }: DealPanelProps) {
   if (!dealId) {
     return (
       <div style={{
-        width: 280, borderLeft: "1px solid rgba(255,255,255,0.06)",
+        borderLeft: "1px solid rgba(255,255,255,0.06)",
         background: "#0d0f1a",
         display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
-        color: "rgba(255,255,255,0.3)", gap: 12, flexShrink: 0, height: "100%",
+        color: "rgba(255,255,255,0.3)", gap: 12, flexShrink: 0, height: "100%", width: "100%",
       }}>
         <div style={{
           width: 80, height: 80, borderRadius: "50%",
@@ -785,10 +802,10 @@ export default function DealPanel({ dealId, onClose }: DealPanelProps) {
   if (loading) {
     return (
       <div style={{
-        width: 280, borderLeft: "1px solid rgba(255,255,255,0.06)",
+        borderLeft: "1px solid rgba(255,255,255,0.06)",
         background: "#0d0f1a",
         display: "flex", alignItems: "center", justifyContent: "center",
-        color: "rgba(255,255,255,0.3)", flexShrink: 0, height: "100%",
+        color: "rgba(255,255,255,0.3)", flexShrink: 0, height: "100%", width: "100%",
       }}>
         <span style={{
           fontFamily: "'JetBrains Mono', monospace", fontSize: 11,
@@ -822,7 +839,7 @@ export default function DealPanel({ dealId, onClose }: DealPanelProps) {
       style={{
         display: "flex", flexDirection: "column", height: "100%",
         animation: "panelSlide 0.3s ease",
-        width: 280, borderLeft: "1px solid rgba(255,255,255,0.06)",
+        width: "100%", borderLeft: "1px solid rgba(255,255,255,0.06)",
         background: "#0d0f1a", flexShrink: 0, overflow: "hidden",
       }}
     >

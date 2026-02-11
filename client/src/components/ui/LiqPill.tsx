@@ -14,6 +14,13 @@ const LIQ_LABELS: Record<string, string> = {
   illiquid: 'ILLIQ',
 };
 
+const LIQ_TOOLTIPS: Record<string, string> = {
+  high: 'High liquidity — Sells quickly, strong demand',
+  medium: 'Medium liquidity — Sells reasonably, moderate demand',
+  low: 'Low liquidity — May take time to sell',
+  illiquid: 'Illiquid — Very slow to sell, weak demand',
+};
+
 export default function LiqPill({ grade }: { grade: LiquidityGrade | null }) {
   if (!grade) return null;
   const color = LIQ_COLORS[grade] || 'var(--tMut)';
@@ -21,6 +28,7 @@ export default function LiqPill({ grade }: { grade: LiquidityGrade | null }) {
   const dimmed = grade === 'illiquid';
   return (
     <span
+      title={LIQ_TOOLTIPS[grade] ?? grade}
       style={{
         display: 'inline-flex',
         alignItems: 'center',
@@ -33,6 +41,7 @@ export default function LiqPill({ grade }: { grade: LiquidityGrade | null }) {
         fontWeight: 500,
         lineHeight: '16px',
         opacity: dimmed ? 0.5 : 0.9,
+        cursor: 'help',
       }}
     >
       {label}
