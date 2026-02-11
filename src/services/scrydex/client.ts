@@ -193,11 +193,10 @@ export async function getExpansionCards(expansionId: string, page: number): Prom
 }
 
 export async function getAccountUsage(): Promise<UsageResponse> {
-  // The account API may wrap in { data: ... } and may return camelCase keys.
-  // Normalise both so the rest of the codebase can rely on snake_case.
   const raw: any = await limiter.schedule(() =>
     scrydexFetch<any>(`${ACCOUNT_URL}/usage`),
   );
+  logger.info({ scrydexUsageRaw: JSON.stringify(raw).slice(0, 500) }, 'Scrydex usage API response');
   const d = raw.data ?? raw;
   return {
     total_credits: d.total_credits ?? d.totalCredits,
