@@ -2,12 +2,16 @@ import pino from 'pino';
 import { getAccessToken, clearTokenCache } from './auth.js';
 import { scheduleEbayCall, checkRateLimitHeaders } from './rate-limiter.js';
 import { canMakeCall, trackCall } from './budget.js';
+import { sendAlert } from '../notifications/telegram.js';
 import type { EbaySearchResponse, EbayItemDetail } from './types.js';
 
 const logger = pino({ name: 'ebay-client' });
 
 const BASE_URL = 'https://api.ebay.com/buy/browse/v1';
 const MARKETPLACE_ID = 'EBAY_GB';
+
+// Track consecutive 429s for alerting
+let consecutive429s = 0;
 
 export interface SearchOptions {
   minPrice?: number;
@@ -36,12 +40,19 @@ async function ebayFetch<T>(url: string, retryOn401 = true): Promise<T> {
   }
 
   if (res.status === 429) {
+    consecutive429s++;
     const retryAfter = res.headers.get('Retry-After');
     const waitMs = retryAfter ? parseInt(retryAfter, 10) * 1000 : 5000;
-    logger.warn('Got 429 from eBay — backing off %dms', waitMs);
+    logger.warn('Got 429 from eBay — backing off %dms (consecutive: %d)', waitMs, consecutive429s);
+    if (consecutive429s >= 3) {
+      sendAlert('warning', 'eBay Rate Limited', `${consecutive429s} consecutive 429 responses`).catch(() => {});
+    }
     await new Promise((resolve) => setTimeout(resolve, waitMs));
     return ebayFetch<T>(url, false);
   }
+
+  // Reset consecutive 429 counter on success
+  consecutive429s = 0;
 
   if (!res.ok) {
     const body = await res.text();

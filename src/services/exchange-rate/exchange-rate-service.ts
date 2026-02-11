@@ -1,6 +1,7 @@
 import pino from 'pino';
 import { config } from '../../config/index.js';
 import { pool } from '../../db/pool.js';
+import { sendAlert } from '../notifications/telegram.js';
 
 const logger = pino({ name: 'exchange-rate' });
 
@@ -77,6 +78,15 @@ export async function getValidRate(): Promise<number> {
  * Called on boot and by scheduled jobs.
  */
 export async function refreshRate(): Promise<number> {
+  // Check staleness before refresh — alert if rate was stale
+  const lastFetched = await getLatestRate();
+  if (lastFetched) {
+    const hoursSinceFetch = (Date.now() - lastFetched.fetchedAt.getTime()) / (1000 * 60 * 60);
+    if (hoursSinceFetch > 4) {
+      sendAlert('warning', 'Exchange Rate Stale', `Last fetch: ${hoursSinceFetch.toFixed(1)}h ago`).catch(() => {});
+    }
+  }
+
   const { rate } = await fetchRate();
   await saveRate(rate);
   return rate;

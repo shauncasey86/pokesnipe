@@ -21,6 +21,10 @@ import { getValidRate } from '../exchange-rate/exchange-rate-service.js';
 // Stage 9 — Liquidity engine
 import { calculateLiquidity, getVelocity, adjustTierForLiquidity } from '../liquidity/index.js';
 
+// Stage 13 — Observability
+import { createPipelineContext } from '../logger/correlation.js';
+import { sendDealAlert } from '../notifications/deal-alerts.js';
+
 const log = pino({ name: 'scanner' });
 
 type Condition = 'NM' | 'LP' | 'MP' | 'HP';
@@ -152,9 +156,14 @@ export async function runScanCycle(): Promise<ScanResult> {
       }
       markProcessed(listing.itemId);
 
+      // Correlation context for tracing this listing through the pipeline
+      const ctx = createPipelineContext(listing.itemId);
+      log.info({ ...ctx }, 'Processing listing');
+
       // 3b. Extract signals from title (Phase 1 — title only, no enrichment data)
       const extractionResult = extractSignals(toExtractionInput(listing));
       if (extractionResult.rejected) {
+        log.debug({ ...ctx, rejected: true, reason: extractionResult.reason }, 'Signals extracted — rejected');
         stats.skippedJunk++;
         continue;
       }
@@ -163,9 +172,11 @@ export async function runScanCycle(): Promise<ScanResult> {
       // 3c. Match against card database
       const match = await matchListing(signals);
       if (!match) {
+        log.debug({ ...ctx, matched: false }, 'Match result — no match');
         stats.skippedNoMatch++;
         continue;
       }
+      log.debug({ ...ctx, matched: true, confidence: match.confidence.composite }, 'Match result');
 
       // Track concurrent supply for liquidity scoring
       const matchedCardId = match.card.scrydexCardId;
@@ -226,16 +237,18 @@ export async function runScanCycle(): Promise<ScanResult> {
         enriched = await getItem(listing.itemId);
         stats.enrichmentCalls++;
       } catch (err) {
-        log.warn({ err, itemId: listing.itemId }, 'getItem failed, skipping');
+        log.warn({ err, ...ctx }, 'getItem failed, skipping');
         stats.errors++;
         continue;
       }
 
       if (!enriched) {
         // getItem returned null (budget exhausted inside client)
-        log.warn('getItem returned null (budget), stopping enrichment');
+        log.warn({ ...ctx }, 'getItem returned null (budget), stopping enrichment');
         break;
       }
+
+      log.debug({ ...ctx, enriched: true }, 'Enriched listing');
 
       // Re-extract signals with enriched data (conditionDescriptors, localizedAspects)
       const enrichedExtractionResult = extractSignals(
@@ -366,6 +379,7 @@ export async function runScanCycle(): Promise<ScanResult> {
         stats.dealsCreated++;
         log.info(
           {
+            ...ctx,
             dealId: deal.dealId,
             tier,
             profit: deal.profitGBP,
@@ -373,11 +387,25 @@ export async function runScanCycle(): Promise<ScanResult> {
             liquidityGrade: liquidity.grade,
             liquidityScore: liquidity.composite,
           },
-          'New deal found',
+          'Deal created',
         );
+
+        // Fire and forget — don't block the scanner on Telegram
+        sendDealAlert({
+          cardName: enrichedMatch.card.name || listing.title,
+          cardNumber: enrichedMatch.card.number,
+          ebayPriceGBP,
+          marketPriceGBP: realProfit.marketValueGBP,
+          profitGBP: realProfit.profitGBP,
+          profitPercent: realProfit.profitPercent,
+          tier,
+          condition: realCondition,
+          confidence: enrichedMatch.confidence.composite,
+          ebayUrl: listing.itemWebUrl,
+        }).catch(err => log.warn({ err, ...ctx }, 'Deal alert failed'));
       }
     } catch (err) {
-      log.error({ err, itemId: listing.itemId }, 'Error processing listing');
+      log.error({ err, itemId: listing.itemId, service: 'scanner' }, 'Error processing listing');
       stats.errors++;
     }
   }
