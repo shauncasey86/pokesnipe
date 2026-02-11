@@ -284,14 +284,14 @@ export default function Dashboard() {
     };
   }, [filteredAndSorted]);
 
-  // Session stats for Sidebar
+  // Session stats for Sidebar — derived from live deal stream + status endpoint
   const sessionStats = useMemo(
     () => ({
       scanned: status?.ebay?.callsToday ?? 0,
-      dealsFound: status?.scanner?.dealsToday ?? 0,
-      totalProfit: stats.totalProfit,
+      dealsFound: deals.length,
+      totalProfit: deals.reduce((sum, d) => sum + (d.profit_gbp ?? 0), 0),
     }),
-    [status, stats.totalProfit],
+    [status, deals],
   );
 
   // Handlers

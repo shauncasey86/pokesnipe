@@ -2,6 +2,23 @@ import React from "react";
 import type { Deal } from "../types/deals";
 import ConfidenceRing from "./ui/ConfidenceRing";
 
+/* ── tooltip maps ────────────────────────────────────────────────── */
+
+const TIER_TOOLTIPS: Record<string, string> = {
+  GRAIL: "Grail — High-value rare find, large profit margin",
+  HIT:   "Hit — Strong deal with good profit potential",
+  FLIP:  "Flip — Quick flip opportunity, moderate profit",
+  SLEEP: "Sleep — Low-priority deal, minimal profit",
+};
+
+const COND_TOOLTIPS: Record<string, string> = {
+  NM: "Near Mint — Excellent condition, minimal wear",
+  LP: "Lightly Played — Minor edge/surface wear",
+  MP: "Moderately Played — Noticeable wear, fully playable",
+  HP: "Heavily Played — Significant wear and creasing",
+  DM: "Damaged — Major damage, heavy creasing or tears",
+};
+
 /* ── colour maps ─────────────────────────────────────────────────── */
 
 const TIER_COLORS: Record<string, { bg: string; text: string; border: string }> = {
@@ -40,6 +57,7 @@ function TierBadge({ tier }: { tier: string }) {
   const c = TIER_COLORS[tier] ?? TIER_COLORS.SLEEP;
   return (
     <span
+      title={TIER_TOOLTIPS[tier] ?? tier}
       style={{
         padding: "2px 10px",
         borderRadius: 4,
@@ -52,6 +70,7 @@ function TierBadge({ tier }: { tier: string }) {
         textTransform: "uppercase",
         lineHeight: 1,
         whiteSpace: "nowrap",
+        cursor: "help",
       }}
     >
       {tier}
@@ -63,6 +82,7 @@ function ConditionBadge({ condition }: { condition: string }) {
   const c = COND_COLORS[condition] ?? COND_COLORS.MP;
   return (
     <span
+      title={COND_TOOLTIPS[condition] ?? condition}
       style={{
         padding: "2px 10px",
         borderRadius: 4,
@@ -75,6 +95,7 @@ function ConditionBadge({ condition }: { condition: string }) {
         textTransform: "uppercase",
         lineHeight: 1,
         whiteSpace: "nowrap",
+        cursor: "help",
       }}
     >
       {condition}
@@ -121,7 +142,7 @@ function DealTable({ deals, selectedId, onSelect, newDealIds }: DealTableProps) 
   }, []);
 
   return (
-    <div style={{ width: "100%", overflow: "auto" }}>
+    <div style={{ width: "100%", overflow: "auto", flex: 1 }}>
       {/* ── header ── */}
       <div
         style={{
@@ -144,12 +165,12 @@ function DealTable({ deals, selectedId, onSelect, newDealIds }: DealTableProps) 
       >
         <span />
         <span>Card</span>
-        <span>Tier</span>
-        <span>Cond</span>
-        <span>Match</span>
-        <span>Profit</span>
-        <span>ROI</span>
-        <span>Ago</span>
+        <span style={{ textAlign: "center" }}>Tier</span>
+        <span style={{ textAlign: "center" }}>Cond</span>
+        <span style={{ textAlign: "center" }}>Match</span>
+        <span style={{ textAlign: "center" }}>Profit</span>
+        <span style={{ textAlign: "center" }}>ROI</span>
+        <span style={{ textAlign: "center" }}>Ago</span>
       </div>
 
       {/* ── rows ── */}
@@ -285,17 +306,17 @@ function DealTable({ deals, selectedId, onSelect, newDealIds }: DealTableProps) 
             </div>
 
             {/* tier */}
-            <div>
+            <div style={{ textAlign: "center" }}>
               <TierBadge tier={deal.tier} />
             </div>
 
             {/* condition */}
-            <div>
+            <div style={{ textAlign: "center" }}>
               <ConditionBadge condition={deal.condition} />
             </div>
 
             {/* confidence ring */}
-            <div style={{ display: "flex", alignItems: "center" }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "center" }}>
               <ConfidenceRing value={confidence} size={36} />
             </div>
 
@@ -306,6 +327,7 @@ function DealTable({ deals, selectedId, onSelect, newDealIds }: DealTableProps) 
                 fontWeight: 800,
                 fontFamily: "'JetBrains Mono', monospace",
                 color: profitColor,
+                textAlign: "center",
               }}
             >
               +£{profit.toFixed(2)}
@@ -318,6 +340,7 @@ function DealTable({ deals, selectedId, onSelect, newDealIds }: DealTableProps) 
                 fontWeight: 600,
                 fontFamily: "'JetBrains Mono', monospace",
                 color: profitColor,
+                textAlign: "center",
               }}
             >
               +{profitPct.toFixed(0)}%
@@ -329,6 +352,7 @@ function DealTable({ deals, selectedId, onSelect, newDealIds }: DealTableProps) 
                 fontSize: 11,
                 fontFamily: "'JetBrains Mono', monospace",
                 color: "rgba(255,255,255,0.25)",
+                textAlign: "center",
               }}
             >
               {ago}

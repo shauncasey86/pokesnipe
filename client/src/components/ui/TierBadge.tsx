@@ -7,12 +7,20 @@ const TIER_CONFIG: Record<Tier, { gradient: string; letter: string; glow: string
   SLEEP: { gradient: 'var(--grad-sleep)', letter: 'S', glow: 'none' },
 };
 
+const TIER_TOOLTIPS: Record<Tier, string> = {
+  GRAIL: 'Grail — High-value rare find, large profit margin',
+  HIT:   'Hit — Strong deal with good profit potential',
+  FLIP:  'Flip — Quick flip opportunity, moderate profit',
+  SLEEP: 'Sleep — Low-priority deal, minimal profit',
+};
+
 export default function TierBadge({ tier, size = 'sm' }: { tier: Tier; size?: 'sm' | 'md' | 'lg' }) {
   const cfg = TIER_CONFIG[tier] || TIER_CONFIG.FLIP;
   const px = size === 'lg' ? 28 : size === 'md' ? 22 : 16;
 
   return (
     <span
+      title={TIER_TOOLTIPS[tier] ?? tier}
       style={{
         display: 'inline-flex',
         alignItems: 'center',
@@ -28,6 +36,7 @@ export default function TierBadge({ tier, size = 'sm' }: { tier: Tier; size?: 's
         color: '#fff',
         flexShrink: 0,
         lineHeight: 1,
+        cursor: 'help',
       }}
     >
       {cfg.letter}
