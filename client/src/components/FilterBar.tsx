@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import type { FilterState, Tier, Condition, LiquidityGrade } from '../types/deals';
 
 function Seg({ label, active, color, onClick }: { label: string; active: boolean; color?: string; onClick: () => void }) {
@@ -95,6 +96,14 @@ export default function FilterBar({
   onChange: (f: FilterState) => void;
   onSave: () => void;
 }) {
+  const [saved, setSaved] = useState(false);
+
+  const handleSave = () => {
+    onSave();
+    setSaved(true);
+    setTimeout(() => setSaved(false), 1500);
+  };
+
   return (
     <div
       className="filter-bar"
@@ -186,13 +195,13 @@ export default function FilterBar({
       </FilterGroup>
 
       <button
-        onClick={onSave}
+        onClick={handleSave}
         style={{
           padding: '4px 10px',
           borderRadius: 4,
-          background: 'var(--glass)',
-          border: '1px solid var(--brd)',
-          color: 'var(--tSec)',
+          background: saved ? 'rgba(52,211,153,0.15)' : 'var(--glass)',
+          border: `1px solid ${saved ? 'var(--green)' : 'var(--brd)'}`,
+          color: saved ? 'var(--green)' : 'var(--tSec)',
           fontFamily: "'DM Mono', monospace",
           fontSize: 9,
           fontWeight: 600,
@@ -202,7 +211,7 @@ export default function FilterBar({
           transition: 'all 0.15s',
         }}
       >
-        SAVE
+        {saved ? 'SAVED' : 'SAVE'}
       </button>
 
       <style>{`
