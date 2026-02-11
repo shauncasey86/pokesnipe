@@ -158,7 +158,7 @@ export async function runScanCycle(): Promise<ScanResult> {
 
       // Correlation context for tracing this listing through the pipeline
       const ctx = createPipelineContext(listing.itemId);
-      log.info({ ...ctx }, 'Processing listing');
+      log.debug({ ...ctx }, 'Processing listing');
 
       // 3b. Extract signals from title (Phase 1 — title only, no enrichment data)
       const extractionResult = extractSignals(toExtractionInput(listing));
