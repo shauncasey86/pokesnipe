@@ -356,15 +356,20 @@ export default function DealDetailPanel({
                 <SectionHeader text="PRICE TRENDS" />
                 <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 11, display: 'flex', flexDirection: 'column', gap: 2 }}>
                   {(['1d', '7d', '30d', '90d'] as const).map(period => {
-                    const val = (condTrends as Record<string, number | undefined>)[period];
-                    if (val == null) return null;
+                    const entry = (condTrends as Record<string, { price_change: number; percent_change: number } | undefined>)[period];
+                    if (entry == null) return null;
+                    const priceChange = entry.price_change;
+                    const pctChange = entry.percent_change;
                     return (
                       <div key={period} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '2px 0' }}>
                         <span style={{ width: 28, color: 'var(--tMut)' }}>{period}</span>
-                        <span style={{ width: 70, color: val >= 0 ? 'var(--green)' : 'var(--red)' }}>
-                          {val >= 0 ? '+' : ''}£{Math.abs(val).toFixed(2)}
+                        <span style={{ width: 70, color: priceChange >= 0 ? 'var(--green)' : 'var(--red)' }}>
+                          {priceChange >= 0 ? '+' : ''}${Math.abs(priceChange).toFixed(2)}
                         </span>
-                        <TrendArrow value={val / 100} />
+                        <span style={{ width: 50, color: pctChange >= 0 ? 'var(--green)' : 'var(--red)', fontSize: 10 }}>
+                          {pctChange >= 0 ? '+' : ''}{pctChange.toFixed(1)}%
+                        </span>
+                        <TrendArrow value={pctChange / 100} />
                       </div>
                     );
                   })}

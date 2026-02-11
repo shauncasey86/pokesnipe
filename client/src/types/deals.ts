@@ -1,6 +1,6 @@
 export type Tier = 'GRAIL' | 'HIT' | 'FLIP' | 'SLEEP';
-export type Condition = 'NM' | 'LP' | 'MP' | 'HP';
-export type LiquidityGrade = 'HIGH' | 'MED' | 'LOW' | 'ILLIQ';
+export type Condition = 'NM' | 'LP' | 'MP' | 'HP' | 'DM';
+export type LiquidityGrade = 'high' | 'medium' | 'low' | 'illiquid';
 
 export interface Deal {
   deal_id: string;
@@ -8,7 +8,7 @@ export interface Deal {
   ebay_item_id: string;
   ebay_title: string;
   card_id: string | null;
-  variant_id: string | null;
+  variant_id: number | null;
   status: string;
   ebay_price_gbp: number;
   ebay_shipping_gbp: number;
@@ -51,7 +51,7 @@ export interface DealDetail extends Deal {
   expansion_code: string | null;
   variant_name: string | null;
   variant_prices: Record<string, { low: number; market: number }> | null;
-  variant_trends: Record<string, { '1d'?: number; '7d'?: number; '30d'?: number; '90d'?: number }> | null;
+  variant_trends: Record<string, Record<string, { price_change: number; percent_change: number }>> | null;
   match_signals: {
     confidence?: {
       composite: number;

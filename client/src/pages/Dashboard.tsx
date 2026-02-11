@@ -13,7 +13,7 @@ import type { Deal, SystemStatus, FilterState, Tier, Condition, LiquidityGrade }
 const DEFAULT_FILTERS: FilterState = {
   tiers: ['GRAIL', 'HIT', 'FLIP'],
   conditions: ['NM', 'LP', 'MP'],
-  liquidityGrades: ['HIGH', 'MED'],
+  liquidityGrades: ['high', 'medium'],
   confidenceLevels: ['HI', 'MD'],
   timeWindow: '6H',
   minProfitPercent: 10,
