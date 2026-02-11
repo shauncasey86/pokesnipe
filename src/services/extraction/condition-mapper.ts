@@ -100,6 +100,35 @@ const UNGRADED_TEXT_CONDITION_MAP: Record<string, 'NM' | 'LP' | 'MP' | 'HP'> = {
   'poor':                           'HP',
 };
 
+// --- Text-based grade value mapping ---
+// When eBay returns text values like "9.5" or "Authentic" instead of numeric
+// value IDs like "275021" or "2750219", use this map to normalise the grade.
+const TEXT_GRADE_MAP: Record<string, string> = {
+  '10': '10',
+  '9.5': '9.5',
+  '9': '9',
+  '8.5': '8.5',
+  '8': '8',
+  '7.5': '7.5',
+  '7': '7',
+  '6.5': '6.5',
+  '6': '6',
+  '5.5': '5.5',
+  '5': '5',
+  '4.5': '4.5',
+  '4': '4',
+  '3.5': '3.5',
+  '3': '3',
+  '2.5': '2.5',
+  '2': '2',
+  '1.5': '1.5',
+  '1': '1',
+  'authentic': 'Authentic',
+  'authentic altered': 'Authentic Altered',
+  'authentic - trimmed': 'Authentic - Trimmed',
+  'authentic - coloured': 'Authentic - Coloured',
+};
+
 // --- Text-based grading company value mapping ---
 const TEXT_GRADER_MAP: Record<string, string> = {
   'psa': 'PSA', 'bccg': 'BCCG', 'bvg': 'BVG', 'bgs': 'BGS',
@@ -215,7 +244,7 @@ export function extractCondition(listing: {
 
       // Grade (descriptor name: '27502')
       if (resolvedName === '27502') {
-        grade = GRADE_MAP[value] ?? value;
+        grade = GRADE_MAP[value] ?? TEXT_GRADE_MAP[valueLower] ?? value;
       }
 
       // Cert number (descriptor name: '27503') — free text
