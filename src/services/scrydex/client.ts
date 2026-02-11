@@ -193,7 +193,8 @@ export async function getExpansionCards(expansionId: string, page: number): Prom
 }
 
 export async function getAccountUsage(): Promise<UsageResponse> {
-  return limiter.schedule(() =>
-    scrydexFetch<UsageResponse>(`${ACCOUNT_URL}/usage`),
+  const response = await limiter.schedule(() =>
+    scrydexFetch<{ data: UsageResponse }>(`${ACCOUNT_URL}/usage`),
   );
+  return response.data;
 }
