@@ -103,17 +103,6 @@ function sortDeals(deals: Deal[], sort: string): Deal[] {
   }
 }
 
-/* ─── Search logic ─── */
-
-function searchDeals(deals: Deal[], query: string): Deal[] {
-  if (!query.trim()) return deals;
-  const q = query.toLowerCase().trim();
-  return deals.filter((d) => {
-    const name = (d.cardName || d.ebay_title || '').toLowerCase();
-    return name.includes(q);
-  });
-}
-
 /* ─── SSE Banner (inline — lightweight) ─── */
 
 function SSEBannerInline({
@@ -228,7 +217,6 @@ export default function Dashboard() {
   const [deals, setDeals] = useState<Deal[]>([]);
   const [filters, setFilters] = useState<FilterState>(DEFAULT_FILTERS);
   const [sort, setSort] = useState('profit');
-  const [searchQuery, setSearchQuery] = useState('');
   const [status, setStatus] = useState<SystemStatus | null>(null);
 
   // ─── Hero triage state ───
@@ -364,10 +352,9 @@ export default function Dashboard() {
   // ─── Derived: filtered + sorted visible deals (excluding skipped/snagged) ───
   const visible = useMemo(() => {
     const filtered = applyFilters(deals, filters);
-    const searched = searchDeals(filtered, searchQuery);
-    const sorted = sortDeals(searched, sort);
+    const sorted = sortDeals(filtered, sort);
     return sorted.filter((d) => !skipped.has(d.deal_id) && !snagged.has(d.deal_id));
-  }, [deals, filters, sort, searchQuery, skipped, snagged]);
+  }, [deals, filters, sort, skipped, snagged]);
 
   // ─── Current hero deal ───
   const cur = visible[curIdx] || visible[0] || null;
@@ -612,41 +599,6 @@ export default function Dashboard() {
                     onSave={handleSaveFilters}
                   />
                 </div>
-                <div className="tb-search">
-                  <svg width="13" height="13" viewBox="0 0 14 14" fill="none">
-                    <circle cx="6" cy="6" r="4.5" stroke="currentColor" strokeWidth="1.3" />
-                    <path d="M9.5 9.5L13 13" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
-                  </svg>
-                  <input
-                    type="search"
-                    placeholder="Search…"
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    aria-label="Search deals"
-                  />
-                </div>
-                <button
-                  className="tb"
-                  onClick={() => setShowLookup(true)}
-                  title="Manual eBay lookup"
-                >
-                  <svg width="13" height="13" viewBox="0 0 14 14" fill="none">
-                    <circle
-                      cx="6"
-                      cy="6"
-                      r="4.5"
-                      stroke="currentColor"
-                      strokeWidth="1.3"
-                    />
-                    <path
-                      d="M9.5 9.5L13 13"
-                      stroke="currentColor"
-                      strokeWidth="1.3"
-                      strokeLinecap="round"
-                    />
-                  </svg>
-                  Lookup
-                </button>
                 <div className="sort-m">
                   <label htmlFor="ss">Sort</label>
                   <select
@@ -702,6 +654,9 @@ export default function Dashboard() {
                   </div>
                 )}
               </div>
+
+              {/* Status bar (inside center column) */}
+              <StatusBar status={status} isLive={isLive} sseState={sseState} />
             </div>
 
             {/* ═══ QUEUE PANEL ═══ */}
@@ -713,9 +668,6 @@ export default function Dashboard() {
             />
           </>
         )}
-
-        {/* ═══ STATUS BAR (spans all columns) ═══ */}
-        <StatusBar status={status} isLive={isLive} sseState={sseState} />
       </div>
 
       {/* ═══ MODALS ═══ */}
