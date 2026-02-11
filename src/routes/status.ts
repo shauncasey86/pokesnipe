@@ -32,7 +32,7 @@ router.get('/', async (req: Request, res: Response) => {
         SELECT
           (SELECT COUNT(*) FROM cards) as total_cards,
           (SELECT COUNT(*) FROM expansions) as total_expansions,
-          (SELECT MAX(updated_at) FROM cards) as last_sync
+          (SELECT MAX(last_synced_at) FROM cards) as last_sync
       `),
       pool.query("SELECT rate, fetched_at FROM exchange_rates ORDER BY fetched_at DESC LIMIT 1"),
       pool.query(`
