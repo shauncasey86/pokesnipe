@@ -193,8 +193,15 @@ export async function getExpansionCards(expansionId: string, page: number): Prom
 }
 
 export async function getAccountUsage(): Promise<UsageResponse> {
-  const response = await limiter.schedule(() =>
-    scrydexFetch<{ data: UsageResponse }>(`${ACCOUNT_URL}/usage`),
+  const raw: any = await limiter.schedule(() =>
+    scrydexFetch<any>(`${ACCOUNT_URL}/usage`),
   );
-  return response.data;
+  logger.info({ scrydexUsageRaw: JSON.stringify(raw).slice(0, 500) }, 'Scrydex usage API response');
+  const d = raw.data ?? raw;
+  return {
+    total_credits: d.total_credits ?? d.totalCredits,
+    remaining_credits: d.remaining_credits ?? d.remainingCredits,
+    used_credits: d.used_credits ?? d.usedCredits,
+    overage_credit_rate: d.overage_credit_rate ?? d.overageCreditRate,
+  };
 }
