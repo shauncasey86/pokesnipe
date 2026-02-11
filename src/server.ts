@@ -175,7 +175,12 @@ async function boot(): Promise<void> {
     await runVerification();
   }
 
-  // Step 4: Fetch initial exchange rate
+  // Step 4: Start Express — must happen early so Railway healthcheck passes
+  app.listen(config.PORT, () => {
+    logger.info(`Server ready on port ${config.PORT}`);
+  });
+
+  // Step 5: Fetch initial exchange rate
   try {
     const rate = await refreshRate();
     logger.info({ rate }, 'Exchange rate fetched on boot');
@@ -186,7 +191,7 @@ async function boot(): Promise<void> {
     );
   }
 
-  // Step 5: Check card index freshness — trigger sync if stale (>48h)
+  // Step 6: Check card index freshness — trigger sync if stale (>48h)
   try {
     const { rows } = await pool.query<{ last_synced: Date }>(
       `SELECT MAX(last_synced_at) AS last_synced FROM cards`,
@@ -212,19 +217,14 @@ async function boot(): Promise<void> {
     logger.warn({ error: err instanceof Error ? err.message : String(err) }, 'Failed to check card freshness');
   }
 
-  // Step 6: Start Express
-  app.listen(config.PORT, () => {
-    logger.info(`Server ready on port ${config.PORT}`);
+  // Step 7: Register all background jobs (replaces startScanLoop + setInterval jobs)
+  registerAllJobs();
+  logger.info('Background job scheduler started');
 
-    // Step 7: Register all background jobs (replaces startScanLoop + setInterval jobs)
-    registerAllJobs();
-    logger.info('Background job scheduler started');
-
-    // Step 8: Kick off the first scan immediately (don't wait 5 minutes for cron)
-    runScanCycle().catch(err =>
-      logger.error({ error: err instanceof Error ? err.message : String(err) }, 'Initial scan failed'),
-    );
-  });
+  // Step 8: Kick off the first scan immediately (don't wait 5 minutes for cron)
+  runScanCycle().catch(err =>
+    logger.error({ error: err instanceof Error ? err.message : String(err) }, 'Initial scan failed'),
+  );
 }
 
 boot().catch((err) => {

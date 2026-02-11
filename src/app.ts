@@ -34,6 +34,9 @@ app.use(helmet({
 app.use(express.json());
 app.use(cookieParser());
 
+// Health check — mounted before session middleware so it bypasses the PG session store
+app.use(healthRouter);
+
 // Session middleware (must be before auth-protected routes)
 app.use(sessionMiddleware);
 
@@ -42,9 +45,6 @@ app.use((req, _res, next) => {
   logger.info({ method: req.method, url: req.url }, 'request');
   next();
 });
-
-// Public routes (no auth required)
-app.use(healthRouter);
 app.use('/api/catalog', catalogRouter);
 
 // Auth routes (no auth required)
