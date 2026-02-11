@@ -88,16 +88,36 @@ const LOCALIZED_CONDITION_MAP: Record<string, 'NM' | 'LP' | 'MP' | 'HP'> = {
   'heavily played (poor)': 'HP',
 };
 
+// --- eBay top-level condition text mapping ---
+const EBAY_CONDITION_TEXT_MAP: Record<string, 'NM' | 'LP' | 'MP' | 'HP'> = {
+  'near mint or better': 'NM',
+  'near mint': 'NM',
+  'like new': 'NM',
+  'lightly played (excellent)': 'LP',
+  'lightly played': 'LP',
+  'excellent': 'LP',
+  'moderately played (very good)': 'MP',
+  'moderately played': 'MP',
+  'very good': 'MP',
+  'heavily played (poor)': 'HP',
+  'heavily played': 'HP',
+  'poor': 'HP',
+};
+
 // --- Title condition patterns ---
 const TITLE_CONDITION_PATTERNS: [RegExp, 'NM' | 'LP' | 'MP' | 'HP'][] = [
   [/\bnear mint\b/, 'NM'],
-  [/\bnm\b/, 'NM'],
+  [/\bnm[\s/+\-]?m?\b/, 'NM'],
+  [/\bnm\+?\b/, 'NM'],
+  [/\bmint\b/, 'NM'],
   [/\blightly played\b/, 'LP'],
   [/\blp\b/, 'LP'],
+  [/\bexcellent\b/, 'LP'],
   [/\bmoderately played\b/, 'MP'],
   [/\bmp\b/, 'MP'],
   [/\bheavily played\b/, 'HP'],
   [/\bhp\b/, 'HP'],
+  [/\bpoor\b/, 'HP'],
 ];
 
 function makeDefault(): ConditionResult {
@@ -116,6 +136,7 @@ export function extractCondition(listing: {
   conditionDescriptors?: Array<{ name: string; values: string[] }>;
   localizedAspects?: Array<{ name: string; value: string }> | null;
   title?: string;
+  conditionText?: string | null;
 }): ConditionResult {
   const descriptors = listing.conditionDescriptors ?? [];
   const rawDescriptorIds: string[] = [];
@@ -211,7 +232,24 @@ export function extractCondition(listing: {
     }
   }
 
-  // Priority 3: Title parsing
+  // Priority 3: eBay top-level condition text (from search/getItem)
+  if (listing.conditionText) {
+    const normalized = listing.conditionText.toLowerCase().trim();
+    const mapped = EBAY_CONDITION_TEXT_MAP[normalized];
+    if (mapped) {
+      return {
+        condition: mapped,
+        source: 'localized_aspects' as const,
+        isGraded: false,
+        gradingCompany: null,
+        grade: null,
+        certNumber: null,
+        rawDescriptorIds,
+      };
+    }
+  }
+
+  // Priority 4: Title parsing
   if (listing.title) {
     const lowerTitle = listing.title.toLowerCase();
     for (const [pattern, condition] of TITLE_CONDITION_PATTERNS) {
@@ -229,6 +267,6 @@ export function extractCondition(listing: {
     }
   }
 
-  // Priority 4: Default
+  // Priority 5: Default
   return { ...makeDefault(), rawDescriptorIds };
 }

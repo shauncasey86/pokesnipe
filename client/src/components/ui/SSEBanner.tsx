@@ -1,10 +1,56 @@
+import { useEffect, useState } from 'react';
+
 export default function SSEBanner({
   state,
   onRetry,
 }: {
-  state: 'connected' | 'reconnecting' | 'lost';
+  state: 'connected' | 'reconnecting' | 'lost' | 'restored';
   onRetry: () => void;
 }) {
+  const [showRestored, setShowRestored] = useState(false);
+
+  useEffect(() => {
+    if (state === 'restored') {
+      setShowRestored(true);
+      const timer = setTimeout(() => setShowRestored(false), 3000);
+      return () => clearTimeout(timer);
+    }
+    setShowRestored(false);
+  }, [state]);
+
+  if (state === 'connected' && !showRestored) return null;
+
+  if (showRestored || state === 'restored') {
+    return (
+      <div
+        style={{
+          width: '100%',
+          padding: '6px 16px',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: 8,
+          fontSize: 12,
+          fontWeight: 500,
+          color: 'var(--green)',
+          background: 'rgba(52,211,153,0.08)',
+          borderBottom: '1px solid rgba(52,211,153,0.15)',
+          transition: 'opacity 0.5s',
+        }}
+      >
+        <span
+          style={{
+            width: 6,
+            height: 6,
+            borderRadius: 6,
+            background: 'var(--green)',
+          }}
+        />
+        Connection restored
+      </div>
+    );
+  }
+
   if (state === 'connected') return null;
 
   const isLost = state === 'lost';

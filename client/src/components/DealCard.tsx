@@ -5,14 +5,15 @@ import Bar from './ui/Bar';
 import TrendArrow from './ui/TrendArrow';
 import type { Deal, Tier, Condition, LiquidityGrade } from '../types/deals';
 
-function timeAgo(dateStr: string): { text: string; isOld: boolean } {
+function timeAgo(dateStr: string): { text: string; isFresh: boolean; isOld: boolean } {
   const ms = Date.now() - new Date(dateStr).getTime();
   const min = Math.floor(ms / 60000);
-  if (min < 1) return { text: 'now', isOld: false };
-  if (min < 60) return { text: `${min}m`, isOld: false };
+  if (min < 1) return { text: 'just now', isFresh: true, isOld: false };
+  if (min < 5) return { text: `${min}m ago`, isFresh: true, isOld: false };
+  if (min < 60) return { text: `${min}m ago`, isFresh: false, isOld: false };
   const hrs = Math.floor(min / 60);
-  if (hrs < 24) return { text: `${hrs}h`, isOld: min > 60 };
-  return { text: `${Math.floor(hrs / 24)}d`, isOld: true };
+  if (hrs < 24) return { text: `${hrs}h ago`, isFresh: false, isOld: min > 60 };
+  return { text: `${Math.floor(hrs / 24)}d ago`, isFresh: false, isOld: true };
 }
 
 const TIER_GLOW: Record<string, string> = {
@@ -22,32 +23,56 @@ const TIER_GLOW: Record<string, string> = {
   SLEEP: 'none',
 };
 
+const TIER_LEFT_BORDER: Record<string, string> = {
+  GRAIL: '#ff6b35',
+  HIT: '#ffd60a',
+  FLIP: 'transparent',
+  SLEEP: 'transparent',
+};
+
 export default function DealCard({
   deal,
   selected,
+  isNew,
   onClick,
   style,
 }: {
   deal: Deal;
   selected: boolean;
+  isNew?: boolean;
   onClick: () => void;
   style?: React.CSSProperties;
 }) {
   const time = timeAgo(deal.listed_at || deal.created_at);
   const isSleep = deal.tier === 'SLEEP';
+  const isGrail = deal.tier === 'GRAIL';
   const profitGbp = deal.profit_gbp ?? 0;
   const profitPct = deal.profit_percent ?? 0;
+
+  // Tier-specific sizing
+  const imgSize = isGrail ? 64 : 48;
+  const imgHeight = isGrail ? 89 : 67;
+  const nameFontSize = isGrail ? 15 : 14;
+  const profitFontSize = isGrail ? 22 : 20;
+  const rowPadding = isSleep ? '6px 14px' : isGrail ? '12px 14px' : '10px 14px';
+
+  const leftBorder = selected
+    ? '2px solid var(--green)'
+    : isNew && time.isFresh
+      ? '2px solid var(--green)'
+      : `2px solid ${TIER_LEFT_BORDER[deal.tier] || 'transparent'}`;
 
   return (
     <div
       onClick={onClick}
+      className={isNew ? 'deal-card-new' : undefined}
       style={{
         display: 'grid',
-        gridTemplateColumns: 'auto 1fr auto',
+        gridTemplateColumns: `auto 1fr auto`,
         gap: 12,
-        padding: '10px 14px',
-        background: selected ? 'var(--glass2)' : 'transparent',
-        borderLeft: selected ? '2px solid var(--green)' : '2px solid transparent',
+        padding: rowPadding,
+        background: selected ? 'var(--glass2)' : isNew && time.isFresh ? 'rgba(52,211,153,0.03)' : 'transparent',
+        borderLeft: leftBorder,
         borderBottom: '1px solid var(--brd)',
         cursor: 'pointer',
         opacity: isSleep ? 0.35 : 1,
@@ -57,13 +82,13 @@ export default function DealCard({
       }}
     >
       {/* Left: Image + tier badge */}
-      <div style={{ position: 'relative', width: 48, flexShrink: 0 }} className="deal-card-img">
+      <div style={{ position: 'relative', width: imgSize, flexShrink: 0 }} className="deal-card-img">
         {deal.ebay_image_url ? (
           <img
             src={deal.ebay_image_url}
             alt=""
             style={{
-              width: 48, height: 67,
+              width: imgSize, height: imgHeight,
               objectFit: 'cover',
               borderRadius: 4,
               background: 'var(--glass)',
@@ -72,7 +97,7 @@ export default function DealCard({
           />
         ) : (
           <div style={{
-            width: 48, height: 67, borderRadius: 4,
+            width: imgSize, height: imgHeight, borderRadius: 4,
             background: 'var(--glass)', display: 'flex', alignItems: 'center', justifyContent: 'center',
             color: 'var(--tMut)', fontSize: 10,
           }}>
@@ -87,7 +112,10 @@ export default function DealCard({
       {/* Center: Info */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 3, minWidth: 0, justifyContent: 'center' }}>
         <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
-          <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--tMax)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          <span style={{
+            fontSize: nameFontSize, fontWeight: isGrail ? 800 : 700,
+            color: 'var(--tMax)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+          }}>
             {deal.cardName || deal.ebay_title}
           </span>
         </div>
@@ -100,6 +128,12 @@ export default function DealCard({
           {deal.confidence != null && (
             <div style={{ display: 'flex', alignItems: 'center', gap: 4, width: 72 }}>
               <Bar value={deal.confidence} height={3} />
+              <span style={{
+                fontFamily: "'DM Mono', monospace", fontSize: 9,
+                color: deal.confidence >= 0.7 ? 'var(--green)' : deal.confidence >= 0.4 ? 'var(--amber)' : 'var(--red)',
+              }}>
+                {(deal.confidence * 100).toFixed(0)}%
+              </span>
             </div>
           )}
           <CondPill condition={deal.condition as Condition} />
@@ -115,7 +149,7 @@ export default function DealCard({
           )}
           <span style={{
             fontFamily: "'DM Mono', monospace", fontSize: 10,
-            color: time.isOld ? 'var(--red)' : 'var(--tMut)',
+            color: time.isFresh ? 'var(--green)' : time.isOld ? 'var(--red)' : 'var(--tMut)',
             marginLeft: 'auto',
           }}>
             {time.text}
@@ -126,9 +160,9 @@ export default function DealCard({
       {/* Right: Profit */}
       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', justifyContent: 'center', flexShrink: 0 }}>
         <span style={{
-          fontFamily: "'DM Mono', monospace", fontSize: 20, fontWeight: 800,
+          fontFamily: "'DM Mono', monospace", fontSize: profitFontSize, fontWeight: 800,
           color: 'var(--greenB)',
-          textShadow: '0 0 12px rgba(110,231,183,0.4)',
+          textShadow: isGrail ? '0 0 16px rgba(110,231,183,0.5)' : '0 0 12px rgba(110,231,183,0.4)',
           lineHeight: 1,
         }}>
           +£{profitGbp.toFixed(2)}

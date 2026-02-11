@@ -5,6 +5,7 @@ import { getBudgetStatus } from '../services/ebay/budget.js';
 import { getDedupStats } from '../services/scanner/deduplicator.js';
 import { getJobStatuses, pauseJob, resumeJob } from '../services/jobs/index.js';
 import { getAccuracyStats } from '../services/accuracy/tracker.js';
+import { getAccountUsage } from '../services/scrydex/client.js';
 
 const log = pino({ name: 'status' });
 const router = Router();
@@ -43,7 +44,15 @@ router.get('/', async (req: Request, res: Response) => {
     const dedupStats = getDedupStats();
     const jobStatuses = getJobStatuses();
     const scannerJob = jobStatuses['ebay-scan'];
-    const scannerRunning = scannerJob?.isPaused ? 'paused' : 'running';
+    const scannerRunning = scannerJob?.isPaused ? 'paused' : scannerJob?.isRunning ? 'scanning' : 'idle';
+
+    // Fetch Scrydex usage (non-blocking — don't fail status if Scrydex is down)
+    let scrydexUsage = null;
+    try {
+      scrydexUsage = await getAccountUsage();
+    } catch {
+      // Scrydex API unavailable — return null for usage
+    }
 
     const exchangeRateRow = exchangeRate.rows[0];
     const exchangeRateAge = exchangeRateRow
@@ -53,6 +62,9 @@ router.get('/', async (req: Request, res: Response) => {
     return res.json({
       scanner: {
         status: scannerRunning,
+        isRunning: scannerJob?.isRunning ?? false,
+        lastRun: scannerJob?.lastRun ?? null,
+        lastError: scannerJob?.lastError ?? null,
         dealsToday: parseInt(dealsToday.rows[0].count),
         grailsToday: parseInt(grailsToday.rows[0].count),
         activeDeals: parseInt(totalDeals.rows[0].count),
@@ -81,6 +93,12 @@ router.get('/', async (req: Request, res: Response) => {
         totalIncorrect: accuracyStats.totalIncorrect,
         incorrectReasons: accuracyStats.incorrectReasons,
       },
+      scrydex: scrydexUsage ? {
+        totalCredits: scrydexUsage.total_credits,
+        usedCredits: scrydexUsage.used_credits,
+        remainingCredits: scrydexUsage.remaining_credits,
+        status: scrydexUsage.remaining_credits > 1000 ? 'healthy' : scrydexUsage.remaining_credits > 100 ? 'low' : 'critical',
+      } : null,
       jobs: getJobStatuses(),
     });
   } catch (err) {

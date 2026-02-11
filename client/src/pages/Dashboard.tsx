@@ -61,7 +61,8 @@ export default function Dashboard() {
   const [selectedDealId, setSelectedDealId] = useState<string | null>(null);
   const [filters, setFilters] = useState<FilterState>(DEFAULT_FILTERS);
   const [status, setStatus] = useState<SystemStatus | null>(null);
-  const [sseState, setSseState] = useState<'connected' | 'reconnecting' | 'lost'>('reconnecting');
+  const [sseState, setSseState] = useState<'connected' | 'reconnecting' | 'lost' | 'restored'>('reconnecting');
+  const wasDisconnectedRef = useRef(false);
   const [showLookup, setShowLookup] = useState(false);
   const [newDealIds, setNewDealIds] = useState<Set<string>>(new Set());
   const [scannerPaused, setScannerPaused] = useState(false);
@@ -100,8 +101,14 @@ export default function Dashboard() {
     eventSourceRef.current = es;
 
     es.addEventListener('open', () => {
-      setSseState('connected');
       if (sseTimerRef.current) clearTimeout(sseTimerRef.current);
+      if (wasDisconnectedRef.current) {
+        setSseState('restored');
+        setTimeout(() => setSseState('connected'), 3000);
+      } else {
+        setSseState('connected');
+      }
+      wasDisconnectedRef.current = false;
     });
 
     es.addEventListener('deal', (e: MessageEvent) => {
@@ -140,7 +147,9 @@ export default function Dashboard() {
     });
 
     es.addEventListener('error', () => {
+      wasDisconnectedRef.current = true;
       setSseState('reconnecting');
+      if (sseTimerRef.current) clearTimeout(sseTimerRef.current);
       sseTimerRef.current = setTimeout(() => {
         setSseState('lost');
       }, 30000);
@@ -192,7 +201,7 @@ export default function Dashboard() {
     }
   };
 
-  const scannerStatus = scannerPaused ? 'paused' : 'running';
+  const scannerStatus = scannerPaused ? 'paused' : (status?.scanner?.status || 'running');
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', overflow: 'hidden' }}>

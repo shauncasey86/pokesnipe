@@ -88,6 +88,9 @@ export interface DealsResponse {
 export interface SystemStatus {
   scanner: {
     status: string;
+    isRunning: boolean;
+    lastRun: string | null;
+    lastError: string | null;
     dealsToday: number;
     grailsToday: number;
     activeDeals: number;
@@ -114,6 +117,12 @@ export interface SystemStatus {
     totalReviewed: number;
     totalCorrect: number;
   };
+  scrydex: {
+    totalCredits: number;
+    usedCredits: number;
+    remainingCredits: number;
+    status: string;
+  } | null;
   jobs: Record<string, unknown>;
 }
 

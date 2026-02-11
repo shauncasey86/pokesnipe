@@ -12,19 +12,36 @@ function timeAgo(dateStr: string | null): string {
 }
 
 function StatusDot({ status }: { status: string }) {
-  const color = status === 'healthy' || status === 'running' ? 'var(--green)'
-    : status === 'degraded' || status === 'low' ? 'var(--amber)'
-    : 'var(--red)';
+  const color = status === 'healthy' || status === 'running' || status === 'idle'
+    ? 'var(--green)'
+    : status === 'degraded' || status === 'low' || status === 'scanning'
+      ? 'var(--amber)'
+      : status === 'paused'
+        ? 'var(--tMut)'
+        : 'var(--red)';
   return <span style={{ display: 'inline-block', width: 5, height: 5, borderRadius: 5, background: color }} />;
+}
+
+function scanStateLabel(status: string, lastRun: string | null, lastError: string | null): string {
+  if (status === 'scanning') return 'Scanning';
+  if (status === 'paused') return 'Paused';
+  if (lastError) return 'Error';
+  if (status === 'idle') return `Hunting · ${timeAgo(lastRun)}`;
+  return 'Hunting';
+}
+
+function formatCredits(n: number): string {
+  if (n >= 1000) return `${(n / 1000).toFixed(1)}K`;
+  return String(n);
 }
 
 export default function StatusFooter({ status }: { status: SystemStatus | null }) {
   if (!status) return null;
 
   const scanStatus = status.scanner?.status || 'stopped';
-  const lastScanText = status.scanner?.dealsToday != null ? `Today: ${status.scanner.dealsToday}` : '';
   const grails = status.scanner?.grailsToday ?? 0;
   const accuracy = status.accuracy?.rolling7d;
+  const scrydex = status.scrydex;
 
   return (
     <div
@@ -44,14 +61,16 @@ export default function StatusFooter({ status }: { status: SystemStatus | null }
         overflow: 'hidden',
       }}
     >
-      {/* Left zone: operational stats */}
+      {/* Left zone: scanner state */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
         <StatusDot status={scanStatus} />
-        <span style={{ textTransform: 'capitalize' }}>
-          {scanStatus === 'running' ? 'Hunting' : scanStatus === 'paused' ? 'Paused' : scanStatus}
+        <span>
+          {scanStateLabel(scanStatus, status.scanner?.lastRun, status.scanner?.lastError)}
         </span>
         <span style={{ color: 'var(--tMut)' }}>|</span>
-        <span>{lastScanText} · {grails}G · {(status.scanner?.dealsToday ?? 0) - grails}H</span>
+        <span>
+          Today: {status.scanner?.dealsToday ?? 0} · {grails}G · {(status.scanner?.dealsToday ?? 0) - grails}H
+        </span>
         {accuracy != null && (
           <>
             <span style={{ color: 'var(--tMut)' }}>|</span>
@@ -66,6 +85,14 @@ export default function StatusFooter({ status }: { status: SystemStatus | null }
           eBay <StatusDot status={status.ebay?.status || 'healthy'} /> {status.ebay?.callsToday?.toLocaleString()}/{(status.ebay?.dailyLimit / 1000).toFixed(0)}K
         </span>
         <span style={{ color: 'var(--tMut)' }}>|</span>
+        {scrydex && (
+          <>
+            <span>
+              Scrydex <StatusDot status={scrydex.status} /> {formatCredits(scrydex.usedCredits)}/{formatCredits(scrydex.totalCredits)}
+            </span>
+            <span style={{ color: 'var(--tMut)' }}>|</span>
+          </>
+        )}
         <span>
           Index <StatusDot status="healthy" /> {status.sync?.totalCards?.toLocaleString()} · {timeAgo(status.sync?.lastSync)}
         </span>

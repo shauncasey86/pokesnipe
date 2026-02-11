@@ -18,6 +18,7 @@ export function extractSignals(listing: {
   title: string;
   conditionDescriptors?: Array<{ name: string; values: string[] }>;
   localizedAspects?: Array<{ name: string; value: string }> | null;
+  conditionText?: string | null;
 }): ExtractionResult {
   // 1. Clean the title
   const cleaned = cleanTitle(listing.title);
