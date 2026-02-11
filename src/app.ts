@@ -11,17 +11,27 @@ import { debugExtractRouter } from './routes/debug-extract.js';
 import { debugScanRouter } from './routes/debug-scan.js';
 import { debugLiquidityRouter } from './routes/debug-liquidity.js';
 import velocityRouter from './routes/velocity.js';
+import { sessionMiddleware, authRouter, requireAuth } from './middleware/auth.js';
+import dealsRouter from './routes/deals.js';
+import lookupRouter from './routes/lookup.js';
+import statusRouter from './routes/status.js';
+import preferencesRouter from './routes/preferences.js';
+import sseRouter from './routes/sse.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const logger = pino({ name: 'http' });
 
 const app = express();
 
+// Security headers
 app.use(helmet({
   contentSecurityPolicy: false,
 }));
 app.use(express.json());
 app.use(cookieParser());
+
+// Session middleware (must be before auth-protected routes)
+app.use(sessionMiddleware);
 
 // Request logging middleware
 app.use((req, _res, next) => {
@@ -29,13 +39,26 @@ app.use((req, _res, next) => {
   next();
 });
 
+// Public routes (no auth required)
 app.use(healthRouter);
 app.use('/api/catalog', catalogRouter);
+
+// Auth routes (no auth required)
+app.use('/auth', authRouter);
+
+// Debug routes (kept as-is from earlier stages)
 app.use(debugEbayRouter);
 app.use(debugExtractRouter);
 app.use(debugScanRouter);
 app.use(debugLiquidityRouter);
-app.use('/api', velocityRouter);
+
+// Protected routes
+app.use('/api/deals', requireAuth, sseRouter);        // SSE at /api/deals/stream (must be before deals CRUD)
+app.use('/api/deals', requireAuth, dealsRouter);       // Deal CRUD at /api/deals/*
+app.use('/api', requireAuth, velocityRouter);          // /api/deals/:id/velocity (protected)
+app.use('/api/lookup', requireAuth, lookupRouter);
+app.use('/api/status', requireAuth, statusRouter);
+app.use('/api/preferences', requireAuth, preferencesRouter);
 
 // Serve frontend static files
 const clientDist = path.join(__dirname, '../client/dist');
