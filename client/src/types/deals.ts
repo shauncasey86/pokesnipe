@@ -50,6 +50,11 @@ export interface DealDetail extends Deal {
   card_image_url: string | null;
   expansion_name: string | null;
   expansion_code: string | null;
+  expansion_logo: string | null;
+  expansion_symbol: string | null;
+  expansion_release_date: string | null;
+  expansion_card_count: number | null;
+  expansion_series: string | null;
   variant_name: string | null;
   variant_prices: Record<string, { low: number; market: number }> | null;
   variant_trends: Record<string, Record<string, { price_change: number; percent_change: number }>> | null;

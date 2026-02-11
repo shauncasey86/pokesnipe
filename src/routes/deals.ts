@@ -125,6 +125,9 @@ router.get('/:id', async (req: Request, res: Response) => {
       `SELECT d.*,
               c.name as card_name, c.number as card_number, c.image_large as card_image_url,
               e.name as expansion_name, e.code as expansion_code,
+              e.logo_url as expansion_logo, e.symbol_url as expansion_symbol,
+              e.release_date as expansion_release_date, e.printed_total as expansion_card_count,
+              e.series as expansion_series,
               v.name as variant_name, v.prices as variant_prices, v.trends as variant_trends
        FROM deals d
        LEFT JOIN cards c ON c.scrydex_card_id = d.card_id
@@ -163,7 +166,7 @@ router.get('/:id', async (req: Request, res: Response) => {
  */
 const reviewSchema = z.object({
   isCorrectMatch: z.boolean(),
-  reason: z.enum(['wrong_card', 'wrong_set', 'wrong_variant', 'wrong_price']).optional(),
+  reason: z.enum(['wrong_card', 'wrong_set', 'wrong_condition', 'wrong_variant', 'wrong_price', 'bad_image']).optional(),
 });
 
 router.post('/:id/review', validate(reviewSchema), async (req: Request, res: Response) => {
