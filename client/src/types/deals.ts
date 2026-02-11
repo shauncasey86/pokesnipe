@@ -47,6 +47,7 @@ export interface Deal {
 export interface DealDetail extends Deal {
   card_name: string | null;
   card_number: string | null;
+  card_image_url: string | null;
   expansion_name: string | null;
   expansion_code: string | null;
   variant_name: string | null;
