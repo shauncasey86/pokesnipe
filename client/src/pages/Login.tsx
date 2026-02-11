@@ -1,12 +1,17 @@
 import { useState, type FormEvent } from 'react';
+import { Navigate, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 
 export default function Login() {
-  const { login } = useAuth();
+  const { login, isAuthenticated } = useAuth();
+  const navigate = useNavigate();
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [shake, setShake] = useState(false);
   const [loading, setLoading] = useState(false);
+
+  // Already logged in — redirect to dashboard
+  if (isAuthenticated) return <Navigate to="/" />;
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
@@ -15,6 +20,7 @@ export default function Login() {
     setLoading(true);
     try {
       await login(password);
+      navigate('/');
     } catch {
       setError('Invalid password');
       setShake(true);
