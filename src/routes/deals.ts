@@ -123,7 +123,7 @@ router.get('/:id', async (req: Request, res: Response) => {
   try {
     const { rows } = await pool.query(
       `SELECT d.*,
-              c.name as card_name, c.number as card_number,
+              c.name as card_name, c.number as card_number, c.image_large as card_image_url,
               e.name as expansion_name, e.code as expansion_code,
               v.name as variant_name, v.prices as variant_prices, v.trends as variant_trends
        FROM deals d
