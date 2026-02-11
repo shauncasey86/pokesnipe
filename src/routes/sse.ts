@@ -60,7 +60,7 @@ router.get('/stream', async (req: Request, res: Response) => {
 
   // Listen for new deal events
   const onDeal = (deal: any) => {
-    res.write(`event: deal\nid: ${deal.eventId}\ndata: ${JSON.stringify(deal)}\n\n`);
+    res.write(`event: deal\nid: ${deal.event_id}\ndata: ${JSON.stringify(deal)}\n\n`);
   };
   sseEmitter.on('deal', onDeal);
 

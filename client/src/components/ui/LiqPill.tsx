@@ -1,16 +1,24 @@
 import type { LiquidityGrade } from '../../types/deals';
 
 const LIQ_COLORS: Record<string, string> = {
-  HIGH: 'var(--green)',
-  MED: 'var(--amber)',
-  LOW: '#f97316',
-  ILLIQ: 'var(--red)',
+  high: 'var(--green)',
+  medium: 'var(--amber)',
+  low: '#f97316',
+  illiquid: 'var(--red)',
+};
+
+const LIQ_LABELS: Record<string, string> = {
+  high: 'HIGH',
+  medium: 'MED',
+  low: 'LOW',
+  illiquid: 'ILLIQ',
 };
 
 export default function LiqPill({ grade }: { grade: LiquidityGrade | null }) {
   if (!grade) return null;
   const color = LIQ_COLORS[grade] || 'var(--tMut)';
-  const dimmed = grade === 'ILLIQ';
+  const label = LIQ_LABELS[grade] || grade.toUpperCase();
+  const dimmed = grade === 'illiquid';
   return (
     <span
       style={{
@@ -27,7 +35,7 @@ export default function LiqPill({ grade }: { grade: LiquidityGrade | null }) {
         opacity: dimmed ? 0.5 : 0.9,
       }}
     >
-      {grade}
+      {label}
     </span>
   );
 }

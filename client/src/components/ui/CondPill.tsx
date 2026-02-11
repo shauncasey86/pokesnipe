@@ -5,6 +5,7 @@ const COND_COLORS: Record<Condition, string> = {
   LP: 'var(--amber)',
   MP: '#f97316',
   HP: 'var(--red)',
+  DM: '#991b1b',
 };
 
 export default function CondPill({ condition }: { condition: Condition }) {

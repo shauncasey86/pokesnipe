@@ -80,7 +80,7 @@ const TIER_COLORS: Record<Tier, string> = {
   GRAIL: '#ff6b35', HIT: '#ffd60a', FLIP: '#6b7fa0', SLEEP: '#3a4060',
 };
 const COND_COLORS: Record<Condition, string> = {
-  NM: 'var(--green)', LP: 'var(--amber)', MP: '#f97316', HP: 'var(--red)',
+  NM: 'var(--green)', LP: 'var(--amber)', MP: '#f97316', HP: 'var(--red)', DM: '#991b1b',
 };
 
 function toggleInArray<T>(arr: T[], item: T): T[] {
@@ -143,12 +143,12 @@ export default function FilterBar({
 
       <div className="filter-extended" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
         <FilterGroup label="LIQ">
-          {(['HIGH', 'MED', 'LOW'] as LiquidityGrade[]).map(g => (
+          {(['high', 'medium', 'low'] as LiquidityGrade[]).map(g => (
             <Seg
               key={g}
-              label={g === 'HIGH' ? 'HI' : g === 'MED' ? 'MD' : 'LO'}
+              label={g === 'high' ? 'HI' : g === 'medium' ? 'MD' : 'LO'}
               active={filters.liquidityGrades.includes(g)}
-              color={g === 'HIGH' ? 'var(--green)' : g === 'MED' ? 'var(--amber)' : '#f97316'}
+              color={g === 'high' ? 'var(--green)' : g === 'medium' ? 'var(--amber)' : '#f97316'}
               onClick={() => onChange({ ...filters, liquidityGrades: toggleInArray(filters.liquidityGrades, g) })}
             />
           ))}
