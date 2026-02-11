@@ -2,6 +2,7 @@ import { pool } from '../../db/pool.js';
 import * as scrydex from '../scrydex/client.js';
 import { transformExpansion, transformCard, transformVariant } from './transformers.js';
 import { batchUpsertExpansions, batchUpsertCards, batchUpsertVariants } from './batch-insert.js';
+import { sendAlert } from '../notifications/telegram.js';
 
 function log(msg: string): void {
   console.log(`[sync] ${msg}`);
@@ -159,6 +160,7 @@ export async function syncAll(): Promise<SyncResult> {
     logError(`syncAll FAILED: ${message}`);
     logError(`Stack: ${stack}`);
     await failSyncLog(logId, message).catch(() => {});
+    sendAlert('critical', 'Sync Failed', `Error: ${message}`).catch(() => {});
     throw error;
   }
 }

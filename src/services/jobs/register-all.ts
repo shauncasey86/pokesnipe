@@ -1,5 +1,6 @@
 import pino from 'pino';
 import { registerJob } from './scheduler.js';
+import { pool } from '../../db/pool.js';
 
 // Lifecycle
 import { expireOldDeals } from '../lifecycle/deal-expiry.js';
@@ -21,6 +22,10 @@ import { batchUpsertCards, batchUpsertVariants } from '../sync/batch-insert.js';
 
 // Liquidity velocity
 import { getVelocity } from '../liquidity/tier3-velocity.js';
+
+// Notifications & accuracy
+import { sendAlert } from '../notifications/telegram.js';
+import { checkAccuracyThreshold } from '../accuracy/tracker.js';
 
 // Helpers
 import { getRecentExpansions, checkForNewExpansions, getTopMatchedCards } from './helpers.js';
@@ -167,6 +172,24 @@ export function registerAllJobs(): void {
     }
 
     log.info({ fetched, total: topCards.length }, 'Velocity pre-fetch complete');
+  });
+
+  // -- Accuracy check -- every 6 hours
+  registerJob('accuracy-check', '0 */6 * * *', async () => {
+    await checkAccuracyThreshold();
+  });
+
+  // -- Card index staleness check -- every 12 hours
+  registerJob('card-index-check', '0 */12 * * *', async () => {
+    const lastSync = await pool.query(
+      "SELECT MAX(completed_at) as last FROM sync_log WHERE status = 'completed'"
+    );
+    if (lastSync.rows[0]?.last) {
+      const hoursSinceSync = (Date.now() - new Date(lastSync.rows[0].last).getTime()) / (1000 * 60 * 60);
+      if (hoursSinceSync > 48) {
+        sendAlert('critical', 'Card Index Stale', `Last sync: ${hoursSinceSync.toFixed(0)}h ago`).catch(() => {});
+      }
+    }
   });
 
   log.info('All background jobs registered');
