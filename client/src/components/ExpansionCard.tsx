@@ -8,7 +8,7 @@ interface Props {
 
 export default function ExpansionCard({ expansion }: Props) {
   return (
-    <Link to={`/catalog/expansions/${expansion.id}`} className="expansion-card glass">
+    <Link to={`/catalog/expansions/${expansion.id}`} className="expansion-card">
       <div className="expansion-card-logo">
         {expansion.logo ? (
           <img src={expansion.logo} alt={expansion.name} />

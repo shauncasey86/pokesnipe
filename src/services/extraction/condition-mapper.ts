@@ -71,6 +71,46 @@ const UNGRADED_CONDITION_MAP: Record<string, 'NM' | 'LP' | 'MP' | 'HP'> = {
   '400017': 'HP', // Heavily Played (Poor)
 };
 
+// --- Text-based descriptor name mapping ---
+// The eBay Browse API returns human-readable text names in conditionDescriptors
+// instead of numeric IDs. This maps text names to the equivalent numeric ID
+// so the same downstream logic works for both formats.
+const DESCRIPTOR_TEXT_NAME_MAP: Record<string, string> = {
+  'card condition':        '40001',
+  'professional grader':   '27501',
+  'grade':                 '27502',
+  'certification number':  '27503',
+};
+
+// --- Text-based ungraded condition value mapping ---
+// When eBay returns text values like "Moderately played (Very good)" instead
+// of numeric value IDs like "400016", use this map to resolve the condition.
+const UNGRADED_TEXT_CONDITION_MAP: Record<string, 'NM' | 'LP' | 'MP' | 'HP'> = {
+  'near mint or better':            'NM',
+  'near mint':                      'NM',
+  'mint':                           'NM',
+  'lightly played (excellent)':     'LP',
+  'lightly played':                 'LP',
+  'excellent':                      'LP',
+  'moderately played (very good)':  'MP',
+  'moderately played':              'MP',
+  'very good':                      'MP',
+  'heavily played (poor)':          'HP',
+  'heavily played':                 'HP',
+  'poor':                           'HP',
+};
+
+// --- Text-based grading company value mapping ---
+const TEXT_GRADER_MAP: Record<string, string> = {
+  'psa': 'PSA', 'bccg': 'BCCG', 'bvg': 'BVG', 'bgs': 'BGS',
+  'csg': 'CSG', 'cgc': 'CGC', 'sgc': 'SGC', 'ksa': 'KSA',
+  'gma': 'GMA', 'hga': 'HGA', 'isa': 'ISA', 'pca': 'PCA',
+  'gsg': 'GSG', 'pgs': 'PGS', 'mnt': 'MNT', 'tag': 'TAG',
+  'rare edition': 'Rare Edition', 'rcg': 'RCG', 'pcg': 'PCG',
+  'ace grading': 'Ace Grading', 'cga': 'CGA', 'tcg': 'TCG',
+  'ark': 'ARK', 'other': 'Other',
+};
+
 // --- localizedAspects text mapping ---
 const LOCALIZED_CONDITION_MAP: Record<string, 'NM' | 'LP' | 'MP' | 'HP'> = {
   'near mint': 'NM',
@@ -149,7 +189,7 @@ export function extractCondition(listing: {
     }
   }
 
-  // Priority 1: Condition Descriptors (numeric IDs from eBay)
+  // Priority 1: Condition Descriptors (numeric IDs or text names from eBay)
   if (descriptors.length > 0) {
     let isGraded = false;
     let gradingCompany: string | null = null;
@@ -161,25 +201,32 @@ export function extractCondition(listing: {
       const value = descriptor.values[0];
       if (!value) continue;
 
+      // Resolve text descriptor names to numeric IDs.
+      // eBay Browse API returns text names like "Card Condition" instead of "40001".
+      const resolvedName =
+        DESCRIPTOR_TEXT_NAME_MAP[descriptor.name.toLowerCase()] ?? descriptor.name;
+      const valueLower = value.toLowerCase().trim();
+
       // Grading company (descriptor name: '27501')
-      if (descriptor.name === '27501') {
+      if (resolvedName === '27501') {
         isGraded = true;
-        gradingCompany = GRADER_MAP[value] ?? value;
+        gradingCompany = GRADER_MAP[value] ?? TEXT_GRADER_MAP[valueLower] ?? value;
       }
 
       // Grade (descriptor name: '27502')
-      if (descriptor.name === '27502') {
+      if (resolvedName === '27502') {
         grade = GRADE_MAP[value] ?? value;
       }
 
       // Cert number (descriptor name: '27503') — free text
-      if (descriptor.name === '27503') {
+      if (resolvedName === '27503') {
         certNumber = value;
       }
 
       // Ungraded condition (descriptor name: '40001')
-      if (descriptor.name === '40001') {
-        const mapped = UNGRADED_CONDITION_MAP[value];
+      if (resolvedName === '40001') {
+        // Try numeric ID first, then text-based matching
+        const mapped = UNGRADED_CONDITION_MAP[value] ?? UNGRADED_TEXT_CONDITION_MAP[valueLower];
         if (mapped) {
           detectedCondition = mapped;
         }

@@ -186,7 +186,9 @@ export async function getExpansionDetail(
       orderBy = 'nm_price DESC NULLS LAST';
       break;
     default:
-      orderBy = 'c.number_normalized ASC, c.number ASC';
+      // Cast to integer for proper numeric sorting (1, 2, 3... not 1, 10, 100...)
+      // Non-numeric portions are stripped, falling back to text sort for edge cases
+      orderBy = `LPAD(regexp_replace(c.number_normalized, '[^0-9]', '', 'g'), 10, '0') ASC, c.number ASC`;
   }
 
   const countResult = await pool.query(

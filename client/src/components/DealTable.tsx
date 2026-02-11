@@ -278,7 +278,7 @@ function DealTable({ deals, selectedId, onSelect, newDealIds }: DealTableProps) 
               />
             </div>
 
-            {/* card name + price range */}
+            {/* card name + expansion + price range */}
             <div style={{ minWidth: 0, paddingLeft: 4 }}>
               <div
                 style={{
@@ -293,12 +293,50 @@ function DealTable({ deals, selectedId, onSelect, newDealIds }: DealTableProps) 
               >
                 {name}
               </div>
+              {/* expansion info */}
+              {deal.expansion_name && (
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 4,
+                    marginTop: 1,
+                  }}
+                >
+                  {deal.expansion_logo && (
+                    <img
+                      src={deal.expansion_logo}
+                      alt=""
+                      style={{
+                        height: 12,
+                        width: "auto",
+                        maxWidth: 40,
+                        objectFit: "contain",
+                        opacity: 0.7,
+                      }}
+                    />
+                  )}
+                  <span
+                    style={{
+                      fontSize: 10,
+                      fontFamily: "'JetBrains Mono', monospace",
+                      color: "rgba(255,255,255,0.35)",
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    {deal.expansion_name}
+                    {deal.card_number ? ` #${deal.card_number}` : ""}
+                  </span>
+                </div>
+              )}
               <div
                 style={{
                   fontSize: 10,
                   fontFamily: "'JetBrains Mono', monospace",
                   color: "rgba(255,255,255,0.3)",
-                  marginTop: 2,
+                  marginTop: 1,
                 }}
               >
                 £{ebayPrice.toFixed(2)} → £{marketPrice.toFixed(2)}

@@ -39,13 +39,13 @@ router.get('/', async (req: Request, res: Response) => {
     const sortColumn = sortMap[sortField] || 'created_at';
 
     // Build WHERE clause
-    const conditions: string[] = ['status = $1'];
+    const conditions: string[] = ['d.status = $1'];
     const params: any[] = [status];
     let paramIndex = 2;
 
     if (tierFilter) {
       const tiers = tierFilter.split(',').map(t => t.trim().toUpperCase());
-      conditions.push(`tier = ANY($${paramIndex})`);
+      conditions.push(`d.tier = ANY($${paramIndex})`);
       params.push(tiers);
       paramIndex++;
     }
@@ -54,48 +54,42 @@ router.get('/', async (req: Request, res: Response) => {
 
     // Count total
     const countResult = await pool.query(
-      `SELECT COUNT(*) FROM deals WHERE ${whereClause}`,
+      `SELECT COUNT(*) FROM deals d WHERE ${whereClause}`,
       params,
     );
     const total = parseInt(countResult.rows[0].count);
 
-    // Fetch page
+    // Fetch page — join cards + expansions for display data
     const { rows } = await pool.query(
       `SELECT
-        deal_id, event_id, ebay_item_id, ebay_title,
-        card_id, variant_id, status,
-        ebay_price_gbp, ebay_shipping_gbp, buyer_prot_fee, total_cost_gbp,
-        market_price_usd, market_price_gbp, exchange_rate,
-        profit_gbp, profit_percent, tier,
-        confidence, confidence_tier, condition, condition_source,
-        is_graded, grading_company, grade,
-        liquidity_score, liquidity_grade,
-        trend_7d, trend_30d,
-        ebay_image_url, ebay_url,
-        seller_name, seller_feedback, listed_at,
-        reviewed_at, is_correct_match, incorrect_reason,
-        created_at, expires_at
-      FROM deals
+        d.deal_id, d.event_id, d.ebay_item_id, d.ebay_title,
+        d.card_id, d.variant_id, d.status,
+        d.ebay_price_gbp, d.ebay_shipping_gbp, d.buyer_prot_fee, d.total_cost_gbp,
+        d.market_price_usd, d.market_price_gbp, d.exchange_rate,
+        d.profit_gbp, d.profit_percent, d.tier,
+        d.confidence, d.confidence_tier, d.condition, d.condition_source,
+        d.is_graded, d.grading_company, d.grade,
+        d.liquidity_score, d.liquidity_grade,
+        d.trend_7d, d.trend_30d,
+        d.ebay_image_url, d.ebay_url,
+        d.seller_name, d.seller_feedback, d.listed_at,
+        d.reviewed_at, d.is_correct_match, d.incorrect_reason,
+        d.created_at, d.expires_at,
+        c.name AS card_name, c.number AS card_number,
+        e.name AS expansion_name, e.code AS expansion_code,
+        e.logo_url AS expansion_logo
+      FROM deals d
+      LEFT JOIN cards c ON c.scrydex_card_id = d.card_id
+      LEFT JOIN expansions e ON e.scrydex_id = c.expansion_id
       WHERE ${whereClause}
-      ORDER BY ${sortColumn} ${sortOrder}
+      ORDER BY d.${sortColumn} ${sortOrder}
       LIMIT $${paramIndex} OFFSET $${paramIndex + 1}`,
       [...params, limit, offset],
     );
 
-    // Also fetch card names for display
-    const cardIds = [...new Set(rows.map(r => r.card_id).filter(Boolean))];
-    let cardNames: Record<string, string> = {};
-    if (cardIds.length > 0) {
-      const cardResult = await pool.query(
-        'SELECT scrydex_card_id, name FROM cards WHERE scrydex_card_id = ANY($1)',
-        [cardIds],
-      );
-      cardNames = Object.fromEntries(cardResult.rows.map(r => [r.scrydex_card_id, r.name]));
-    }
-
     const data = rows.map(row => ({
       ...row,
-      cardName: cardNames[row.card_id] || null,
+      cardName: row.card_name || null,
       ebay_price_gbp: parseFloat(row.ebay_price_gbp),
       ebay_shipping_gbp: parseFloat(row.ebay_shipping_gbp),
       buyer_prot_fee: parseFloat(row.buyer_prot_fee),
