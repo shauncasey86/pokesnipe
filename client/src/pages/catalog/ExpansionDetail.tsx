@@ -39,7 +39,7 @@ export default function ExpansionDetail() {
 
   return (
     <div className="expansion-detail">
-      <div className="exp-header glass-static">
+      <div className="exp-header">
         {expansion.logo && (
           <img src={expansion.logo} alt={expansion.name} className="exp-header-logo" />
         )}

@@ -1,7 +1,7 @@
 .card-grid {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 16px;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 12px;
 }
 
 .card-tile {
@@ -10,12 +10,16 @@
   padding: 12px;
   text-decoration: none;
   color: var(--tPri);
-  transition: transform 0.15s, box-shadow 0.15s;
+  transition: transform 0.15s, box-shadow 0.15s, border-color 0.15s;
+  border: 1px solid var(--brd);
+  border-radius: 8px;
+  background: var(--glass);
 }
 
 .card-tile:hover {
   transform: translateY(-4px);
   box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+  border-color: rgba(255,255,255,0.08);
   text-decoration: none;
 }
 
@@ -35,7 +39,7 @@
 .card-tile-placeholder {
   width: 68px;
   height: 95px;
-  background: var(--bg2);
+  background: rgba(255,255,255,0.03);
   border-radius: 4px;
 }
 
@@ -47,7 +51,7 @@
 }
 
 .card-tile-name {
-  font-size: 0.8125rem;
+  font-size: 0.75rem;
   font-weight: 600;
   color: var(--tMax);
   white-space: nowrap;
@@ -56,21 +60,28 @@
 }
 
 .card-tile-number {
-  font-size: 0.75rem;
+  font-family: var(--font-mono);
+  font-size: 10px;
   color: var(--tSec);
 }
 
 .card-tile-price {
-  font-size: 0.8125rem;
-  font-weight: 500;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
   color: var(--green);
 }
 
 .empty-state {
   text-align: center;
   padding: 48px 24px;
-  color: var(--tSec);
-  font-size: 0.9375rem;
+  color: var(--tMut);
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+@media (max-width: 1100px) {
+  .card-grid { grid-template-columns: repeat(4, 1fr); }
 }
 
 @media (max-width: 900px) {

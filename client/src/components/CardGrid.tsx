@@ -14,7 +14,7 @@ export default function CardGrid({ cards }: Props) {
   return (
     <div className="card-grid">
       {cards.map((card) => (
-        <Link key={card.id} to={`/catalog/cards/${card.id}`} className="card-tile glass">
+        <Link key={card.id} to={`/catalog/cards/${card.id}`} className="card-tile">
           <div className="card-tile-img">
             {card.image ? (
               <img src={card.image} alt={card.name} loading="lazy" />

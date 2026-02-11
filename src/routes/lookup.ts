@@ -139,6 +139,7 @@ router.post('/', validate(lookupSchema), async (req: Request, res: Response) => 
             signals: liquidity.signals,
           }
         : null,
+      rawEbayResponse: listing,
     });
   } catch (err: any) {
     log.error({ err }, 'Lookup failed');

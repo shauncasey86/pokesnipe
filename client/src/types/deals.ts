@@ -42,11 +42,14 @@ export interface Deal {
   created_at: string;
   expires_at: string | null;
   cardName: string | null;
+  card_number: string | null;
+  expansion_name: string | null;
+  expansion_code: string | null;
+  expansion_logo: string | null;
 }
 
 export interface DealDetail extends Deal {
   card_name: string | null;
-  card_number: string | null;
   card_image_url: string | null;
   expansion_name: string | null;
   expansion_code: string | null;
@@ -155,18 +158,34 @@ export interface LookupResult {
     price: { value: string; currency: string } | null;
     shipping: { value: string; currency: string } | null;
     condition: string | null;
-    conditionDescriptors: Array<{ name: string; values: Array<{ content: string }> }> | null;
+    conditionDescriptors: Array<{
+      name: string;
+      values: Array<{ content: string; additionalInfo?: string[] }>;
+    }> | null;
     image: string | null;
-    seller: { username: string; feedbackPercentage: string; feedbackScore: number } | null;
+    seller: {
+      username: string;
+      feedbackPercentage: string;
+      feedbackScore: number;
+      sellerAccountType?: string;
+    } | null;
     quantitySold: number | null;
   };
   signals: {
     rejected: boolean;
     rejectReason?: string;
-    cardNumber?: unknown;
-    condition?: unknown;
-    variant?: unknown;
-    expansion?: unknown;
+    cardNumber?: { number: number | null; prefix: string | null; denominator: number | null };
+    condition?: {
+      condition: string;
+      source: string;
+      isGraded: boolean;
+      gradingCompany: string | null;
+      grade: string | null;
+      certNumber: string | null;
+      rawDescriptorIds: string[];
+    };
+    variant?: string | null;
+    expansion?: string | null;
     isGraded?: boolean;
   };
   match: {
@@ -174,7 +193,15 @@ export interface LookupResult {
     cardName: string;
     cardNumber: string;
     variantName: string;
-    confidence: number;
+    confidence: number | {
+      composite: number;
+      name?: number;
+      number?: number;
+      denominator?: number;
+      expansion?: number;
+      variant?: number;
+      normalization?: number;
+    };
   } | null;
   profit: {
     profitGBP: number;
@@ -186,6 +213,7 @@ export interface LookupResult {
   liquidity: {
     composite: number;
     grade: LiquidityGrade;
-    signals: Record<string, number>;
+    signals: Record<string, number | null>;
   } | null;
+  rawEbayResponse?: Record<string, unknown>;
 }

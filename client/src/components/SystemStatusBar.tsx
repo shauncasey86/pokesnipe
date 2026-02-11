@@ -136,7 +136,8 @@ export default function SystemStatusBar({ status, isLive }: SystemStatusBarProps
                 background: scrydexHealthy ? '#22c55e' : '#ef4444',
               }}
             />
-            {' '}OK
+            {' '}
+            {formatCredits(status.scrydex.usedCredits)}/{formatCredits(status.scrydex.totalCredits)}
           </span>
 
           {/* Separator */}

@@ -10,6 +10,42 @@ const TIER_CHIP_COLORS: Record<string, { bg: string; text: string; border: strin
   SLEEP: { bg: 'rgba(58,64,96,0.15)',    text: '#8290a8', border: '#3a4060' },
 };
 
+/* ─── Tooltip maps ─── */
+
+const TIER_TOOLTIPS: Record<string, string> = {
+  ALL:   'Show all deal tiers',
+  GRAIL: 'Grail — High-value rare find, large profit margin',
+  HIT:   'Hit — Strong deal with good profit potential',
+  FLIP:  'Flip — Quick flip opportunity, moderate profit',
+  SLEEP: 'Sleep — Low-priority deal, minimal profit',
+};
+
+const COND_TOOLTIPS: Record<string, string> = {
+  ALL: 'Show all card conditions',
+  NM:  'Near Mint — Excellent condition, minimal wear',
+  LP:  'Lightly Played — Minor edge/surface wear',
+  MP:  'Moderately Played — Noticeable wear, fully playable',
+  HP:  'Heavily Played — Significant wear and creasing',
+};
+
+const TIME_TOOLTIPS: Record<string, string> = {
+  '1H':  'Show deals from the last hour',
+  '6H':  'Show deals from the last 6 hours',
+  '24H': 'Show deals from the last 24 hours',
+  ALL:   'Show all deals regardless of time',
+};
+
+const LIQ_TOOLTIPS: Record<string, string> = {
+  high:   'High liquidity — Sells quickly, strong demand',
+  medium: 'Medium liquidity — Sells reasonably, moderate demand',
+  low:    'Low liquidity — May take time to sell',
+};
+
+const CONF_TOOLTIPS: Record<string, string> = {
+  HI: 'High confidence — Match score 85%+',
+  MD: 'Medium confidence — Match score 65-84%',
+};
+
 const ALL_TIERS: Tier[] = ['GRAIL', 'HIT', 'FLIP', 'SLEEP'];
 const ALL_CONDS: Condition[] = ['NM', 'LP', 'MP', 'HP', 'DM'];
 const TIME_OPTIONS = ['1H', '6H', '24H', 'ALL'] as const;
@@ -28,6 +64,7 @@ function Chip({
   activeColor,
   activeBg,
   activeBorder,
+  tooltip,
   onClick,
 }: {
   label: string;
@@ -35,12 +72,14 @@ function Chip({
   activeColor?: string;
   activeBg?: string;
   activeBorder?: string;
+  tooltip?: string;
   onClick: () => void;
 }) {
   const color = active ? (activeColor || '#c084fc') : 'rgba(255,255,255,0.3)';
   return (
     <button
       onClick={onClick}
+      title={tooltip}
       style={{
         padding: '4px 12px',
         borderRadius: 6,
@@ -236,6 +275,7 @@ export default function FilterBar({
         <Chip
           label="ALL"
           active={allTiersActive}
+          tooltip={TIER_TOOLTIPS.ALL}
           onClick={() => handleTierClick('ALL')}
         />
         {ALL_TIERS.map((t) => {
@@ -248,6 +288,7 @@ export default function FilterBar({
               activeColor={c.text}
               activeBg={c.bg}
               activeBorder={c.border}
+              tooltip={TIER_TOOLTIPS[t]}
               onClick={() => handleTierClick(t)}
             />
           );
@@ -261,6 +302,7 @@ export default function FilterBar({
         <Chip
           label="ALL"
           active={allCondsActive}
+          tooltip={COND_TOOLTIPS.ALL}
           onClick={() => handleCondClick('ALL')}
         />
         {(['NM', 'LP', 'MP', 'HP'] as Condition[]).map((c) => (
@@ -271,6 +313,7 @@ export default function FilterBar({
             activeColor={c === 'NM' ? '#4ade80' : c === 'LP' ? '#facc15' : c === 'MP' ? '#fb923c' : '#ef4444'}
             activeBg={c === 'NM' ? 'rgba(34,197,94,0.12)' : c === 'LP' ? 'rgba(250,204,21,0.12)' : c === 'MP' ? 'rgba(251,146,60,0.12)' : 'rgba(239,68,68,0.12)'}
             activeBorder={c === 'NM' ? 'rgba(34,197,94,0.3)' : c === 'LP' ? 'rgba(250,204,21,0.3)' : c === 'MP' ? 'rgba(251,146,60,0.3)' : 'rgba(239,68,68,0.3)'}
+            tooltip={COND_TOOLTIPS[c]}
             onClick={() => handleCondClick(c)}
           />
         ))}
@@ -285,6 +328,7 @@ export default function FilterBar({
             key={t}
             label={t}
             active={filters.timeWindow === t}
+            tooltip={TIME_TOOLTIPS[t]}
             onClick={() => onChange({ ...filters, timeWindow: t })}
           />
         ))}
@@ -294,6 +338,7 @@ export default function FilterBar({
       <Divider />
       <button
         onClick={() => setShowMore(!showMore)}
+        title="Toggle advanced filters: liquidity, confidence, graded, min profit %"
         style={{
           padding: '3px 8px',
           borderRadius: 4,
@@ -352,6 +397,7 @@ export default function FilterBar({
       {/* Save button */}
       <button
         onClick={handleSave}
+        title="Save current filter configuration as default"
         style={{
           padding: '4px 12px',
           borderRadius: 6,
@@ -395,6 +441,7 @@ export default function FilterBar({
                 activeColor={g === 'high' ? '#4ade80' : g === 'medium' ? '#facc15' : '#fb923c'}
                 activeBg={g === 'high' ? 'rgba(34,197,94,0.12)' : g === 'medium' ? 'rgba(250,204,21,0.12)' : 'rgba(251,146,60,0.12)'}
                 activeBorder={g === 'high' ? 'rgba(34,197,94,0.3)' : g === 'medium' ? 'rgba(250,204,21,0.3)' : 'rgba(251,146,60,0.3)'}
+                tooltip={LIQ_TOOLTIPS[g]}
                 onClick={() =>
                   onChange({
                     ...filters,
@@ -417,6 +464,7 @@ export default function FilterBar({
                 activeColor="#60a5fa"
                 activeBg="rgba(59,130,246,0.12)"
                 activeBorder="rgba(59,130,246,0.3)"
+                tooltip={CONF_TOOLTIPS[c]}
                 onClick={() =>
                   onChange({
                     ...filters,
@@ -437,6 +485,7 @@ export default function FilterBar({
               activeColor="#60a5fa"
               activeBg="rgba(59,130,246,0.12)"
               activeBorder="rgba(59,130,246,0.3)"
+              tooltip="Filter to show only graded (slabbed) cards"
               onClick={() => onChange({ ...filters, gradedOnly: !filters.gradedOnly })}
             />
           </ChipGroup>

@@ -14,9 +14,12 @@
 }
 
 .browser-header h1 {
-  font-size: 1.5rem;
+  font-family: var(--font-mono);
+  font-size: 1.25rem;
   font-weight: 700;
   color: var(--tMax);
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
 }
 
 .browser-controls {
@@ -25,13 +28,22 @@
 }
 
 .browser-controls select {
-  background: var(--bg1);
+  background: var(--glass);
   border: 1px solid var(--brd);
-  border-radius: 8px;
+  border-radius: 6px;
   color: var(--tPri);
-  padding: 8px 12px;
-  font-size: 0.8125rem;
+  padding: 6px 28px 6px 10px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 500;
   outline: none;
+  cursor: pointer;
+  appearance: none;
+  -webkit-appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%23666' fill='none' stroke-width='1.5'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 8px center;
+  transition: border-color 0.15s;
 }
 
 .browser-controls select:focus {
@@ -41,13 +53,15 @@
 .expansion-grid {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
-  gap: 16px;
+  gap: 12px;
 }
 
 .loading-state {
   text-align: center;
   padding: 48px;
-  color: var(--tSec);
+  color: var(--tMut);
+  font-family: var(--font-mono);
+  font-size: 12px;
 }
 
 @media (max-width: 900px) {
