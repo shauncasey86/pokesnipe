@@ -30,12 +30,13 @@ router.post('/', validate(lookupSchema), async (req: Request, res: Response) => 
   try {
     const { ebayUrl } = req.body;
 
-    // Extract item ID from URL
+    // Extract item ID from URL and convert to Browse API format
     const itemIdMatch = ebayUrl.match(/\/itm\/(?:.*\/)?(\d+)/);
     if (!itemIdMatch) {
       return res.status(400).json({ error: 'Could not extract item ID from URL' });
     }
-    const itemId = itemIdMatch[1];
+    const legacyId = itemIdMatch[1];
+    const itemId = `v1|${legacyId}|0`;
 
     // Check budget
     if (!canMakeCall()) {
@@ -99,7 +100,7 @@ router.post('/', validate(lookupSchema), async (req: Request, res: Response) => 
     }
 
     return res.json({
-      itemId,
+      itemId: legacyId,
       ebayUrl,
       listing: {
         title: listing.title,

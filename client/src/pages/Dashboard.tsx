@@ -177,11 +177,10 @@ export default function Dashboard() {
     const currentStatus = status?.scanner?.status || 'running';
     const action = currentStatus === 'paused' ? 'start' : 'stop';
     try {
-      const result = await toggleScanner(action);
-      setStatus(prev => prev ? {
-        ...prev,
-        scanner: { ...prev.scanner, status: result.status },
-      } : prev);
+      await toggleScanner(action);
+      // Refresh full status so UI updates even if status was null
+      const s = await getStatus();
+      setStatus(s);
     } catch { /* silent */ }
   };
 
