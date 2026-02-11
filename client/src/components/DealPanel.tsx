@@ -840,7 +840,7 @@ export default function DealPanel({ dealId, onClose }: DealPanelProps) {
         display: "flex", flexDirection: "column", height: "100%",
         animation: "panelSlide 0.3s ease",
         width: "100%", borderLeft: "1px solid rgba(255,255,255,0.06)",
-        background: "#0d0f1a", flexShrink: 0, overflow: "hidden",
+        background: "#0d0f1a", flexShrink: 0, overflow: "auto",
       }}
     >
       <style>{`
@@ -962,6 +962,8 @@ export default function DealPanel({ dealId, onClose }: DealPanelProps) {
         padding: "16px 20px 0",
         borderBottom: "1px solid rgba(255,255,255,0.06)",
         display: "flex", gap: 0,
+        position: "sticky", top: 0, zIndex: 2,
+        background: "#0d0f1a",
       }}>
         {tabItems.map(t => {
           const isActive = tab === t.key;
@@ -986,7 +988,7 @@ export default function DealPanel({ dealId, onClose }: DealPanelProps) {
 
       {/* ═══ TAB CONTENT ═══ */}
       <div style={{
-        flex: 1, overflow: "auto", padding: "16px 20px 20px",
+        padding: "16px 20px 20px",
       }}>
         {tab === "overview" && (
           <OverviewTab
