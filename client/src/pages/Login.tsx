@@ -1,10 +1,9 @@
 import { useState, type FormEvent } from 'react';
-import { Navigate, useNavigate } from 'react-router-dom';
+import { Navigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 
 export default function Login() {
   const { login, isAuthenticated } = useAuth();
-  const navigate = useNavigate();
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [shake, setShake] = useState(false);
@@ -20,12 +19,12 @@ export default function Login() {
     setLoading(true);
     try {
       await login(password);
-      navigate('/');
+      // Full page redirect — ensures fresh app state with session cookie
+      window.location.href = '/';
     } catch {
       setError('Invalid password');
       setShake(true);
       setTimeout(() => setShake(false), 500);
-    } finally {
       setLoading(false);
     }
   };
