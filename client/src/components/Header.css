@@ -11,14 +11,14 @@
 .header-inner {
   display: flex;
   align-items: center;
-  gap: 24px;
-  max-width: 1280px;
-  margin: 0 auto;
-  padding: 12px 24px;
+  gap: 16px;
+  max-width: 100%;
+  padding: 10px 20px;
+  height: 56px;
 }
 
 .header-logo {
-  font-size: 1.25rem;
+  font-size: 1.15rem;
   font-weight: 800;
   color: var(--tMax);
   text-decoration: none;
@@ -38,11 +38,12 @@
 .nav-tab {
   padding: 6px 14px;
   border-radius: 6px;
-  font-size: 0.875rem;
+  font-size: 0.835rem;
   font-weight: 500;
   color: var(--tSec);
   text-decoration: none;
   transition: all 0.15s;
+  position: relative;
 }
 
 .nav-tab:hover {
@@ -56,6 +57,18 @@
   background: var(--glass2);
 }
 
+.nav-tab.active::after {
+  content: '';
+  position: absolute;
+  bottom: -1px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 60%;
+  height: 2px;
+  background: var(--green);
+  border-radius: 1px;
+}
+
 .header-search {
   display: flex;
   align-items: center;
@@ -65,8 +78,8 @@
   border-radius: 8px;
   padding: 6px 12px;
   margin-left: auto;
-  min-width: 200px;
-  max-width: 320px;
+  min-width: 180px;
+  max-width: 280px;
   flex: 1;
 }
 
@@ -80,7 +93,7 @@
   border: none;
   outline: none;
   color: var(--tPri);
-  font-size: 0.875rem;
+  font-size: 0.835rem;
   width: 100%;
 }
 
@@ -88,20 +101,77 @@
   color: var(--tMut);
 }
 
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.header-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 6px;
+  background: transparent;
+  border: 1px solid var(--brd);
+  color: var(--tSec);
+  transition: all 0.15s;
+}
+
+.header-btn:hover {
+  background: var(--glass);
+  color: var(--tMax);
+}
+
+.live-indicator {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0 6px;
+  transition: opacity 0.3s;
+}
+
+.live-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 6px;
+  animation: headerPulse 1.5s infinite;
+}
+
+.live-text {
+  font-family: 'DM Mono', monospace;
+  font-size: 9px;
+  font-weight: 500;
+  letter-spacing: 1.5px;
+  color: var(--tSec);
+}
+
 .header-accent {
-  height: 2px;
+  height: 1px;
   background: linear-gradient(90deg, #34d399, #60a5fa, #c084fc, #ff6b6b);
+}
+
+@keyframes headerPulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
 }
 
 @media (max-width: 640px) {
   .header-inner {
     flex-wrap: wrap;
-    gap: 12px;
-    padding: 10px 16px;
+    gap: 8px;
+    padding: 8px 12px;
+    height: auto;
   }
   .header-search {
     order: 3;
     min-width: 100%;
     max-width: 100%;
+  }
+  .live-indicator {
+    display: none;
   }
 }
