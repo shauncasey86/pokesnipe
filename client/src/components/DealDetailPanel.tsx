@@ -557,6 +557,7 @@ export default function DealDetailPanel({
             </span>
           )}
           <CondPill condition={deal.condition as Condition} />
+          <LiqPill grade={liqGrade} />
           {deal.is_graded && (
             <span style={{
               padding: '1px 5px', borderRadius: 4, fontSize: 10,
