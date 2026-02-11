@@ -3,7 +3,7 @@ import pino from 'pino';
 import { pool } from '../db/pool.js';
 import { getBudgetStatus } from '../services/ebay/budget.js';
 import { getDedupStats } from '../services/scanner/deduplicator.js';
-import { getJobStatuses } from '../services/jobs/index.js';
+import { getJobStatuses, pauseJob, resumeJob } from '../services/jobs/index.js';
 
 const log = pino({ name: 'status' });
 const router = Router();
@@ -48,6 +48,9 @@ router.get('/', async (req: Request, res: Response) => {
 
     const ebayBudget = getBudgetStatus();
     const dedupStats = getDedupStats();
+    const jobStatuses = getJobStatuses();
+    const scannerJob = jobStatuses['ebay-scan'];
+    const scannerRunning = scannerJob?.isPaused ? 'paused' : 'running';
 
     const exchangeRateRow = exchangeRate.rows[0];
     const exchangeRateAge = exchangeRateRow
@@ -60,7 +63,7 @@ router.get('/', async (req: Request, res: Response) => {
 
     return res.json({
       scanner: {
-        status: 'running',
+        status: scannerRunning,
         dealsToday: parseInt(dealsToday.rows[0].count),
         grailsToday: parseInt(grailsToday.rows[0].count),
         activeDeals: parseInt(totalDeals.rows[0].count),
@@ -93,6 +96,31 @@ router.get('/', async (req: Request, res: Response) => {
     log.error({ err }, 'Failed to fetch status');
     return res.status(500).json({ error: 'Failed to fetch status' });
   }
+});
+
+/**
+ * POST /api/status/scanner — Toggle the scanner on/off.
+ *
+ * Body: { action: 'start' | 'stop' }
+ */
+router.post('/scanner', (req: Request, res: Response) => {
+  const { action } = req.body;
+
+  if (action === 'stop') {
+    const ok = pauseJob('ebay-scan');
+    if (!ok) return res.status(404).json({ error: 'Scanner job not found' });
+    log.info('Scanner paused via API');
+    return res.json({ status: 'paused' });
+  }
+
+  if (action === 'start') {
+    const ok = resumeJob('ebay-scan');
+    if (!ok) return res.status(404).json({ error: 'Scanner job not found' });
+    log.info('Scanner resumed via API');
+    return res.json({ status: 'running' });
+  }
+
+  return res.status(400).json({ error: 'Invalid action. Use "start" or "stop".' });
 });
 
 export default router;

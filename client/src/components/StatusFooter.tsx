@@ -48,7 +48,7 @@ export default function StatusFooter({ status }: { status: SystemStatus | null }
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
         <StatusDot status={scanStatus} />
         <span style={{ textTransform: 'capitalize' }}>
-          {scanStatus === 'running' ? 'Hunting' : scanStatus}
+          {scanStatus === 'running' ? 'Hunting' : scanStatus === 'paused' ? 'Paused' : scanStatus}
         </span>
         <span style={{ color: 'var(--tMut)' }}>|</span>
         <span>{lastScanText} · {grails}G · {(status.scanner?.dealsToday ?? 0) - grails}H</span>

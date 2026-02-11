@@ -6,9 +6,8 @@ import DealFeed from '../components/DealFeed';
 import DealDetailPanel from '../components/DealDetailPanel';
 import StatusFooter from '../components/StatusFooter';
 import LookupModal from '../components/LookupModal';
-import SettingsModal from '../components/SettingsModal';
 import ToastContainer, { showToast } from '../components/ui/Toast';
-import { getDeals, getStatus, getPreferences, updatePreferences } from '../api/deals';
+import { getDeals, getStatus, getPreferences, updatePreferences, toggleScanner } from '../api/deals';
 import type { Deal, SystemStatus, FilterState, Tier, Condition, LiquidityGrade } from '../types/deals';
 
 const DEFAULT_FILTERS: FilterState = {
@@ -64,7 +63,6 @@ export default function Dashboard() {
   const [status, setStatus] = useState<SystemStatus | null>(null);
   const [sseState, setSseState] = useState<'connected' | 'reconnecting' | 'lost'>('reconnecting');
   const [showLookup, setShowLookup] = useState(false);
-  const [showSettings, setShowSettings] = useState(false);
   const [newDealIds, setNewDealIds] = useState<Set<string>>(new Set());
   const [isMobile, setIsMobile] = useState(window.innerWidth <= 920);
   const eventSourceRef = useRef<EventSource | null>(null);
@@ -175,12 +173,27 @@ export default function Dashboard() {
     connectSSE();
   };
 
+  const handleToggleScanner = async () => {
+    const currentStatus = status?.scanner?.status || 'running';
+    const action = currentStatus === 'paused' ? 'start' : 'stop';
+    try {
+      const result = await toggleScanner(action);
+      setStatus(prev => prev ? {
+        ...prev,
+        scanner: { ...prev.scanner, status: result.status },
+      } : prev);
+    } catch { /* silent */ }
+  };
+
+  const scannerStatus = status?.scanner?.status || 'running';
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', overflow: 'hidden' }}>
       <Header
         sseConnected={sseState === 'connected'}
+        scannerStatus={scannerStatus}
         onOpenLookup={() => setShowLookup(true)}
-        onOpenSettings={() => setShowSettings(true)}
+        onToggleScanner={handleToggleScanner}
       />
       <SSEBanner state={sseState} onRetry={handleRetrySSE} />
       <FilterBar filters={filters} onChange={setFilters} onSave={handleSaveFilters} />
@@ -247,7 +260,6 @@ export default function Dashboard() {
 
       {/* Modals */}
       {showLookup && <LookupModal onClose={() => setShowLookup(false)} />}
-      {showSettings && <SettingsModal onClose={() => setShowSettings(false)} />}
       <ToastContainer />
 
       <style>{`
