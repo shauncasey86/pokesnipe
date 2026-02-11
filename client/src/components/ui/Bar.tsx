@@ -34,9 +34,13 @@ export function BarRow({ label, value }: { label: string; value: number | null |
   const v = value ?? 0;
   return (
     <div style={{ display: 'grid', gridTemplateColumns: '66px 1fr 38px', alignItems: 'center', gap: 8, padding: '3px 0' }}>
-      <span style={{ fontFamily: "'DM Mono', monospace", fontSize: 10, color: 'var(--tSec)', textTransform: 'capitalize' }}>{label}</span>
+      <span style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: 'var(--tSec)', textTransform: 'capitalize', fontWeight: 200 }}>{label}</span>
       <Bar value={v} height={5} />
-      <span style={{ fontFamily: "'DM Mono', monospace", fontSize: 10, color: v >= 0.85 ? 'var(--green)' : v >= 0.65 ? 'var(--amber)' : 'var(--red)', textAlign: 'right' }}>
+      <span style={{
+        fontFamily: "var(--font-mono)", fontSize: 10, fontWeight: 700,
+        color: v >= 0.85 ? 'var(--green)' : v >= 0.65 ? 'var(--amber)' : 'var(--red)',
+        textAlign: 'right', fontFeatureSettings: "'tnum' 1",
+      }}>
         {(v * 100).toFixed(0)}%
       </span>
     </div>

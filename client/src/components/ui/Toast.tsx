@@ -40,8 +40,8 @@ export default function ToastContainer() {
           }}>
             <TierBadge tier={t.tier} size="md" />
             <div>
-              <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--tMax)' }}>{t.cardName}</div>
-              <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 14, fontWeight: 700, color: 'var(--greenB)' }}>{t.profit}</div>
+              <div style={{ fontFamily: 'var(--font-display)', fontSize: 13, fontWeight: 700, color: 'var(--tMax)' }}>{t.cardName}</div>
+              <div style={{ fontFamily: "var(--font-mono)", fontSize: 14, fontWeight: 800, color: 'var(--greenB)', fontFeatureSettings: "'tnum' 1" }}>{t.profit}</div>
             </div>
           </div>
         </div>

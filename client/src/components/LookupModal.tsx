@@ -77,7 +77,7 @@ export default function LookupModal({ onClose }: { onClose: () => void }) {
               background: 'var(--glass)', border: '1px solid var(--brd)',
               borderRadius: 8, padding: '0 14px',
               color: 'var(--tMax)', fontSize: 13,
-              fontFamily: "'DM Mono', monospace",
+              fontFamily: "var(--font-mono)",
               outline: 'none',
             }}
           />
@@ -97,7 +97,7 @@ export default function LookupModal({ onClose }: { onClose: () => void }) {
 
         {/* Loading */}
         {loading && (
-          <div style={{ textAlign: 'center', padding: '20px 0', color: 'var(--amber)', fontFamily: "'DM Mono', monospace", fontSize: 12, animation: 'pulse 1.5s infinite' }}>
+          <div style={{ textAlign: 'center', padding: '20px 0', color: 'var(--amber)', fontFamily: "var(--font-mono)", fontSize: 12, animation: 'pulse 1.5s infinite' }}>
             {loadingStage}
           </div>
         )}
@@ -142,14 +142,14 @@ export default function LookupModal({ onClose }: { onClose: () => void }) {
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10 }}>
                     <TierBadge tier={result.profit.tier as Tier} size="md" />
                     <span style={{
-                      fontFamily: "'DM Mono', monospace", fontSize: 34, fontWeight: 800,
+                      fontFamily: "var(--font-mono)", fontSize: 34, fontWeight: 800,
                       color: 'var(--greenB)',
                       textShadow: '0 0 16px rgba(110,231,183,0.5)',
                     }}>
                       +£{result.profit.profitGBP.toFixed(2)}
                     </span>
                   </div>
-                  <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 12, color: 'var(--green)', marginTop: 4 }}>
+                  <div style={{ fontFamily: "var(--font-mono)", fontSize: 12, color: 'var(--green)', marginTop: 4 }}>
                     +{result.profit.profitPercent.toFixed(1)}%
                   </div>
                 </div>
@@ -158,7 +158,7 @@ export default function LookupModal({ onClose }: { onClose: () => void }) {
 
             {/* Confidence */}
             {result.match && (
-              <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 12, color: 'var(--tSec)' }}>
+              <div style={{ fontFamily: "var(--font-mono)", fontSize: 12, color: 'var(--tSec)' }}>
                 Confidence: <span style={{ color: result.match.confidence >= 0.85 ? 'var(--green)' : 'var(--amber)', fontWeight: 600 }}>
                   {(result.match.confidence * 100).toFixed(0)}%
                 </span>
@@ -220,7 +220,7 @@ export default function LookupModal({ onClose }: { onClose: () => void }) {
               style={{
                 background: 'none', border: 'none',
                 color: 'var(--tMut)', fontSize: 10,
-                fontFamily: "'DM Mono', monospace",
+                fontFamily: "var(--font-mono)",
                 cursor: 'pointer', textAlign: 'left',
               }}
             >
@@ -232,7 +232,7 @@ export default function LookupModal({ onClose }: { onClose: () => void }) {
                 padding: 12, fontSize: 10,
                 color: 'var(--tSec)', overflow: 'auto',
                 maxHeight: 300,
-                fontFamily: "'DM Mono', monospace",
+                fontFamily: "var(--font-mono)",
               }}>
                 {JSON.stringify({ signals: result.signals, match: result.match, listing: result.listing }, null, 2)}
               </pre>

@@ -15,9 +15,23 @@ html {
 body {
   background: var(--bg0);
   color: var(--tPri);
-  font-family: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+  font-family: var(--font-display);
   line-height: 1.5;
   min-height: 100vh;
+  position: relative;
+}
+
+/* Subtle grid pattern overlay */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background-image:
+    linear-gradient(rgba(255,255,255,0.015) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255,255,255,0.015) 1px, transparent 1px);
+  background-size: 40px 40px;
+  pointer-events: none;
+  z-index: 0;
 }
 
 a {
@@ -49,11 +63,11 @@ input, select {
 ::-webkit-scrollbar-thumb:hover { background: var(--tMut); }
 
 /* Monospace for all prices/numbers */
-.mono { font-family: 'DM Mono', monospace; }
+.mono { font-family: var(--font-mono); font-feature-settings: 'tnum' 1; }
 
 /* Section headers */
 .section-header {
-  font-family: 'DM Mono', monospace;
+  font-family: var(--font-mono);
   font-size: 9px;
   text-transform: uppercase;
   letter-spacing: 2.5px;

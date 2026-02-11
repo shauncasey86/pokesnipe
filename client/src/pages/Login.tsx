@@ -79,7 +79,7 @@ export default function Login() {
             Poke<span style={{ color: 'var(--red)' }}>Snipe</span>
           </h1>
           <span style={{
-            fontFamily: "'DM Mono', monospace",
+            fontFamily: "var(--font-mono)",
             fontSize: 10,
             color: 'var(--tMut)',
             textTransform: 'uppercase',
@@ -139,7 +139,7 @@ export default function Login() {
 
         {/* Footer */}
         <span style={{
-          fontFamily: "'DM Mono', monospace",
+          fontFamily: "var(--font-mono)",
           fontSize: 9,
           color: 'var(--tMut)',
           textTransform: 'uppercase',
