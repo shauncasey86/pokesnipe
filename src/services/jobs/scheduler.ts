@@ -72,6 +72,7 @@ export function registerJob(name: string, schedule: string, fn: () => Promise<vo
  */
 export function getJobStatuses(): Record<string, {
   isRunning: boolean;
+  isPaused: boolean;
   lastRun: Date | null;
   lastError: string | null;
   runCount: number;
