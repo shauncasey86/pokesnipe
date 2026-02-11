@@ -1,3 +1,5 @@
+@import './variables.css';
+
 *, *::before, *::after {
   box-sizing: border-box;
   margin: 0;
@@ -41,24 +43,19 @@ input, select {
   font-family: inherit;
 }
 
-::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
-}
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--brd); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--tMut); }
 
-::-webkit-scrollbar-track {
-  background: transparent;
-}
+/* Monospace for all prices/numbers */
+.mono { font-family: 'DM Mono', monospace; }
 
-::-webkit-scrollbar-thumb {
-  background: var(--tMut);
-  border-radius: 3px;
-}
-
-::-webkit-scrollbar-thumb:hover {
-  background: var(--tSec);
-}
-
-.mono {
+/* Section headers */
+.section-header {
   font-family: 'DM Mono', monospace;
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 2.5px;
+  color: var(--tMut);
 }

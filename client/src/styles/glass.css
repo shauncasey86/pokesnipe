@@ -17,3 +17,15 @@
   border: 1px solid var(--brd);
   border-radius: var(--radius);
 }
+
+/* GradBorder — 1px padding trick */
+.grad-border {
+  background: var(--grad-accent);
+  padding: 1px;
+  border-radius: 10px;
+}
+
+.grad-border > * {
+  background: var(--bg1);
+  border-radius: 9px;
+}
