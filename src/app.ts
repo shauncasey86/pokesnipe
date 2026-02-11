@@ -23,6 +23,9 @@ const logger = pino({ name: 'http' });
 
 const app = express();
 
+// Trust Railway's reverse proxy so secure cookies work behind TLS termination
+app.set('trust proxy', 1);
+
 // Security headers
 app.use(helmet({
   contentSecurityPolicy: false,
