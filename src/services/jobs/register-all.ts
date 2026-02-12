@@ -79,7 +79,7 @@ async function syncExpansionCards(expansionId: string): Promise<{ cards: number;
  *   -----------------|------------------|--------------------------------------
  *   ebay-scan        | Every 5 min      | Search eBay + create deals
  *   deal-cleanup     | Every hour       | Expire old deals + prune stale
- *   exchange-rate    | Every hour (:30) | Refresh GBP/USD exchange rate
+ *   exchange-rate    | Every 4h (:30)   | Refresh GBP/USD exchange rate
  *   hot-refresh      | Daily at 03:00   | Re-sync 10 most recent expansions
  *   expansion-check  | Daily at 04:00   | Detect and sync new expansions
  *   full-sync        | Weekly Sun 03:00 | Full card database re-sync
@@ -136,8 +136,8 @@ export function registerAllJobs(): void {
     }
   });
 
-  // -- Exchange rate refresh -- every hour at :30
-  registerJob('exchange-rate', '30 * * * *', async () => {
+  // -- Exchange rate refresh -- every 4 hours at :30 (free plan: 1500 credits/month)
+  registerJob('exchange-rate', '30 */4 * * *', async () => {
     await refreshRate();
   });
 
