@@ -387,7 +387,14 @@ export default function App() {
             </div>
 
             {/* RIGHT: Deal Detail */}
-            {selectedDeal && <DetailErrorBoundary key={selectedDeal.deal_id} onReset={() => setSelId(null)}><DealDetailPanel dealSummary={selectedDeal} /></DetailErrorBoundary>}
+            {selectedDeal && <DetailErrorBoundary key={selectedDeal.deal_id} onReset={() => setSelId(null)}><DealDetailPanel dealSummary={selectedDeal} onReviewDeal={(dealId, isCorrect) => {
+                if (isCorrect) {
+                  setDeals(prev => prev.map(d => d.deal_id === dealId ? { ...d, is_correct_match: true } : d));
+                } else {
+                  setDeals(prev => prev.filter(d => d.deal_id !== dealId));
+                  setSelId(null);
+                }
+              }} /></DetailErrorBoundary>}
           </main>
         )}
       </div>
@@ -433,7 +440,7 @@ class DetailErrorBoundary extends Component<{ children: ReactNode; onReset: () =
 }
 
 // ═══════════ DEAL DETAIL PANEL ═══════════
-function DealDetailPanel({ dealSummary }: { dealSummary: Deal }) {
+function DealDetailPanel({ dealSummary, onReviewDeal }: { dealSummary: Deal; onReviewDeal: (dealId: string, isCorrect: boolean) => void }) {
   const [detail, setDetail] = useState<DealDetailType | null>(null);
   const [loading, setLoading] = useState(true);
   const [detailScr, setDetailScr] = useState(false);
@@ -462,6 +469,7 @@ function DealDetailPanel({ dealSummary }: { dealSummary: Deal }) {
       if (detail) {
         setDetail({ ...detail, is_correct_match: isCorrect, reviewed_at: new Date().toISOString(), incorrect_reason: reason || null });
       }
+      onReviewDeal(dealSummary.deal_id, isCorrect);
       setShowReasonPicker(false);
     } catch { /* ignore */ }
     setReviewLoading(false);

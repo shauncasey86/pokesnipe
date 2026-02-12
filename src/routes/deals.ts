@@ -167,14 +167,18 @@ router.post('/:id/review', validate(reviewSchema), async (req: Request, res: Res
   try {
     const { isCorrectMatch, reason } = req.body;
 
+    // Correct matches stay active so they remain visible in the feed.
+    // Incorrect matches move to 'reviewed' so the active filter hides them.
+    const newStatus = isCorrectMatch ? 'active' : 'reviewed';
+
     const { rowCount } = await pool.query(
       `UPDATE deals SET
-        status = 'reviewed',
+        status = $1,
         reviewed_at = NOW(),
-        is_correct_match = $1,
-        incorrect_reason = $2
-      WHERE deal_id = $3 AND status IN ('active', 'expired')`,
-      [isCorrectMatch, isCorrectMatch ? null : (reason || null), req.params.id],
+        is_correct_match = $2,
+        incorrect_reason = $3
+      WHERE deal_id = $4 AND status IN ('active', 'expired')`,
+      [newStatus, isCorrectMatch, isCorrectMatch ? null : (reason || null), req.params.id],
     );
 
     if (rowCount === 0) {
