@@ -3,10 +3,13 @@ import { Ring, SignalGrid } from '../shared';
 import { CONF_WEIGHTS, LIQ_WEIGHTS_V, LIQ_WEIGHTS_NV } from '../../data/mock';
 import type { Deal, DealDetail } from '../../types/deals';
 
+type ConfSignals = NonNullable<NonNullable<DealDetail['match_signals']>['confidence']>;
+type LiqSignals = NonNullable<NonNullable<DealDetail['match_signals']>['liquidity']>;
+
 interface SignalCardsProps {
   d: Deal;
-  confSignals: DealDetail['match_signals'] extends { confidence?: infer C } ? C | null : null;
-  liqSignals: DealDetail['match_signals'] extends { liquidity?: infer L } ? L | null : null;
+  confSignals: ConfSignals | null;
+  liqSignals: LiqSignals | null;
 }
 
 export function SignalCards({ d, confSignals, liqSignals }: SignalCardsProps) {
