@@ -10,7 +10,7 @@ import SystemView from './components/SystemView';
 import AuditView from './components/AuditView';
 import LookupView from './components/LookupView';
 import SettingsView from './components/SettingsView';
-import { getDeals, getDealDetail, reviewDeal, getStatus, toggleScanner, checkAuth, login, logout } from './api/deals';
+import { getDeals, getDealDetail, reviewDeal, getStatus, toggleScanner, checkAuth, login, logout, deleteAllDeals } from './api/deals';
 import type { Deal, DealDetail as DealDetailType, SystemStatus } from './types/deals';
 
 type ViewName = 'opportunities' | 'system' | 'audit' | 'lookup' | 'settings';
@@ -74,6 +74,20 @@ export default function App() {
       setStatus(s);
     } catch { /* ignore */ }
     setScannerToggling(false);
+  };
+
+  const [deleteConfirm, setDeleteConfirm] = useState(false);
+  const [deleteLoading, setDeleteLoading] = useState(false);
+  const handleDeleteAll = async () => {
+    if (!deleteConfirm) { setDeleteConfirm(true); return; }
+    setDeleteLoading(true);
+    try {
+      await deleteAllDeals();
+      setDeals([]);
+      setSelId(null);
+      setDeleteConfirm(false);
+    } catch { /* ignore */ }
+    setDeleteLoading(false);
   };
 
   // Fetch deals
@@ -284,6 +298,14 @@ export default function App() {
                     <I.Search c="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted" />
                     <input type="text" value={searchQ} onChange={e => setSearchQ(e.target.value)} placeholder="Search cards, sets..." className="bg-surface border border-border rounded-lg pl-9 pr-4 py-1.5 text-xs font-mono text-white focus:outline-none focus:border-brand placeholder:text-muted/50 w-56" />
                   </div>
+                  <button
+                    onClick={handleDeleteAll}
+                    onBlur={() => setDeleteConfirm(false)}
+                    disabled={deleteLoading || deals.length === 0}
+                    className={'px-3 py-1.5 text-[10px] font-bold rounded-lg border transition-all disabled:opacity-30 ' + (deleteConfirm ? 'bg-risk/20 border-risk/40 text-risk' : 'bg-surface border-border text-muted hover:text-risk hover:border-risk/30')}
+                  >
+                    {deleteLoading ? 'Deleting\u2026' : deleteConfirm ? 'Confirm Delete All' : 'Delete All'}
+                  </button>
                 </div>
               </div>
 

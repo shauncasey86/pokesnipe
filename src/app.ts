@@ -18,6 +18,7 @@ import statusRouter from './routes/status.js';
 import preferencesRouter from './routes/preferences.js';
 import sseRouter from './routes/sse.js';
 import notificationsRouter from './routes/notifications.js';
+import auditRouter from './routes/audit.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const logger = pino({ name: 'http' });
@@ -64,6 +65,7 @@ app.use('/api/lookup', requireAuth, lookupRouter);
 app.use('/api/status', requireAuth, statusRouter);
 app.use('/api/preferences', requireAuth, preferencesRouter);
 app.use('/api/notifications', requireAuth, notificationsRouter);
+app.use('/api/audit', requireAuth, auditRouter);
 
 // Serve frontend static files
 const clientDist = path.join(__dirname, '../client/dist');

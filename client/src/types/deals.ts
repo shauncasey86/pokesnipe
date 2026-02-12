@@ -135,6 +135,29 @@ export interface SystemStatus {
   jobs: Record<string, unknown>;
 }
 
+export interface SyncLogEntry {
+  id: number;
+  sync_type: string;
+  started_at: string;
+  completed_at: string | null;
+  status: 'running' | 'completed' | 'failed';
+  expansions_synced: number;
+  cards_upserted: number;
+  variants_upserted: number;
+  credits_used: number;
+  error_message: string | null;
+  metadata: Record<string, unknown> | null;
+  duration_seconds: number | null;
+}
+
+export interface SyncLogResponse {
+  data: SyncLogEntry[];
+  total: number;
+  page: number;
+  limit: number;
+  totalPages: number;
+}
+
 export interface Preferences {
   data: Record<string, unknown>;
   updatedAt: string | null;
