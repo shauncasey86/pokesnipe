@@ -441,6 +441,7 @@ function DealDetailPanel({ dealSummary }: { dealSummary: Deal }) {
   const [confFlipped, setConfFlipped] = useState(false);
   const [liqFlipped, setLiqFlipped] = useState(false);
   const [reviewLoading, setReviewLoading] = useState(false);
+  const [showReasonPicker, setShowReasonPicker] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -454,13 +455,14 @@ function DealDetailPanel({ dealSummary }: { dealSummary: Deal }) {
 
   const d = detail ?? dealSummary;
 
-  const handleReview = async (isCorrect: boolean) => {
+  const handleReview = async (isCorrect: boolean, reason?: string) => {
     setReviewLoading(true);
     try {
-      await reviewDeal(dealSummary.deal_id, isCorrect);
+      await reviewDeal(dealSummary.deal_id, isCorrect, reason);
       if (detail) {
-        setDetail({ ...detail, is_correct_match: isCorrect, reviewed_at: new Date().toISOString() });
+        setDetail({ ...detail, is_correct_match: isCorrect, reviewed_at: new Date().toISOString(), incorrect_reason: reason || null });
       }
+      setShowReasonPicker(false);
     } catch { /* ignore */ }
     setReviewLoading(false);
   };
@@ -641,33 +643,71 @@ function DealDetailPanel({ dealSummary }: { dealSummary: Deal }) {
         </div>
 
         {/* Match Review */}
-        <div className={'bg-obsidian border rounded-xl p-4 flex items-center justify-between ' + (rv === true ? 'border-profit/30' : rv === false ? 'border-risk/30' : 'border-border')}>
-          <div>
-            <div className="text-[10px] font-bold text-muted uppercase tracking-wider">Match Review</div>
-            {rv != null ? (
-              <div className={'text-[11px] mt-1 font-semibold ' + (rv ? 'text-profit' : 'text-risk')}>Marked as {rv ? 'correct' : 'incorrect'}</div>
-            ) : (
-              <div className="text-[11px] text-muted mt-1">Was this card match correct?</div>
+        <div className={'bg-obsidian border rounded-xl p-4 ' + (rv === true ? 'border-profit/30' : rv === false ? 'border-risk/30' : 'border-border')}>
+          <div className="flex items-center justify-between">
+            <div>
+              <div className="text-[10px] font-bold text-muted uppercase tracking-wider">Match Review</div>
+              {rv != null ? (
+                <div className={'text-[11px] mt-1 font-semibold ' + (rv ? 'text-profit' : 'text-risk')}>
+                  Marked as {rv ? 'correct' : 'incorrect'}{d.incorrect_reason ? ` — ${({ wrong_card: 'Wrong card', wrong_set: 'Wrong set', wrong_condition: 'Wrong condition', wrong_variant: 'Wrong variant', wrong_price: 'Wrong price', bad_image: 'Bad image' } as Record<string, string>)[d.incorrect_reason] || d.incorrect_reason}` : ''}
+                </div>
+              ) : showReasonPicker ? (
+                <div className="text-[11px] text-muted mt-1">What was wrong?</div>
+              ) : (
+                <div className="text-[11px] text-muted mt-1">Was this card match correct?</div>
+              )}
+            </div>
+            {!showReasonPicker && (
+              <div className="flex gap-2">
+                <button
+                  onClick={() => handleReview(true)}
+                  disabled={reviewLoading}
+                  className={'p-2 rounded-lg border transition-all ' + (rv === true ? 'bg-profit/20 border-profit/40 text-profit' : 'border-border bg-surface hover:bg-profit/10 hover:border-profit/30 hover:text-profit text-muted')}
+                  title="Correct match"
+                >
+                  {rv === true ? <I.Check s={16} c="w-4 h-4" /> : <I.Up s={16} c="w-4 h-4" />}
+                </button>
+                <button
+                  onClick={() => { if (rv == null) setShowReasonPicker(true); else handleReview(false); }}
+                  disabled={reviewLoading}
+                  className={'p-2 rounded-lg border transition-all ' + (rv === false ? 'bg-risk/20 border-risk/40 text-risk' : 'border-border bg-surface hover:bg-risk/10 hover:border-risk/30 hover:text-risk text-muted')}
+                  title="Incorrect match"
+                >
+                  {rv === false ? <I.X s={16} c="w-4 h-4" /> : <I.Down s={16} c="w-4 h-4" />}
+                </button>
+              </div>
             )}
           </div>
-          <div className="flex gap-2">
-            <button
-              onClick={() => handleReview(true)}
-              disabled={reviewLoading}
-              className={'p-2 rounded-lg border transition-all ' + (rv === true ? 'bg-profit/20 border-profit/40 text-profit' : 'border-border bg-surface hover:bg-profit/10 hover:border-profit/30 hover:text-profit text-muted')}
-              title="Correct match"
-            >
-              {rv === true ? <I.Check s={16} c="w-4 h-4" /> : <I.Up s={16} c="w-4 h-4" />}
-            </button>
-            <button
-              onClick={() => handleReview(false)}
-              disabled={reviewLoading}
-              className={'p-2 rounded-lg border transition-all ' + (rv === false ? 'bg-risk/20 border-risk/40 text-risk' : 'border-border bg-surface hover:bg-risk/10 hover:border-risk/30 hover:text-risk text-muted')}
-              title="Incorrect match"
-            >
-              {rv === false ? <I.X s={16} c="w-4 h-4" /> : <I.Down s={16} c="w-4 h-4" />}
-            </button>
-          </div>
+          {showReasonPicker && rv == null && (
+            <div className="mt-3 space-y-2">
+              <div className="grid grid-cols-2 gap-1.5">
+                {([
+                  ['wrong_card', 'Wrong Card', 'Matched a completely different card'],
+                  ['wrong_set', 'Wrong Set', 'Right card, wrong expansion'],
+                  ['wrong_variant', 'Wrong Variant', 'Right card, wrong variant (holo/reverse/etc)'],
+                  ['wrong_condition', 'Wrong Condition', 'Condition was misidentified'],
+                  ['wrong_price', 'Wrong Price', 'Market price was inaccurate'],
+                  ['bad_image', 'Bad Image', 'Image doesn\'t match listing'],
+                ] as const).map(([value, label, desc]) => (
+                  <button
+                    key={value}
+                    onClick={() => handleReview(false, value)}
+                    disabled={reviewLoading}
+                    className="text-left p-2.5 rounded-lg border border-border bg-surface hover:bg-risk/10 hover:border-risk/30 transition-all group"
+                  >
+                    <div className="text-[11px] font-semibold text-white/80 group-hover:text-risk">{label}</div>
+                    <div className="text-[9px] text-muted mt-0.5 leading-tight">{desc}</div>
+                  </button>
+                ))}
+              </div>
+              <button
+                onClick={() => setShowReasonPicker(false)}
+                className="w-full text-[10px] text-muted hover:text-white/60 py-1 transition-colors"
+              >
+                Cancel
+              </button>
+            </div>
+          )}
         </div>
       </div>
 
