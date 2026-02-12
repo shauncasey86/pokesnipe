@@ -193,6 +193,12 @@ const EBAY_CONDITION_TEXT_MAP: Record<string, Condition> = {
   'damaged': 'DM',
 };
 
+// --- Title grading patterns ---
+// Matches "PSA 10", "CGC 9.5", "BGS 8", "ACE 10" etc. in titles
+// so Phase 1 can use graded pricing before conditionDescriptors are available.
+const TITLE_GRADING_PATTERN =
+  /\b(psa|cgc|bgs|sgc|bvg|bccg|csg|ksa|gma|hga|isa|pca|gsg|pgs|mnt|tag|rcg|pcg|ace(?:\s+grading)?|cga|tcg|ark)\s+(10|9\.5|9|8\.5|8|7\.5|7|6\.5|6|5\.5|5|4\.5|4|3\.5|3|2\.5|2|1\.5|1|authentic)\b/i;
+
 // --- Title condition patterns ---
 const TITLE_CONDITION_PATTERNS: [RegExp, Condition][] = [
   [/\bnear mint\b/, 'NM'],
@@ -360,6 +366,24 @@ export function extractCondition(listing: {
   // Priority 4: Title parsing
   if (listing.title) {
     const lowerTitle = listing.title.toLowerCase();
+
+    // 4a: Detect graded cards from title (e.g. "PSA 10", "CGC 9.5")
+    const gradingMatch = TITLE_GRADING_PATTERN.exec(lowerTitle);
+    if (gradingMatch) {
+      const company = TEXT_GRADER_MAP[gradingMatch[1].toLowerCase()] ?? gradingMatch[1].toUpperCase();
+      const grade = TEXT_GRADE_MAP[gradingMatch[2].toLowerCase()] ?? gradingMatch[2];
+      return {
+        condition: 'NM',
+        source: 'title',
+        isGraded: true,
+        gradingCompany: company,
+        grade,
+        certNumber: null,
+        rawDescriptorIds,
+      };
+    }
+
+    // 4b: Detect raw condition from title
     for (const [pattern, condition] of TITLE_CONDITION_PATTERNS) {
       if (pattern.test(lowerTitle)) {
         return {
