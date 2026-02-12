@@ -5,10 +5,18 @@ interface ConditionPrice {
   market: number;
 }
 
+export interface GradedPrice {
+  low: number;
+  market: number;
+  mid?: number;
+  high?: number;
+}
+
 export interface VariantCandidate {
   id: number;
   name: string;
   prices: Record<string, Partial<Record<Condition, ConditionPrice>>>;
+  gradedPrices?: Record<string, GradedPrice> | null;
 }
 
 export interface VariantResolution {

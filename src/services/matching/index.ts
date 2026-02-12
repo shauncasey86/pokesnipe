@@ -17,6 +17,13 @@ interface ConditionPrice {
   market: number;
 }
 
+interface GradedPrice {
+  low: number;
+  market: number;
+  mid?: number;
+  high?: number;
+}
+
 export interface MatchResult {
   card: {
     scrydexCardId: string;
@@ -27,6 +34,7 @@ export interface MatchResult {
     id: number;
     name: string;
     prices: Partial<Record<Condition, ConditionPrice>>;
+    gradedPrices: Record<string, GradedPrice> | null;
   };
   confidence: ConfidenceResult['signals'] & { composite: number };
   strategy: string;
@@ -171,6 +179,7 @@ export async function matchListing(
       id: variantResult.variant.id,
       name: variantResult.variant.name,
       prices: rawPrices,
+      gradedPrices: variantResult.variant.gradedPrices || null,
     },
     confidence: {
       composite: confidence.composite,

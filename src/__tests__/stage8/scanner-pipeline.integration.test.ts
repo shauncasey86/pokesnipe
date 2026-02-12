@@ -103,6 +103,7 @@ function makeMatchResult(overrides: Partial<MatchResult> = {}): MatchResult {
       id: 42,
       name: 'holofoil',
       prices: { NM: { low: 40, market: 50 }, LP: { low: 30, market: 38 } },
+      gradedPrices: null,
     },
     confidence: {
       composite: 0.88,
@@ -323,6 +324,7 @@ describe('Scanner Pipeline Integration', () => {
         id: 42,
         name: 'holofoil',
         prices: { NM: { low: 35, market: 40 } }, // market=40 USD, GBP=31.60 < total cost
+        gradedPrices: null,
       },
     });
 
@@ -474,6 +476,7 @@ describe('Scanner Pipeline Integration', () => {
         id: 42,
         name: 'holofoil',
         prices: { NM: { low: 80, market: 100 } }, // 100 USD * 0.79 = 79 GBP >> 10+1.5+fee
+        gradedPrices: null,
       },
       confidence: {
         composite: 0.92,
@@ -520,6 +523,7 @@ describe('Scanner Pipeline Integration', () => {
           LP: { low: 30, market: 38 },
           MP: { low: 20, market: 25 },
         },
+        gradedPrices: null,
       },
     });
     const enriched = makeEnrichedItem(listing);

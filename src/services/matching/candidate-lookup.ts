@@ -8,6 +8,13 @@ interface ConditionPrice {
   market: number;
 }
 
+export interface GradedPrice {
+  low: number;
+  market: number;
+  mid?: number;
+  high?: number;
+}
+
 export interface CardCandidate {
   scrydexCardId: string;
   name: string;
@@ -21,6 +28,7 @@ export interface CardCandidate {
     id: number;
     name: string;
     prices: Record<string, Partial<Record<Condition, ConditionPrice>>>;
+    gradedPrices: Record<string, GradedPrice> | null;
   }>;
 }
 
@@ -36,6 +44,7 @@ interface CandidateRow {
   variant_id: number;
   variant_name: string;
   prices: Record<string, unknown>;
+  graded_prices: Record<string, GradedPrice> | null;
 }
 
 function groupCandidates(rows: CandidateRow[]): CardCandidate[] {
@@ -63,6 +72,7 @@ function groupCandidates(rows: CandidateRow[]): CardCandidate[] {
         id: row.variant_id,
         name: row.variant_name,
         prices: row.prices as Record<string, Partial<Record<Condition, ConditionPrice>>>,
+        gradedPrices: row.graded_prices || null,
       });
     }
   }
@@ -73,7 +83,7 @@ function groupCandidates(rows: CandidateRow[]): CardCandidate[] {
 const BASE_QUERY = `
   SELECT c.scrydex_card_id, c.name, c.number, c.number_normalized,
          c.printed_total, c.expansion_id, c.expansion_name, c.expansion_code,
-         v.id AS variant_id, v.name AS variant_name, v.prices
+         v.id AS variant_id, v.name AS variant_name, v.prices, v.graded_prices
   FROM cards c
   LEFT JOIN variants v ON v.card_id = c.scrydex_card_id
 `;
