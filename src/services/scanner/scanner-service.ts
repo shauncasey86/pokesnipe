@@ -223,8 +223,8 @@ export async function runScanCycle(): Promise<ScanResult> {
         variantPrices: match.variant.prices,
         exchangeRate,
         isGraded: signals.condition?.isGraded || false,
-        gradingCompany: signals.condition?.gradingCompany,
-        grade: signals.condition?.grade,
+        gradingCompany: signals.condition?.gradingCompany ?? undefined,
+        grade: signals.condition?.grade ?? undefined,
         gradedPrices: match.variant.gradedPrices,
       });
 
@@ -292,8 +292,8 @@ export async function runScanCycle(): Promise<ScanResult> {
       // Recalculate profit with real condition from enrichment
       const realCondition = enrichedSignals.condition?.condition || titleCondition;
       const realIsGraded = enrichedSignals.condition?.isGraded || false;
-      const realGradingCompany = enrichedSignals.condition?.gradingCompany;
-      const realGrade = enrichedSignals.condition?.grade;
+      const realGradingCompany = enrichedSignals.condition?.gradingCompany ?? undefined;
+      const realGrade = enrichedSignals.condition?.grade ?? undefined;
       const realProfit = calculateProfit({
         ebayPriceGBP,
         shippingGBP: ebayShippingGBP,
