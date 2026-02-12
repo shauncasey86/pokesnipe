@@ -1,5 +1,11 @@
+import pino from 'pino';
+
+const log = pino({ name: 'condition-mapper' });
+
+export type Condition = 'NM' | 'LP' | 'MP' | 'HP' | 'DM';
+
 export interface ConditionResult {
-  condition: 'NM' | 'LP' | 'MP' | 'HP';
+  condition: Condition;
   source: 'condition_descriptor' | 'localized_aspects' | 'title' | 'default';
   isGraded: boolean;
   gradingCompany: string | null;
@@ -64,11 +70,12 @@ const GRADE_MAP: Record<string, string> = {
 };
 
 // --- Ungraded condition (descriptor name: '40001') ---
-const UNGRADED_CONDITION_MAP: Record<string, 'NM' | 'LP' | 'MP' | 'HP'> = {
+const UNGRADED_CONDITION_MAP: Record<string, Condition> = {
   '400010': 'NM', // Near Mint or Better
   '400015': 'LP', // Lightly Played (Excellent)
   '400016': 'MP', // Moderately Played (Very Good)
   '400017': 'HP', // Heavily Played (Poor)
+  '400018': 'DM', // Damaged
 };
 
 // --- Text-based descriptor name mapping ---
@@ -77,15 +84,25 @@ const UNGRADED_CONDITION_MAP: Record<string, 'NM' | 'LP' | 'MP' | 'HP'> = {
 // so the same downstream logic works for both formats.
 const DESCRIPTOR_TEXT_NAME_MAP: Record<string, string> = {
   'card condition':        '40001',
+  'condition':             '40001',
+  'card quality':          '40001',
   'professional grader':   '27501',
+  'grader':                '27501',
+  'grading company':       '27501',
   'grade':                 '27502',
+  'psa grade':             '27502',
+  'cgc grade':             '27502',
+  'bgs grade':             '27502',
   'certification number':  '27503',
+  'cert number':           '27503',
+  'cert #':                '27503',
+  'cert no':               '27503',
 };
 
 // --- Text-based ungraded condition value mapping ---
 // When eBay returns text values like "Moderately played (Very good)" instead
 // of numeric value IDs like "400016", use this map to resolve the condition.
-const UNGRADED_TEXT_CONDITION_MAP: Record<string, 'NM' | 'LP' | 'MP' | 'HP'> = {
+const UNGRADED_TEXT_CONDITION_MAP: Record<string, Condition> = {
   'near mint or better':            'NM',
   'near mint':                      'NM',
   'mint':                           'NM',
@@ -98,6 +115,7 @@ const UNGRADED_TEXT_CONDITION_MAP: Record<string, 'NM' | 'LP' | 'MP' | 'HP'> = {
   'heavily played (poor)':          'HP',
   'heavily played':                 'HP',
   'poor':                           'HP',
+  'damaged':                        'DM',
 };
 
 // --- Text-based grade value mapping ---
@@ -141,7 +159,7 @@ const TEXT_GRADER_MAP: Record<string, string> = {
 };
 
 // --- localizedAspects text mapping ---
-const LOCALIZED_CONDITION_MAP: Record<string, 'NM' | 'LP' | 'MP' | 'HP'> = {
+const LOCALIZED_CONDITION_MAP: Record<string, Condition> = {
   'near mint': 'NM',
   'mint': 'NM',
   'near mint or better': 'NM',
@@ -155,10 +173,11 @@ const LOCALIZED_CONDITION_MAP: Record<string, 'NM' | 'LP' | 'MP' | 'HP'> = {
   'heavily played': 'HP',
   'poor': 'HP',
   'heavily played (poor)': 'HP',
+  'damaged': 'DM',
 };
 
 // --- eBay top-level condition text mapping ---
-const EBAY_CONDITION_TEXT_MAP: Record<string, 'NM' | 'LP' | 'MP' | 'HP'> = {
+const EBAY_CONDITION_TEXT_MAP: Record<string, Condition> = {
   'near mint or better': 'NM',
   'near mint': 'NM',
   'like new': 'NM',
@@ -171,10 +190,11 @@ const EBAY_CONDITION_TEXT_MAP: Record<string, 'NM' | 'LP' | 'MP' | 'HP'> = {
   'heavily played (poor)': 'HP',
   'heavily played': 'HP',
   'poor': 'HP',
+  'damaged': 'DM',
 };
 
 // --- Title condition patterns ---
-const TITLE_CONDITION_PATTERNS: [RegExp, 'NM' | 'LP' | 'MP' | 'HP'][] = [
+const TITLE_CONDITION_PATTERNS: [RegExp, Condition][] = [
   [/\bnear mint\b/, 'NM'],
   [/\bnm[\s/+\-]?m?\b/, 'NM'],
   [/\bnm\+?\b/, 'NM'],
@@ -187,6 +207,7 @@ const TITLE_CONDITION_PATTERNS: [RegExp, 'NM' | 'LP' | 'MP' | 'HP'][] = [
   [/\bheavily played\b/, 'HP'],
   [/\bhp\b/, 'HP'],
   [/\bpoor\b/, 'HP'],
+  [/\bdamaged\b/, 'DM'],
 ];
 
 function makeDefault(): ConditionResult {
@@ -202,7 +223,7 @@ function makeDefault(): ConditionResult {
 }
 
 export function extractCondition(listing: {
-  conditionDescriptors?: Array<{ name: string; values: string[] }>;
+  conditionDescriptors?: Array<{ name: string; values: string[]; additionalInfo?: string[] }>;
   localizedAspects?: Array<{ name: string; value: string }> | null;
   title?: string;
   conditionText?: string | null;
@@ -210,11 +231,16 @@ export function extractCondition(listing: {
   const descriptors = listing.conditionDescriptors ?? [];
   const rawDescriptorIds: string[] = [];
 
-  // Collect all descriptor IDs for audit trail
+  // Collect all descriptor IDs and additionalInfo for audit trail
   for (const d of descriptors) {
     rawDescriptorIds.push(d.name);
     for (const v of d.values) {
       rawDescriptorIds.push(v);
+    }
+    if (d.additionalInfo?.length) {
+      for (const info of d.additionalInfo) {
+        rawDescriptorIds.push(`info:${info}`);
+      }
     }
   }
 
@@ -224,7 +250,8 @@ export function extractCondition(listing: {
     let gradingCompany: string | null = null;
     let grade: string | null = null;
     let certNumber: string | null = null;
-    let detectedCondition: 'NM' | 'LP' | 'MP' | 'HP' | null = null;
+    let detectedCondition: Condition | null = null;
+    const knownDescriptorNames = new Set(['27501', '27502', '27503', '40001']);
 
     for (const descriptor of descriptors) {
       const value = descriptor.values[0];
@@ -243,22 +270,27 @@ export function extractCondition(listing: {
       }
 
       // Grade (descriptor name: '27502')
-      if (resolvedName === '27502') {
+      else if (resolvedName === '27502') {
         grade = GRADE_MAP[value] ?? TEXT_GRADE_MAP[valueLower] ?? value;
       }
 
       // Cert number (descriptor name: '27503') — free text
-      if (resolvedName === '27503') {
+      else if (resolvedName === '27503') {
         certNumber = value;
       }
 
       // Ungraded condition (descriptor name: '40001')
-      if (resolvedName === '40001') {
+      else if (resolvedName === '40001') {
         // Try numeric ID first, then text-based matching
         const mapped = UNGRADED_CONDITION_MAP[value] ?? UNGRADED_TEXT_CONDITION_MAP[valueLower];
         if (mapped) {
           detectedCondition = mapped;
         }
+      }
+
+      // Fix #5: Warn on unmapped descriptor names
+      else if (!knownDescriptorNames.has(resolvedName)) {
+        log.warn({ descriptorName: descriptor.name, resolvedName, value }, 'Unmapped condition descriptor — skipped');
       }
     }
 

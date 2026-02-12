@@ -56,7 +56,7 @@ export { extractCardNumber } from './number-extractor.js';
 export type { CardNumber } from './number-extractor.js';
 export { detectVariant } from './variant-detector.js';
 export { extractCondition } from './condition-mapper.js';
-export type { ConditionResult } from './condition-mapper.js';
+export type { Condition, ConditionResult } from './condition-mapper.js';
 export { extractStructuredData } from './structured-extractor.js';
 export type { StructuredSignals } from './structured-extractor.js';
 export { mergeSignals } from './signal-merger.js';

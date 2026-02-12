@@ -35,6 +35,22 @@ describe('extractCondition', () => {
       ).toBe('HP');
     });
 
+    it('maps DM from descriptor 40001/400018', () => {
+      expect(
+        extractCondition({
+          conditionDescriptors: [{ name: '40001', values: ['400018'] }],
+        }).condition,
+      ).toBe('DM');
+    });
+
+    it('maps DM from text value "Damaged"', () => {
+      expect(
+        extractCondition({
+          conditionDescriptors: [{ name: '40001', values: ['Damaged'] }],
+        }).condition,
+      ).toBe('DM');
+    });
+
     it('returns condition_descriptor as source', () => {
       const result = extractCondition({
         conditionDescriptors: [{ name: '40001', values: ['400010'] }],
@@ -169,6 +185,14 @@ describe('extractCondition', () => {
       });
       expect(result.condition).toBe('NM');
     });
+
+    it('maps Damaged to DM', () => {
+      const result = extractCondition({
+        conditionDescriptors: [],
+        localizedAspects: [{ name: 'Card Condition', value: 'Damaged' }],
+      });
+      expect(result.condition).toBe('DM');
+    });
   });
 
   describe('title fallback', () => {
@@ -187,6 +211,15 @@ describe('extractCondition', () => {
         title: 'charizard lp condition',
       });
       expect(result.condition).toBe('LP');
+      expect(result.source).toBe('title');
+    });
+
+    it('extracts DM from title', () => {
+      const result = extractCondition({
+        conditionDescriptors: [],
+        title: 'damaged charizard card',
+      });
+      expect(result.condition).toBe('DM');
       expect(result.source).toBe('title');
     });
 
@@ -220,6 +253,59 @@ describe('extractCondition', () => {
       const result = extractCondition({});
       expect(result.condition).toBe('LP');
       expect(result.source).toBe('default');
+    });
+  });
+
+  describe('additionalInfo capture', () => {
+    it('captures additionalInfo in rawDescriptorIds', () => {
+      const result = extractCondition({
+        conditionDescriptors: [
+          { name: '40001', values: ['400010'], additionalInfo: ['minor edge wear'] },
+        ],
+      });
+      expect(result.rawDescriptorIds).toContain('info:minor edge wear');
+    });
+  });
+
+  describe('expanded text descriptor name mapping', () => {
+    it('maps "Condition" text name to 40001', () => {
+      const result = extractCondition({
+        conditionDescriptors: [{ name: 'Condition', values: ['Near Mint or Better'] }],
+      });
+      expect(result.condition).toBe('NM');
+      expect(result.source).toBe('condition_descriptor');
+    });
+
+    it('maps "Grader" text name to 27501', () => {
+      const result = extractCondition({
+        conditionDescriptors: [
+          { name: 'Grader', values: ['PSA'] },
+          { name: '27502', values: ['275020'] },
+        ],
+      });
+      expect(result.isGraded).toBe(true);
+      expect(result.gradingCompany).toBe('PSA');
+    });
+
+    it('maps "Cert Number" text name to 27503', () => {
+      const result = extractCondition({
+        conditionDescriptors: [
+          { name: 'Professional Grader', values: ['PSA'] },
+          { name: 'Grade', values: ['10'] },
+          { name: 'Cert Number', values: ['12345678'] },
+        ],
+      });
+      expect(result.certNumber).toBe('12345678');
+    });
+  });
+
+  describe('eBay conditionText fallback', () => {
+    it('maps "Damaged" conditionText to DM', () => {
+      const result = extractCondition({
+        conditionDescriptors: [],
+        conditionText: 'Damaged',
+      });
+      expect(result.condition).toBe('DM');
     });
   });
 });

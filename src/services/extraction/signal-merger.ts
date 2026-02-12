@@ -11,6 +11,9 @@ export interface NormalizedListing {
   cardNumber: CardNumber | null;
   variant: string | null;
   setName: string | null;
+  rarity: string | null;
+  language: string | null;
+  year: string | null;
 
   condition: ConditionResult;
 
@@ -82,6 +85,23 @@ export function mergeSignals(
     signalSources['variant'] = 'title';
   }
 
+  // Rarity, language, year: structured only
+  let rarity: string | null = null;
+  let language: string | null = null;
+  let year: string | null = null;
+  if (structured?.rarity) {
+    rarity = structured.rarity;
+    signalSources['rarity'] = 'structured';
+  }
+  if (structured?.language) {
+    language = structured.language;
+    signalSources['language'] = 'structured';
+  }
+  if (structured?.year) {
+    year = structured.year;
+    signalSources['year'] = 'structured';
+  }
+
   // Condition source tracking
   signalSources['condition'] = condition.source;
 
@@ -93,6 +113,9 @@ export function mergeSignals(
     cardNumber,
     variant,
     setName,
+    rarity,
+    language,
+    year,
     condition,
     hasStructuredData,
     signalSources,

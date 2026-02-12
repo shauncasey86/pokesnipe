@@ -177,4 +177,56 @@ describe('mergeSignals', () => {
     );
     expect(result.signalSources['condition']).toBe('title');
   });
+
+  it('passes rarity/language/year from structured data', () => {
+    const result = mergeSignals(
+      { cardNumber: null, variant: null },
+      {
+        cardName: 'Charizard ex',
+        setName: 'Obsidian Flames',
+        cardNumber: null,
+        rarity: 'Illustration Rare',
+        language: 'Japanese',
+        gradingCompany: null,
+        grade: null,
+        year: '2023',
+      },
+      {
+        condition: 'NM',
+        source: 'condition_descriptor',
+        isGraded: false,
+        gradingCompany: null,
+        grade: null,
+        certNumber: null,
+        rawDescriptorIds: [],
+      },
+      { itemId: '222', title: 'Charizard ex', cleanedTitle: 'charizard ex' },
+    );
+    expect(result.rarity).toBe('Illustration Rare');
+    expect(result.language).toBe('Japanese');
+    expect(result.year).toBe('2023');
+    expect(result.signalSources['rarity']).toBe('structured');
+    expect(result.signalSources['language']).toBe('structured');
+    expect(result.signalSources['year']).toBe('structured');
+  });
+
+  it('rarity/language/year are null without structured data', () => {
+    const result = mergeSignals(
+      { cardNumber: null, variant: null },
+      null,
+      {
+        condition: 'LP',
+        source: 'default',
+        isGraded: false,
+        gradingCompany: null,
+        grade: null,
+        certNumber: null,
+        rawDescriptorIds: [],
+      },
+      { itemId: '333', title: 'Pikachu', cleanedTitle: 'pikachu' },
+    );
+    expect(result.rarity).toBeNull();
+    expect(result.language).toBeNull();
+    expect(result.year).toBeNull();
+  });
 });

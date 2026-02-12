@@ -387,7 +387,7 @@ function buildFilterString(): string {
 
 We **need** `getItem()` enrichment to get:
 - `localizedAspects`: Card Name, Set, Card Number, Rarity (seller-provided structured fields)
-- `conditionDescriptors`: The numeric condition descriptor IDs that tell us exact card condition (NM/LP/MP/HP) and grading details (company, grade, cert number)
+- `conditionDescriptors`: The numeric condition descriptor IDs that tell us exact card condition (NM/LP/MP/HP/DM) and grading details (company, grade, cert number). Also captures `additionalInfo` from descriptor values for audit trail.
 
 Without enrichment, we only have the title to work with — no structured condition data, no item specifics.
 
@@ -495,15 +495,54 @@ Descriptor name: `40001` (Card Condition)
 | Lightly Played (Excellent) | `400015` |
 | Moderately Played (Very Good) | `400016` |
 | Heavily Played (Poor) | `400017` |
+| Damaged | `400018` |
 
 **Mapping to Scrydex conditions:**
 
 ```typescript
-const UNGRADED_CONDITION_MAP: Record<string, ScrydexCondition> = {
+type Condition = 'NM' | 'LP' | 'MP' | 'HP' | 'DM';
+
+const UNGRADED_CONDITION_MAP: Record<string, Condition> = {
   '400010': 'NM',   // Near Mint or Better
   '400015': 'LP',   // Lightly Played (Excellent)
   '400016': 'MP',   // Moderately Played (Very Good)
   '400017': 'HP',   // Heavily Played (Poor)
+  '400018': 'DM',   // Damaged
+};
+```
+
+**Text-based descriptor name mapping:**
+
+The eBay Browse API sometimes returns text names instead of numeric IDs. We map both formats:
+
+```typescript
+const DESCRIPTOR_TEXT_NAME_MAP: Record<string, string> = {
+  'card condition':        '40001',
+  'condition':             '40001',
+  'card quality':          '40001',
+  'professional grader':   '27501',
+  'grader':                '27501',
+  'grading company':       '27501',
+  'grade':                 '27502',
+  'psa grade':             '27502',
+  'cgc grade':             '27502',
+  'bgs grade':             '27502',
+  'certification number':  '27503',
+  'cert number':           '27503',
+  'cert #':                '27503',
+  'cert no':               '27503',
+};
+```
+
+**Text-based condition value mapping** (when eBay returns text like "Damaged" instead of ID `400018`):
+
+```typescript
+const UNGRADED_TEXT_CONDITION_MAP: Record<string, Condition> = {
+  'near mint or better': 'NM', 'near mint': 'NM', 'mint': 'NM',
+  'lightly played (excellent)': 'LP', 'lightly played': 'LP', 'excellent': 'LP',
+  'moderately played (very good)': 'MP', 'moderately played': 'MP', 'very good': 'MP',
+  'heavily played (poor)': 'HP', 'heavily played': 'HP', 'poor': 'HP',
+  'damaged': 'DM',
 };
 ```
 
@@ -574,78 +613,81 @@ Three descriptors for graded cards:
 
 ```typescript
 interface ConditionResult {
-  condition: 'NM' | 'LP' | 'MP' | 'HP';
+  condition: Condition;              // 'NM' | 'LP' | 'MP' | 'HP' | 'DM'
   source: 'condition_descriptor' | 'localized_aspects' | 'title' | 'default';
   isGraded: boolean;
   gradingCompany: string | null;     // "PSA", "CGC", "BGS", etc.
   grade: string | null;              // "10", "9.5", "9", etc.
   certNumber: string | null;         // Slab serial number
-  rawDescriptorIds: string[];        // For audit trail
+  rawDescriptorIds: string[];        // For audit trail (includes additionalInfo prefixed with "info:")
 }
 
-function extractCondition(listing: EnrichedEbayListing): ConditionResult {
-  const descriptors = listing.conditionDescriptors || [];
+function extractCondition(listing: {
+  conditionDescriptors?: Array<{ name: string; values: string[]; additionalInfo?: string[] }>;
+  localizedAspects?: Array<{ name: string; value: string }> | null;
+  title?: string;
+  conditionText?: string | null;
+}): ConditionResult {
+  const descriptors = listing.conditionDescriptors ?? [];
+  const rawDescriptorIds: string[] = [];
 
-  // Check if graded (conditionId 2750 or descriptor 27501 present)
-  const graderDescriptor = descriptors.find(d => d.name === '27501');
-  const gradeDescriptor = descriptors.find(d => d.name === '27502');
-  const certDescriptor = descriptors.find(d => d.name === '27503');
-
-  if (graderDescriptor) {
-    // GRADED CARD
-    const companyId = graderDescriptor.values?.[0];
-    const gradeId = gradeDescriptor?.values?.[0];
-    return {
-      condition: 'NM',  // Graded cards are priced separately, not by raw condition
-      source: 'condition_descriptor',
-      isGraded: true,
-      gradingCompany: GRADER_MAP[companyId] || 'Unknown',
-      grade: GRADE_MAP[gradeId] || null,
-      certNumber: certDescriptor?.values?.[0] || null,
-      rawDescriptorIds: [companyId, gradeId, certDescriptor?.values?.[0]].filter(Boolean),
-    };
-  }
-
-  // Check for ungraded condition descriptor (name 40001)
-  const conditionDescriptor = descriptors.find(d => d.name === '40001');
-  if (conditionDescriptor) {
-    const conditionId = conditionDescriptor.values?.[0];
-    const mapped = UNGRADED_CONDITION_MAP[conditionId];
-    if (mapped) {
-      return {
-        condition: mapped,
-        source: 'condition_descriptor',
-        isGraded: false,
-        gradingCompany: null, grade: null, certNumber: null,
-        rawDescriptorIds: [conditionId],
-      };
+  // Collect all descriptor IDs and additionalInfo for audit trail
+  for (const d of descriptors) {
+    rawDescriptorIds.push(d.name);
+    for (const v of d.values) rawDescriptorIds.push(v);
+    if (d.additionalInfo?.length) {
+      for (const info of d.additionalInfo) rawDescriptorIds.push(`info:${info}`);
     }
   }
 
-  // Fallback: localizedAspects (from getItem enrichment)
-  const aspects = listing.localizedAspects;
-  if (aspects?.['Card Condition']) {
-    const mapped = mapAspectToCondition(aspects['Card Condition']);
-    if (mapped) {
-      return { condition: mapped, source: 'localized_aspects', isGraded: false,
-               gradingCompany: null, grade: null, certNumber: null, rawDescriptorIds: [] };
+  // Priority 1: Condition Descriptors
+  if (descriptors.length > 0) {
+    let isGraded = false, gradingCompany: string | null = null;
+    let grade: string | null = null, certNumber: string | null = null;
+    let detectedCondition: Condition | null = null;
+
+    for (const descriptor of descriptors) {
+      const value = descriptor.values[0];
+      if (!value) continue;
+      // Resolve text names to numeric IDs
+      const resolvedName = DESCRIPTOR_TEXT_NAME_MAP[descriptor.name.toLowerCase()] ?? descriptor.name;
+      const valueLower = value.toLowerCase().trim();
+
+      if (resolvedName === '27501') {
+        isGraded = true;
+        gradingCompany = GRADER_MAP[value] ?? TEXT_GRADER_MAP[valueLower] ?? value;
+      } else if (resolvedName === '27502') {
+        grade = GRADE_MAP[value] ?? TEXT_GRADE_MAP[valueLower] ?? value;
+      } else if (resolvedName === '27503') {
+        certNumber = value;
+      } else if (resolvedName === '40001') {
+        const mapped = UNGRADED_CONDITION_MAP[value] ?? UNGRADED_TEXT_CONDITION_MAP[valueLower];
+        if (mapped) detectedCondition = mapped;
+      } else {
+        // Warn on unmapped descriptor names for visibility
+        log.warn({ descriptorName: descriptor.name, resolvedName, value }, 'Unmapped condition descriptor');
+      }
+    }
+
+    if (isGraded) {
+      return { condition: 'NM', source: 'condition_descriptor', isGraded: true,
+               gradingCompany, grade, certNumber, rawDescriptorIds };
+    }
+    if (detectedCondition) {
+      return { condition: detectedCondition, source: 'condition_descriptor', isGraded: false,
+               gradingCompany: null, grade: null, certNumber: null, rawDescriptorIds };
     }
   }
 
-  // Fallback: title parsing (least reliable)
-  const titleCondition = parseConditionFromTitle(listing.title);
-  if (titleCondition) {
-    return { condition: titleCondition, source: 'title', isGraded: false,
-             gradingCompany: null, grade: null, certNumber: null, rawDescriptorIds: [] };
-  }
-
-  // Default: LP (conservative — slightly undervalues) with confidence penalty
-  return { condition: 'LP', source: 'default', isGraded: false,
-           gradingCompany: null, grade: null, certNumber: null, rawDescriptorIds: [] };
+  // Priority 2: localizedAspects
+  // Priority 3: eBay conditionText
+  // Priority 4: Title parsing (includes 'damaged' → DM pattern)
+  // Priority 5: Default LP
+  // ...same chain as before, all maps now include 'damaged' → 'DM'
 }
 ```
 
-**Priority order:** Condition descriptors (most reliable, numeric IDs from eBay) → localizedAspects (seller-filled dropdowns) → title parsing (regex, least reliable) → default LP.
+**Priority order:** Condition descriptors (most reliable, numeric IDs or text from eBay) → localizedAspects (seller-filled dropdowns) → eBay conditionText → title parsing (regex, least reliable) → default LP. All maps include DM (Damaged) condition.
 
 ### 3.5 EbayListing Interface
 
@@ -853,19 +895,22 @@ function calculateArbitrage(
   match: MatchResult,
   exchangeRate: number
 ): ArbitrageResult {
-  const condition = listing.condition;   // NM, LP, MP, HP
+  const condition = listing.condition;   // NM, LP, MP, HP, DM
   const variant = match.variant;
 
-  // Get REAL price for this specific condition
-  const conditionPrices = variant.prices.raw[condition];
-  if (!conditionPrices || !conditionPrices.market) {
-    // Fall back to next-lower condition if exact condition not priced
-    const fallbackCondition = findNextPricedCondition(variant, condition);
-    if (!fallbackCondition) return null; // No price data — cannot evaluate
-  }
+  // For graded cards, try graded price first (e.g., PSA_10)
+  // If no graded price, fall back to raw condition pricing
 
-  const marketPriceUSD = conditionPrices.market;
+  // Get REAL price for this specific condition
+  // Fallback chain: NM → LP → MP → HP → DM
+  const marketPriceUSD = resolveMarketPrice(condition, variant.prices);
+  if (!marketPriceUSD) return null; // No price data — cannot evaluate
+
   const marketPriceGBP = marketPriceUSD * exchangeRate;
+
+  // Conservative estimate using low price
+  const lowPriceUSD = variant.prices[condition]?.low ?? null;
+  const lowPriceGBP = lowPriceUSD ? lowPriceUSD * exchangeRate : null;
 
   // Total acquisition cost
   const ebayPriceGBP = listing.price + (listing.shippingCost || 0);
@@ -894,17 +939,20 @@ function calculateArbitrage(
     trends: {
       '1d': trends?.['1d'] || null,
       '7d': trends?.['7d'] || null,
+      '14d': trends?.['14d'] || null,
       '30d': trends?.['30d'] || null,
       '90d': trends?.['90d'] || null,
+      '180d': trends?.['180d'] || null,
     },
     // Graded pricing (if available)
     gradedComps: listing.isGraded ? variant.prices.graded : null,
     // All condition comps (for display in detail panel)
     allConditionComps: {
-      NM: variant.prices.raw['NM'] || null,
-      LP: variant.prices.raw['LP'] || null,
-      MP: variant.prices.raw['MP'] || null,
-      HP: variant.prices.raw['HP'] || null,
+      NM: variant.prices['NM'] || null,
+      LP: variant.prices['LP'] || null,
+      MP: variant.prices['MP'] || null,
+      HP: variant.prices['HP'] || null,
+      DM: variant.prices['DM'] || null,
     },
     baseTier: classifyTier(profitPercent),
     tier: null,  // Set after liquidity adjustment
@@ -941,8 +989,8 @@ Every liquidity signal now uses real data sources:
 
 | Signal | Old (Fabricated) | New (Real) |
 |--------|-----------------|------------|
-| **Trend** | `min(1, marketPriceUsd/100)` — just normalizes price | Scrydex trend data: real % change over 1d/7d/30d/90d |
-| **Prices** | Binary: `prices ? 0.9 : 0.3` | Condition completeness: how many of NM/LP/MP/HP are priced |
+| **Trend** | `min(1, marketPriceUsd/100)` — just normalizes price | Scrydex trend data: real % change over 1d/7d/14d/30d/90d/180d |
+| **Prices** | Binary: `prices ? 0.9 : 0.3` | Condition completeness: how many of NM/LP/MP/HP are priced + graded price bonus |
 | **Spread** | `1 - profitPct/100` — circular | `low/market` ratio from Scrydex (tight = liquid) |
 | **Supply** | `1 - marketPriceUsd/200` — backwards | Count of matching eBay listings in scan batch |
 | **Sold** | `confidence * 1.1` — wrong metric entirely | eBay `quantitySold` + Scrydex listings endpoint sales count |
@@ -958,23 +1006,37 @@ function calculateLiquidity(
   salesCache: SalesVelocityCache | null,
 ): LiquidityAssessment {
   // Tier 1: Trend activity (free — from synced card data)
+  // Now checks 6 windows: 1d, 7d, 14d, 30d, 90d, 180d
   const trends = variant.trends?.[condition];
-  const trendWindows = ['1d', '7d', '30d', '90d']
+  const trendWindows = ['1d', '7d', '14d', '30d', '90d', '180d']
     .map(w => trends?.[w]?.percent_change)
     .filter(v => v !== null && v !== undefined && v !== 0);
-  const trendActivity = trendWindows.length / 4;
+  const trendActivity = trendWindows.length / 6;
 
-  // Tier 1: Price completeness (free)
+  // Tier 1: Price completeness (free) — includes graded price bonus
   const conditionsPriced = ['NM', 'LP', 'MP', 'HP']
-    .filter(c => variant.prices.raw[c]?.market != null).length;
-  const priceCompleteness = conditionsPriced / 4;
+    .filter(c => variant.prices[c]?.market != null).length;
+  let priceCompleteness = conditionsPriced / 4;
+  // Bonus for graded price data (signals actively traded card)
+  if (variant.gradedPrices && Object.values(variant.gradedPrices).some(p => p?.market > 0)) {
+    priceCompleteness = Math.min(priceCompleteness + 0.25, 1.0);
+  }
 
-  // Tier 1: Price spread (free)
-  const low = variant.prices.raw[condition]?.low;
-  const market = variant.prices.raw[condition]?.market;
-  const priceSpread = (low && market && market > 0)
-    ? Math.min(low / market, 1.0)
-    : 0.3;
+  // Tier 1: Price spread (free) — falls back to graded prices
+  const low = variant.prices[condition]?.low;
+  const market = variant.prices[condition]?.market;
+  let priceSpread = 0.3;
+  if (low && market && market > 0) {
+    priceSpread = Math.min(low / market, 1.0);
+  } else if (variant.gradedPrices) {
+    // Fallback: use first available graded price spread
+    for (const gp of Object.values(variant.gradedPrices)) {
+      if (gp?.low && gp?.market && gp.market > 0) {
+        priceSpread = Math.min(gp.low / gp.market, 1.0);
+        break;
+      }
+    }
+  }
 
   // Tier 2: eBay supply (free — from scan batch)
   const supplyScore = Math.min(ebaySignals.concurrentSupply / 5, 1.0);
@@ -1101,12 +1163,12 @@ We're already syncing the full Scrydex card index with pricing, trends, images, 
 
 - **Expansion browser:** Browse all ~350 English expansions with logos, card counts, release dates. Group by series (Scarlet & Violet, Sword & Shield, etc.)
 - **Card grid/list:** View all cards in an expansion as a visual grid (card images) or sortable list
-- **Card detail:** Large card image, all variants with per-condition pricing, trend charts (1d/7d/30d/90d/180d), expansion info, rarity, artist
+- **Card detail:** Large card image, all variants with per-condition pricing (NM/LP/MP/HP/DM), trend charts (1d/7d/14d/30d/90d/180d), graded trends, expansion info, rarity, artist
 - **Search:** Full-text search by card name, number, set name, or artist via pg_trgm
 - **Filtering:** By set, type (Pokemon/Trainer/Energy), rarity, price range, trending direction
 - **Sorting:** By price, price trend (biggest movers), card number, release date, name
 - **Trending cards:** Surface cards with biggest price movements (up or down) across configurable time windows
-- **Price comparison:** Show all condition prices (NM/LP/MP/HP) and graded prices (PSA 10, CGC 9.5, etc.) for each variant
+- **Price comparison:** Show all condition prices (NM/LP/MP/HP/DM) and graded prices (PSA 10, CGC 9.5, etc.) for each variant. Include conservative (low) and market values.
 
 ### 8.3 Catalog API Endpoints
 
@@ -1764,7 +1826,7 @@ npm install bottleneck   # Rate limiter (simpler than writing our own token buck
      Step 7: Update sync_log (status: 'completed', counts)
      ```
    - **Critical: Extract ALL price data per variant, not just the first price.** Each variant from Scrydex has a `prices` object with conditions (NM, LP, MP, HP). Each condition has `low` and `market`. Store the entire prices object as JSONB.
-   - **Store trend data:** Each variant has trend data per condition per time window (1d, 7d, 14d, 30d, 90d, 180d). Store as JSONB in the `trends` column.
+   - **Store trend data:** Each variant has trend data per condition per time window (1d, 7d, 14d, 30d, 90d, 180d). Store as JSONB in the `trends` column. **Includes both raw condition trends and graded trends** (keyed as `PSA_10`, `CGC_9.5`, etc.).
    - **Store graded prices:** If the variant has graded pricing (PSA 10, CGC 9.5, etc.), store in `graded_prices` JSONB column.
 
 4. **Create `src/services/sync/batch-insert.ts`** — Helper for efficient database writes.
@@ -1901,7 +1963,7 @@ npm install -D @types/react @types/react-dom
         ```
 
    e. **`GET /api/catalog/trending`** — Biggest price movers.
-      - Query params: `?period=1d|7d|14d|30d|90d` (default: `7d`), `?direction=up|down|both` (default: `both`), `?minPrice=5` (default: 5, filters bulk), `?condition=NM|LP|MP|HP` (default: `NM`), `?limit=50`
+      - Query params: `?period=1d|7d|14d|30d|90d|180d` (default: `7d`), `?direction=up|down|both` (default: `both`), `?minPrice=5` (default: 5, filters bulk), `?condition=NM|LP|MP|HP|DM` (default: `NM`), `?limit=50`
       - SQL: Query variants JSONB trends column, extract the percentage change for the requested period and condition, sort by absolute change descending.
       - Response: `{ data: [{ card, variant, currentPrice, priceChange, percentChange, period }], total: 50 }`
 
@@ -1928,7 +1990,7 @@ npm install -D @types/react @types/react-dom
 7. **Create shared components** in `client/src/components/`:
    - `Header.tsx` — Top nav with logo "PokeSnipe", nav tabs (Dashboard, Catalog), search bar. Use the glass morphism design from §12 of the frontend spec.
    - `CardGrid.tsx` — Responsive grid that renders card thumbnails. Props: cards array, columns (4/3/2 responsive). Each card shows: image, name, number, NM price.
-   - `PriceTable.tsx` — Tabular display of per-condition prices (NM/LP/MP/HP with low/market columns). Uses DM Mono font for alignment.
+   - `PriceTable.tsx` — Tabular display of per-condition prices (NM/LP/MP/HP/DM with low/market columns). Uses DM Mono font for alignment.
    - `TrendDisplay.tsx` — Shows trend arrows and percentages for each time window. Green for positive, red for negative, grey for <1%.
    - `Pagination.tsx` — Page controls (prev/next, page numbers).
    - `SearchBar.tsx` — Text input with search icon. On submit, navigates to `/catalog/search?q=...`.
@@ -2062,17 +2124,19 @@ npm install node-fetch   # Or use built-in fetch if Node 18+
 3. **Create `src/services/pricing/pricing-engine.ts`** — The core profit calculator.
    - `calculateProfit(input)` takes:
      ```typescript
+     type Condition = 'NM' | 'LP' | 'MP' | 'HP' | 'DM';
+
      interface ProfitInput {
        ebayPriceGBP: number;        // eBay listing price in GBP
        shippingGBP: number;         // Shipping cost in GBP
-       condition: 'NM' | 'LP' | 'MP' | 'HP';
-       variantPrices: {             // From Scrydex variant.prices
-         NM?: { low: number; market: number };
-         LP?: { low: number; market: number };
-         MP?: { low: number; market: number };
-         HP?: { low: number; market: number };
-       };
+       condition: Condition;
+       variantPrices: Partial<Record<Condition, { low: number; market: number }>>;
        exchangeRate: number;        // USD → GBP
+       // Graded card pricing
+       isGraded?: boolean;
+       gradingCompany?: string;
+       grade?: string;
+       gradedPrices?: Record<string, { low: number; market: number; mid?: number; high?: number }> | null;
      }
      ```
    - Returns:
@@ -2084,10 +2148,17 @@ npm install node-fetch   # Or use built-in fetch if Node 18+
        profitGBP: number;         // marketValueGBP - totalCostGBP
        profitPercent: number;     // (profitGBP / totalCostGBP) × 100
        buyerProtectionFee: number;
+       lowValueUSD: number | null;          // Conservative low price (if available)
+       lowValueGBP: number | null;          // lowValueUSD × exchangeRate
+       conservativeProfitGBP: number | null; // lowValueGBP - totalCostGBP
+       priceSource: 'graded' | 'raw';
        breakdown: { ebay, shipping, fee, totalCost, marketUSD, fxRate, marketGBP, profit };
      }
      ```
-   - **Key rule:** Use the condition-specific price from Scrydex. If the listing is LP condition, use the LP market price, not NM. If the condition price is missing, fall back to LP price (conservative).
+   - **Key rule:** Use the condition-specific price from Scrydex. If the listing is LP condition, use the LP market price, not NM.
+   - **Fallback chain:** If the exact condition price is missing, fall back through NM → LP → MP → HP → DM.
+   - **Conservative estimate:** The `low` price from Scrydex is used to calculate `conservativeProfitGBP` — useful for risk assessment when the spread is wide.
+   - **Graded cards:** When `isGraded`, try graded price first (e.g., `PSA_10`), fall back to raw condition prices if no graded price found.
 
 4. **Wire the exchange rate fetching into the boot sequence** — After DB connection and migration, fetch the initial exchange rate. Log a warning if it fails (scanner won't work until a rate exists, but the server can still serve the catalog).
 
@@ -2299,18 +2370,22 @@ Keep `src/scripts/test-ebay.ts` in the project — it's useful for diagnosing eB
 
 5. **Create `src/services/extraction/condition-mapper.ts`** — Map eBay condition descriptors to Scrydex conditions.
    - Import the full descriptor ID maps from §3.4 of this spec
+   - Supports both numeric IDs and text descriptor names via `DESCRIPTOR_TEXT_NAME_MAP`
    - `extractCondition(listing)` — the priority chain:
      ```
      Priority 1: conditionDescriptors (most reliable)
        - Check for graded: descriptor name '27501' present → graded card
-       - Check for ungraded: descriptor name '40001' → map value to NM/LP/MP/HP
+       - Check for ungraded: descriptor name '40001' → map value to NM/LP/MP/HP/DM
+       - Warn on unmapped descriptor names for visibility
      Priority 2: localizedAspects
-       - Look for aspect named 'Card Condition' → map text to NM/LP/MP/HP
-     Priority 3: Title parsing
-       - Look for 'near mint', 'nm', 'lightly played', 'lp', 'moderately played', 'mp', 'heavily played', 'hp'
-     Priority 4: Default LP (conservative)
+       - Look for aspect named 'Card Condition' → map text to NM/LP/MP/HP/DM
+     Priority 3: eBay conditionText (top-level)
+     Priority 4: Title parsing
+       - Includes 'damaged' → DM pattern
+     Priority 5: Default LP (conservative)
      ```
    - For graded cards, also extract: grading company (from `27501`), grade (from `27502`), cert number (from `27503`)
+   - Captures `additionalInfo` from eBay descriptor values in `rawDescriptorIds` (prefixed with `info:`) for audit trail
    - Export: `extractCondition(listing): ConditionResult` (interface from §3.4)
 
 6. **Create `src/services/extraction/structured-extractor.ts`** — Extract signals from `localizedAspects` (the structured fields from getItem enrichment).
@@ -2322,7 +2397,9 @@ Keep `src/scripts/test-ebay.ts` in the project — it's useful for diagnosing eB
    - Takes: title signals (number, variant, condition from title) + structured signals (from localizedAspects) + condition descriptor signals
    - **Rule: Structured data wins over title data when both exist.** If the title says "Holo" but localizedAspects says the card name, use localizedAspects for the name.
    - **Rule: Condition descriptors win over everything** for condition.
+   - **Passes through rarity, language, and year** from structured data (eBay localizedAspects) into NormalizedListing. These are important for pricing accuracy (e.g., Japanese cards have different values).
    - If signals conflict (title says NM but descriptor says LP), log a warning and use the higher-priority source.
+   - NormalizedListing now includes: `rarity: string | null`, `language: string | null`, `year: string | null`
    - Export: `mergeSignals(titleSignals, structuredSignals, conditionResult): NormalizedListing`
 
 8. **Create `src/services/extraction/index.ts`** — The main extraction pipeline that ties it all together:
@@ -2809,11 +2886,11 @@ psql $DATABASE_URL -c "SELECT card_name, ebay_price_gbp, market_value_gbp, profi
 # ✅ Verify manually:
 #   - profit_gbp = market_value_gbp - (ebay_price + shipping + fee)
 #   - tier matches profit thresholds (GRAIL >40%, HIT >25%, etc.)
-#   - condition is NM/LP/MP/HP (not null)
+#   - condition is NM/LP/MP/HP/DM (not null)
 
 # Check match signals audit trail:
 psql $DATABASE_URL -c "SELECT match_signals FROM deals ORDER BY created_at DESC LIMIT 1;" | jq '.'
-# ✅ Should contain: extraction signals, confidence breakdown, enrichment data
+# ✅ Should contain: extraction signals (including rarity, language, year, certNumber, rawDescriptorIds with additionalInfo), confidence breakdown, enrichment data, conservative profit estimate
 
 # Check no duplicate deals:
 psql $DATABASE_URL -c "SELECT ebay_item_id, COUNT(*) FROM deals GROUP BY ebay_item_id HAVING COUNT(*) > 1;"
@@ -3349,8 +3426,8 @@ The frontend spec (FRONTEND_DESIGN_SPEC_FINAL.md) is the detailed reference for 
      - **No BS Pricing:** Simple breakdown (eBay + shipping + fees = total cost, market USD → GBP, profit)
      - **Match Confidence:** Composite score + per-field bars
      - **Liquidity:** Per-signal bars + "Fetch velocity → 3cr" button
-     - **Comps by Condition:** Table of NM/LP/MP/HP prices from Scrydex
-     - **Price Trends:** 1d/7d/30d/90d trend arrows with real data
+     - **Comps by Condition:** Table of NM/LP/MP/HP/DM prices from Scrydex with low/market values
+     - **Price Trends:** 1d/7d/14d/30d/90d/180d trend arrows with real data (including graded trends)
      - **Card Data:** Rarity, types, artist, "View in Catalog →" link
      - **Footer:** "Correct" / "Wrong" review buttons
    - See §3 of frontend spec for full layout details
@@ -3410,7 +3487,7 @@ Open `https://your-app.railway.app/` in a browser and test:
 - [ ] **Live updates:** Leave the page open. After a scan cycle (5 min), new deals slide in at the top without refreshing.
 - [ ] **Deal detail:** Click a deal → right panel opens with full breakdown. Check:
   - Profit number matches eBay price + fees vs market value
-  - Condition comps show NM/LP/MP/HP with real prices (not all the same)
+  - Condition comps show NM/LP/MP/HP/DM with real prices (not all the same)
   - Trends show real data (arrows, percentages)
   - Liquidity shows per-signal bars
   - "SNAG ON EBAY" opens the correct eBay listing in a new tab

@@ -129,8 +129,11 @@ export function buildTrendsJsonb(
 ): Record<string, Record<string, { price_change: number; percent_change: number }>> {
   const result: Record<string, Record<string, { price_change: number; percent_change: number }>> = {};
   for (const p of prices) {
-    if (p.type !== 'raw') continue;
     if (!p.trends) continue;
+    // Build key: raw conditions use condition name (NM/LP/MP/HP), graded use COMPANY_GRADE
+    const key = p.type === 'graded'
+      ? `${p.company ?? 'UNKNOWN'}_${p.grade ?? '0'}`
+      : p.condition;
     const conditionTrends: Record<string, { price_change: number; percent_change: number }> = {};
     for (const [apiKey, value] of Object.entries(p.trends)) {
       const mappedKey = TREND_KEY_MAP[apiKey];
@@ -142,7 +145,7 @@ export function buildTrendsJsonb(
       }
     }
     if (Object.keys(conditionTrends).length > 0) {
-      result[p.condition] = conditionTrends;
+      result[key] = conditionTrends;
     }
   }
   return result;
