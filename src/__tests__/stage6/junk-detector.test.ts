@@ -36,6 +36,10 @@ describe('detectJunk', () => {
     it('detects fan made cards', () => {
       expect(detectJunk('fan made pikachu card')).toEqual({ isJunk: true, reason: 'fake' });
     });
+
+    it('detects fan art cards', () => {
+      expect(detectJunk('charizard fan art custom card')).toEqual({ isJunk: true, reason: 'fake' });
+    });
   });
 
   describe('non_card detection', () => {

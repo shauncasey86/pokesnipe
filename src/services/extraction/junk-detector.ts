@@ -21,6 +21,7 @@ const FAKE_PATTERNS = [
   /\bfake\b/,
   /\bunofficial\b/,
   /\bfan made\b/,
+  /\bfan art\b/,
   /\baltered art\b/,
 ];
 
