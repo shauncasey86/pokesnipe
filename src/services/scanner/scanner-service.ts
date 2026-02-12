@@ -32,10 +32,12 @@ type Condition = 'NM' | 'LP' | 'MP' | 'HP';
 /**
  * Build a condition comps snapshot for all conditions (not just the matched one).
  * Converts USD prices to GBP for the deal record.
+ * Includes graded prices when available.
  */
 function buildConditionComps(
   prices: Partial<Record<Condition, { low: number; market: number }>>,
   exchangeRate: number,
+  gradedPrices?: Record<string, { low: number; market: number; mid?: number; high?: number }> | null,
 ): Record<string, unknown> {
   const comps: Record<string, unknown> = {};
   for (const condition of ['NM', 'LP', 'MP', 'HP'] as Condition[]) {
@@ -47,6 +49,21 @@ function buildConditionComps(
         lowGBP: Math.round(price.low * exchangeRate * 100) / 100,
         marketGBP: Math.round(price.market * exchangeRate * 100) / 100,
       };
+    }
+  }
+  // Include graded prices (e.g., PSA_10, CGC_9.5)
+  if (gradedPrices) {
+    for (const [key, price] of Object.entries(gradedPrices)) {
+      if (price?.market != null) {
+        comps[key] = {
+          lowUSD: price.low,
+          marketUSD: price.market,
+          lowGBP: Math.round(price.low * exchangeRate * 100) / 100,
+          marketGBP: Math.round(price.market * exchangeRate * 100) / 100,
+          ...(price.mid != null ? { midUSD: price.mid, midGBP: Math.round(price.mid * exchangeRate * 100) / 100 } : {}),
+          ...(price.high != null ? { highUSD: price.high, highGBP: Math.round(price.high * exchangeRate * 100) / 100 } : {}),
+        };
+      }
     }
   }
   return comps;
@@ -205,6 +222,10 @@ export async function runScanCycle(): Promise<ScanResult> {
         condition: titleCondition,
         variantPrices: match.variant.prices,
         exchangeRate,
+        isGraded: signals.condition?.isGraded || false,
+        gradingCompany: signals.condition?.gradingCompany,
+        grade: signals.condition?.grade,
+        gradedPrices: match.variant.gradedPrices,
       });
 
       if (!quickProfit) {
@@ -270,12 +291,19 @@ export async function runScanCycle(): Promise<ScanResult> {
 
       // Recalculate profit with real condition from enrichment
       const realCondition = enrichedSignals.condition?.condition || titleCondition;
+      const realIsGraded = enrichedSignals.condition?.isGraded || false;
+      const realGradingCompany = enrichedSignals.condition?.gradingCompany;
+      const realGrade = enrichedSignals.condition?.grade;
       const realProfit = calculateProfit({
         ebayPriceGBP,
         shippingGBP: ebayShippingGBP,
         condition: realCondition,
         variantPrices: enrichedMatch.variant.prices,
         exchangeRate,
+        isGraded: realIsGraded,
+        gradingCompany: realGradingCompany,
+        grade: realGrade,
+        gradedPrices: enrichedMatch.variant.gradedPrices,
       });
 
       if (!realProfit) continue;
@@ -371,7 +399,7 @@ export async function runScanCycle(): Promise<ScanResult> {
             velocityFetched: velocityData?.fetched || false,
           },
         },
-        conditionComps: buildConditionComps(enrichedMatch.variant.prices, exchangeRate),
+        conditionComps: buildConditionComps(enrichedMatch.variant.prices, exchangeRate, enrichedMatch.variant.gradedPrices),
         liquidityScore: liquidity.composite,
         liquidityGrade: liquidity.grade,
       });

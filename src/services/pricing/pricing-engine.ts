@@ -7,12 +7,24 @@ interface ConditionPrice {
   market: number;
 }
 
+interface GradedPrice {
+  low: number;
+  market: number;
+  mid?: number;
+  high?: number;
+}
+
 export interface ProfitInput {
   ebayPriceGBP: number;
   shippingGBP: number;
   condition: Condition;
   variantPrices: Partial<Record<Condition, ConditionPrice>>;
   exchangeRate: number;
+  // Graded card pricing — when present and matched, takes priority over raw prices
+  isGraded?: boolean;
+  gradingCompany?: string;
+  grade?: string;
+  gradedPrices?: Record<string, GradedPrice> | null;
 }
 
 export interface ProfitResult {
@@ -22,6 +34,7 @@ export interface ProfitResult {
   marketValueGBP: number;
   profitGBP: number;
   profitPercent: number;
+  priceSource: 'graded' | 'raw';
   breakdown: {
     ebayPrice: number;
     shipping: number;
@@ -32,6 +45,22 @@ export interface ProfitResult {
     marketGBP: number;
     profit: number;
   };
+}
+
+/**
+ * Resolve the graded market price for the given company + grade.
+ * Key format in gradedPrices is "{COMPANY}_{GRADE}" (e.g., "PSA_10", "CGC_9.5").
+ */
+function resolveGradedPrice(
+  gradingCompany: string,
+  grade: string,
+  gradedPrices: Record<string, GradedPrice>,
+): number | null {
+  const key = `${gradingCompany}_${grade}`;
+  if (gradedPrices[key]?.market != null) {
+    return gradedPrices[key]!.market;
+  }
+  return null;
 }
 
 /**
@@ -59,9 +88,27 @@ function resolveMarketPrice(
 }
 
 export function calculateProfit(input: ProfitInput): ProfitResult | null {
-  const { ebayPriceGBP, shippingGBP, condition, variantPrices, exchangeRate } = input;
+  const {
+    ebayPriceGBP, shippingGBP, condition, variantPrices, exchangeRate,
+    isGraded, gradingCompany, grade, gradedPrices,
+  } = input;
 
-  const marketValueUSD = resolveMarketPrice(condition, variantPrices);
+  let marketValueUSD: number | null = null;
+  let priceSource: 'graded' | 'raw' = 'raw';
+
+  // For graded cards, try graded price first
+  if (isGraded && gradingCompany && grade && gradedPrices) {
+    marketValueUSD = resolveGradedPrice(gradingCompany, grade, gradedPrices);
+    if (marketValueUSD != null) {
+      priceSource = 'graded';
+    }
+  }
+
+  // Fall back to raw condition prices if graded price not found
+  if (marketValueUSD == null) {
+    marketValueUSD = resolveMarketPrice(condition, variantPrices);
+  }
+
   if (marketValueUSD == null) return null;
 
   const buyerProtectionFee = calculateBuyerProtection(ebayPriceGBP);
@@ -77,6 +124,7 @@ export function calculateProfit(input: ProfitInput): ProfitResult | null {
     marketValueGBP,
     profitGBP,
     profitPercent,
+    priceSource,
     breakdown: {
       ebayPrice: ebayPriceGBP,
       shipping: shippingGBP,

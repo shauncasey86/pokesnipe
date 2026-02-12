@@ -7,7 +7,7 @@ function makeVariant(name: string, nmMarket: number | null): VariantCandidate {
   if (nmMarket != null) {
     prices['raw'] = { NM: { low: nmMarket * 0.8, market: nmMarket } };
   }
-  return { id: Math.floor(Math.random() * 10000), name, prices };
+  return { id: Math.floor(Math.random() * 10000), name, prices, gradedPrices: null };
 }
 
 describe('resolveVariant', () => {
