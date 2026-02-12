@@ -2,30 +2,46 @@ import { useState, useEffect } from 'react';
 import { I } from '../icons';
 import { timeAgo } from '../data/mock';
 import { MetricCard, Progress, StatusDot } from './shared';
-import { getStatus } from '../api/deals';
+import { getStatus, toggleScanner } from '../api/deals';
 import type { SystemStatus } from '../types/deals';
 
 export default function SystemView() {
   const [status, setStatus] = useState<SystemStatus | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [toggling, setToggling] = useState(false);
+
+  const refreshStatus = async () => {
+    try {
+      const s = await getStatus();
+      setStatus(s);
+      setError(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load');
+    }
+  };
 
   useEffect(() => {
     let cancelled = false;
     async function load() {
-      try {
-        const s = await getStatus();
-        if (!cancelled) { setStatus(s); setError(null); }
-      } catch (err) {
-        if (!cancelled) setError(err instanceof Error ? err.message : 'Failed to load');
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
+      await refreshStatus();
+      if (!cancelled) setLoading(false);
     }
     load();
-    const interval = setInterval(load, 30_000);
+    const interval = setInterval(refreshStatus, 30_000);
     return () => { cancelled = true; clearInterval(interval); };
   }, []);
+
+  const handleToggleScanner = async () => {
+    if (!status || toggling) return;
+    const action = status.scanner.status === 'paused' ? 'start' : 'stop';
+    setToggling(true);
+    try {
+      await toggleScanner(action);
+      await refreshStatus();
+    } catch { /* ignore */ }
+    setToggling(false);
+  };
 
   if (loading && !status) {
     return (
@@ -83,10 +99,17 @@ export default function SystemView() {
         <div className="bg-surface border border-border rounded-xl p-5">
           <div className="flex items-center justify-between mb-4">
             <div className="flex items-center gap-2"><I.Radar s={18} c="text-brand" /><h2 className="text-sm font-bold text-white">Scanner</h2></div>
-            <div className="flex items-center gap-2 text-xs">
+            <div className="flex items-center gap-3 text-xs">
               <StatusDot ok={status.scanner.isRunning} />
               <span className={status.scanner.isRunning ? 'text-profit font-semibold' : 'text-warn font-semibold'}>{status.scanner.status === 'paused' ? 'Paused' : status.scanner.isRunning ? 'Running' : 'Idle'}</span>
               {status.scanner.lastRun && <span className="text-muted">&middot; last {timeAgo(status.scanner.lastRun)}</span>}
+              <button
+                onClick={handleToggleScanner}
+                disabled={toggling}
+                className={'px-3 py-1 rounded-lg text-[11px] font-bold border transition-all disabled:opacity-50 ' + (status.scanner.status === 'paused' ? 'bg-profit/10 border-profit/30 text-profit hover:bg-profit/20' : 'bg-warn/10 border-warn/30 text-warn hover:bg-warn/20')}
+              >
+                {toggling ? 'Toggling\u2026' : status.scanner.status === 'paused' ? 'Resume' : 'Pause'}
+              </button>
             </div>
           </div>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
