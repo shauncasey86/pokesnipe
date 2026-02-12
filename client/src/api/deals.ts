@@ -99,6 +99,12 @@ export async function logout(): Promise<void> {
   await fetch('/auth/logout', { method: 'POST' });
 }
 
+export async function testTelegram(): Promise<{ success: boolean; message?: string }> {
+  return apiFetch<{ success: boolean; message?: string }>('/api/notifications/telegram/test', {
+    method: 'POST',
+  });
+}
+
 export async function checkAuth(): Promise<boolean> {
   try {
     const res = await fetch('/auth/check');

@@ -1,51 +1,35 @@
 import { useState } from 'react';
 import { I } from '../icons';
 import { Ring, Tier } from './shared';
-
-interface LookupResultData {
-  card: string;
-  set: string;
-  num: string;
-  cond: string;
-  conf: number;
-  confT: 'high' | 'medium' | 'low';
-  tier: string;
-  eP: number;
-  ship: number;
-  bp: number;
-  tCost: number;
-  mGBP: number;
-  pGBP: number;
-  pPct: number;
-  liq: number;
-  liqG: string;
-  seller: string;
-  fb: number;
-  signals: Record<string, number>;
-}
+import { lookupEbayUrl } from '../api/deals';
+import type { LookupResult } from '../types/deals';
 
 export default function LookupView() {
   const [url, setUrl] = useState('');
   const [loading, setLoading] = useState(false);
-  const [result, setResult] = useState<LookupResultData | null>(null);
+  const [result, setResult] = useState<LookupResult | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const doLookup = () => {
+  const doLookup = async () => {
     if (!url.trim()) return;
     setLoading(true); setError(null); setResult(null);
-    setTimeout(() => {
-      if (!url.includes('ebay')) { setError('Invalid URL \u2014 must be an eBay listing (ebay.co.uk/itm/\u2026)'); setLoading(false); return; }
-      setResult({
-        card: 'Pikachu VMAX', set: 'Vivid Voltage', num: '044/185', cond: 'NM',
-        conf: 0.87, confT: 'high', tier: 'FLIP',
-        eP: 12.50, ship: 2.99, bp: 0.96, tCost: 16.45, mGBP: 22.30,
-        pGBP: 5.85, pPct: 35.6, liq: 0.72, liqG: 'medium',
-        seller: 'uk_pokemon_store', fb: 2104,
-        signals: { nameMatch: 0.90, numberMatch: 1.0, setMatch: 0.85, imageMatch: 0.82 },
-      });
+    try {
+      const data = await lookupEbayUrl(url.trim());
+      setResult(data);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Lookup failed');
+    } finally {
       setLoading(false);
-    }, 2200);
+    }
   };
+
+  // Extract display values from the API response
+  const confValue = result?.match
+    ? typeof result.match.confidence === 'number'
+      ? result.match.confidence
+      : result.match.confidence.composite
+    : null;
+  const confTier = confValue != null ? (confValue >= 0.75 ? 'high' : confValue >= 0.5 ? 'medium' : 'low') : 'low';
 
   return (
     <div className="flex-1 overflow-y-auto p-6 bg-obsidian">
@@ -82,67 +66,103 @@ export default function LookupView() {
           </div>
         )}
 
+        {/* Rejected listing */}
+        {result && result.signals.rejected && (
+          <div className="bg-warn/5 border border-warn/20 rounded-xl p-4 flex items-start gap-3">
+            <I.AlertTriangle s={16} c="text-warn shrink-0 mt-0.5" />
+            <div>
+              <p className="text-sm text-warn font-semibold">Listing rejected</p>
+              <p className="text-xs text-muted mt-1">{result.signals.rejectReason || 'Did not pass signal extraction filters'}</p>
+            </div>
+          </div>
+        )}
+
         {/* Result */}
-        {result && (
+        {result && !result.signals.rejected && result.match && result.profit && (
           <div className="space-y-4">
             <div className="bg-surface border border-border rounded-xl p-5">
               <div className="flex items-center gap-3 mb-4">
-                <Ring v={Math.round(result.conf * 100)} tier={result.confT} sz={44} />
+                <Ring v={Math.round((confValue ?? 0) * 100)} tier={confTier} sz={44} />
                 <div>
-                  <h2 className="text-lg font-bold text-white">{result.card}</h2>
-                  <p className="text-sm text-muted font-mono">{result.set} &middot; {result.num} &middot; {result.cond}</p>
+                  <h2 className="text-lg font-bold text-white">{result.match.cardName}</h2>
+                  <p className="text-sm text-muted font-mono">{result.match.cardNumber} &middot; {result.match.variantName}</p>
                 </div>
-                <div className="ml-auto"><Tier t={result.tier} /></div>
+                <div className="ml-auto"><Tier t={result.profit.tier} /></div>
               </div>
+
+              {/* Listing info */}
+              {result.listing.image && (
+                <div className="flex gap-4 mb-4">
+                  <img src={result.listing.image} alt="" className="w-20 h-28 object-cover rounded-lg border border-border" />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs text-white truncate">{result.listing.title}</p>
+                    {result.listing.condition && <p className="text-[10px] text-muted mt-1">Condition: <span className="text-white/70">{result.listing.condition}</span></p>}
+                    {result.listing.seller && <p className="text-[10px] text-muted mt-0.5">Seller: <span className="text-white/70">{result.listing.seller.username} ({result.listing.seller.feedbackScore})</span></p>}
+                  </div>
+                </div>
+              )}
 
               {/* Pricing */}
               <div className="grid grid-cols-3 gap-3 mb-4">
                 <div className="bg-obsidian rounded-lg p-3 text-center">
                   <div className="text-[9px] text-muted uppercase mb-1">Total Cost</div>
-                  <div className="text-lg font-mono font-bold text-white">&pound;{result.tCost.toFixed(2)}</div>
+                  <div className="text-lg font-mono font-bold text-white">&pound;{result.profit.totalCostGBP.toFixed(2)}</div>
                 </div>
                 <div className="bg-obsidian rounded-lg p-3 text-center">
                   <div className="text-[9px] text-muted uppercase mb-1">Market Value</div>
-                  <div className="text-lg font-mono font-bold text-white">&pound;{result.mGBP.toFixed(2)}</div>
+                  <div className="text-lg font-mono font-bold text-white">&pound;{result.profit.marketPriceGBP.toFixed(2)}</div>
                 </div>
                 <div className="bg-obsidian rounded-lg p-3 text-center">
                   <div className="text-[9px] text-muted uppercase mb-1">Net Profit</div>
-                  <div className="text-lg font-mono font-bold text-profit">+&pound;{result.pGBP.toFixed(2)}</div>
-                  <div className="text-[10px] font-mono text-profit/70">+{result.pPct.toFixed(1)}%</div>
+                  <div className={'text-lg font-mono font-bold ' + (result.profit.profitGBP >= 0 ? 'text-profit' : 'text-risk')}>{result.profit.profitGBP >= 0 ? '+' : ''}&pound;{result.profit.profitGBP.toFixed(2)}</div>
+                  <div className={'text-[10px] font-mono ' + (result.profit.profitPercent >= 0 ? 'text-profit/70' : 'text-risk/70')}>{result.profit.profitPercent >= 0 ? '+' : ''}{result.profit.profitPercent.toFixed(1)}%</div>
                 </div>
               </div>
 
               {/* Cost breakdown */}
               <div className="space-y-1.5 font-mono text-[11px] bg-obsidian rounded-lg p-3">
-                <div className="flex justify-between"><span className="text-muted">eBay Price</span><span className="text-white">&pound;{result.eP.toFixed(2)}</span></div>
-                <div className="flex justify-between"><span className="text-muted">Shipping</span><span className="text-white">{result.ship > 0 ? `\u00a3${result.ship.toFixed(2)}` : 'Free'}</span></div>
-                <div className="flex justify-between"><span className="text-muted">Buyer Protection</span><span className="text-white">&pound;{result.bp.toFixed(2)}</span></div>
+                <div className="flex justify-between"><span className="text-muted">eBay Price</span><span className="text-white">{result.listing.price ? '\u00a3' + parseFloat(result.listing.price.value).toFixed(2) : '\u2014'}</span></div>
+                <div className="flex justify-between"><span className="text-muted">Shipping</span><span className="text-white">{result.listing.shipping ? '\u00a3' + parseFloat(result.listing.shipping.value).toFixed(2) : 'Free'}</span></div>
               </div>
 
               {/* Match signals */}
-              <div className="mt-4 pt-4 border-t border-border/50">
-                <h3 className="text-[10px] font-bold text-muted uppercase tracking-wider mb-3">Match Signals</h3>
-                <div className="grid grid-cols-2 gap-2">
-                  {Object.entries(result.signals).map(([k, v]) => (
-                    <div key={k} className="flex items-center justify-between bg-obsidian rounded-lg px-3 py-2">
-                      <span className="text-[11px] text-muted capitalize">{k.replace(/([A-Z])/g, ' $1').trim()}</span>
-                      <div className="flex items-center gap-2">
-                        <div className="w-16 h-1.5 bg-border rounded-full overflow-hidden">
-                          <div className={`h-1.5 rounded-full ${v >= 0.8 ? 'bg-profit' : v >= 0.6 ? 'bg-warn' : 'bg-risk'}`} style={{ width: `${v * 100}%` }} />
+              {typeof result.match.confidence === 'object' && (
+                <div className="mt-4 pt-4 border-t border-border/50">
+                  <h3 className="text-[10px] font-bold text-muted uppercase tracking-wider mb-3">Confidence Signals</h3>
+                  <div className="grid grid-cols-2 gap-2">
+                    {Object.entries(result.match.confidence).filter(([k]) => k !== 'composite').map(([k, v]) => (
+                      <div key={k} className="flex items-center justify-between bg-obsidian rounded-lg px-3 py-2">
+                        <span className="text-[11px] text-muted capitalize">{k}</span>
+                        <div className="flex items-center gap-2">
+                          <div className="w-16 h-1.5 bg-border rounded-full overflow-hidden">
+                            <div className={`h-1.5 rounded-full ${(v as number) >= 0.8 ? 'bg-profit' : (v as number) >= 0.6 ? 'bg-warn' : 'bg-risk'}`} style={{ width: `${(v as number) * 100}%` }} />
+                          </div>
+                          <span className="text-[10px] font-mono text-white/70 w-8 text-right">{((v as number) * 100).toFixed(0)}%</span>
                         </div>
-                        <span className="text-[10px] font-mono text-white/70 w-8 text-right">{(v * 100).toFixed(0)}%</span>
                       </div>
-                    </div>
-                  ))}
+                    ))}
+                  </div>
                 </div>
+              )}
+
+              {/* Liquidity */}
+              {result.liquidity && (
                 <div className="flex items-center gap-2 mt-3 text-[10px] text-muted">
-                  <span>Seller:</span><span className="font-mono text-white/70">{result.seller} ({result.fb.toLocaleString()})</span>
-                  <span className="mx-2 text-border">&middot;</span>
                   <span>Liquidity:</span>
-                  <span className={`font-mono font-bold ${result.liqG === 'high' ? 'text-profit' : result.liqG === 'medium' ? 'text-warn' : 'text-risk'}`}>{result.liqG} ({Math.round(result.liq * 100)}%)</span>
+                  <span className={`font-mono font-bold ${result.liquidity.grade === 'high' ? 'text-profit' : result.liquidity.grade === 'medium' ? 'text-warn' : 'text-risk'}`}>{result.liquidity.grade} ({Math.round(result.liquidity.composite * 100)}%)</span>
                 </div>
-              </div>
+              )}
             </div>
+          </div>
+        )}
+
+        {/* No match found */}
+        {result && !result.signals.rejected && !result.match && (
+          <div className="bg-surface border border-border rounded-xl p-5 text-center">
+            <I.Search s={32} c="text-muted/30 mx-auto mb-3" />
+            <h3 className="text-base font-bold text-white mb-1">No match found</h3>
+            <p className="text-xs text-muted">The listing could not be matched to any card in the catalog.</p>
+            {result.listing.title && <p className="text-[11px] font-mono text-muted/70 mt-2 truncate">{result.listing.title}</p>}
           </div>
         )}
       </div>
