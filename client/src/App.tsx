@@ -10,7 +10,8 @@ import SystemView from './components/SystemView';
 import AuditView from './components/AuditView';
 import LookupView from './components/LookupView';
 import SettingsView from './components/SettingsView';
-import { getDeals, getDealDetail, reviewDeal, getStatus, toggleScanner, checkAuth, login, logout, deleteAllDeals } from './api/deals';
+import { getDeals, getDealDetail, reviewDeal, getStatus, toggleScanner, checkAuth, login, logout, deleteAllDeals, searchCards } from './api/deals';
+import type { CardSearchResult } from './api/deals';
 import type { Deal, DealDetail as DealDetailType, SystemStatus } from './types/deals';
 
 type ViewName = 'opportunities' | 'system' | 'audit' | 'lookup' | 'settings';
@@ -449,6 +450,12 @@ function DealDetailPanel({ dealSummary, onReviewDeal }: { dealSummary: Deal; onR
   const [liqFlipped, setLiqFlipped] = useState(false);
   const [reviewLoading, setReviewLoading] = useState(false);
   const [showReasonPicker, setShowReasonPicker] = useState(false);
+  const [pendingReason, setPendingReason] = useState<string | null>(null);
+  const [cardSearchQuery, setCardSearchQuery] = useState('');
+  const [cardSearchResults, setCardSearchResults] = useState<CardSearchResult[]>([]);
+  const [cardSearchLoading, setCardSearchLoading] = useState(false);
+  const [selectedCorrectCard, setSelectedCorrectCard] = useState<CardSearchResult | null>(null);
+  const cardSearchTimer = useRef<ReturnType<typeof setTimeout>>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -462,17 +469,35 @@ function DealDetailPanel({ dealSummary, onReviewDeal }: { dealSummary: Deal; onR
 
   const d = detail ?? dealSummary;
 
-  const handleReview = async (isCorrect: boolean, reason?: string) => {
+  const handleReview = async (isCorrect: boolean, reason?: string, correctCardId?: string) => {
     setReviewLoading(true);
     try {
-      await reviewDeal(dealSummary.deal_id, isCorrect, reason);
+      await reviewDeal(dealSummary.deal_id, isCorrect, reason, correctCardId);
       if (detail) {
         setDetail({ ...detail, is_correct_match: isCorrect, reviewed_at: new Date().toISOString(), incorrect_reason: reason || null });
       }
       onReviewDeal(dealSummary.deal_id, isCorrect);
       setShowReasonPicker(false);
+      setPendingReason(null);
+      setSelectedCorrectCard(null);
+      setCardSearchQuery('');
+      setCardSearchResults([]);
     } catch { /* ignore */ }
     setReviewLoading(false);
+  };
+
+  const handleCardSearch = (query: string) => {
+    setCardSearchQuery(query);
+    if (cardSearchTimer.current) clearTimeout(cardSearchTimer.current);
+    if (query.trim().length < 2) { setCardSearchResults([]); return; }
+    setCardSearchLoading(true);
+    cardSearchTimer.current = setTimeout(async () => {
+      try {
+        const res = await searchCards(query.trim(), 8);
+        setCardSearchResults(res.data);
+      } catch { setCardSearchResults([]); }
+      setCardSearchLoading(false);
+    }, 300);
   };
 
   const cardImg = detail?.card_image_url ?? null;
@@ -686,7 +711,7 @@ function DealDetailPanel({ dealSummary, onReviewDeal }: { dealSummary: Deal; onR
               </div>
             )}
           </div>
-          {showReasonPicker && rv == null && (
+          {showReasonPicker && rv == null && !pendingReason && (
             <div className="mt-3 space-y-2">
               <div className="grid grid-cols-2 gap-1.5">
                 {([
@@ -699,7 +724,13 @@ function DealDetailPanel({ dealSummary, onReviewDeal }: { dealSummary: Deal; onR
                 ] as const).map(([value, label, desc]) => (
                   <button
                     key={value}
-                    onClick={() => handleReview(false, value)}
+                    onClick={() => {
+                      if (['wrong_card', 'wrong_set', 'wrong_variant'].includes(value)) {
+                        setPendingReason(value);
+                      } else {
+                        handleReview(false, value);
+                      }
+                    }}
                     disabled={reviewLoading}
                     className="text-left p-2.5 rounded-lg border border-border bg-surface hover:bg-risk/10 hover:border-risk/30 transition-all group"
                   >
@@ -714,6 +745,63 @@ function DealDetailPanel({ dealSummary, onReviewDeal }: { dealSummary: Deal; onR
               >
                 Cancel
               </button>
+            </div>
+          )}
+          {pendingReason && rv == null && (
+            <div className="mt-3 space-y-2">
+              <div className="text-[10px] text-muted mb-1">Know the correct card? Search below, or skip to submit.</div>
+              <div className="relative">
+                <I.Search c="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted" />
+                <input
+                  type="text"
+                  value={cardSearchQuery}
+                  onChange={e => handleCardSearch(e.target.value)}
+                  placeholder="Search card name or number..."
+                  autoFocus
+                  className="w-full bg-obsidian border border-border rounded-lg pl-8 pr-3 py-2 text-xs font-mono text-white focus:outline-none focus:border-brand placeholder:text-muted/50"
+                />
+                {cardSearchLoading && <I.Loader s={14} c="absolute right-2.5 top-1/2 -translate-y-1/2 text-brand" />}
+              </div>
+              {selectedCorrectCard && (
+                <div className="flex items-center gap-2 p-2 rounded-lg border border-profit/30 bg-profit/5">
+                  <div className="flex-1 min-w-0">
+                    <div className="text-[11px] font-semibold text-profit truncate">{selectedCorrectCard.name}</div>
+                    <div className="text-[9px] text-muted font-mono">{selectedCorrectCard.number} &middot; {selectedCorrectCard.expansion_name}</div>
+                  </div>
+                  <button onClick={() => setSelectedCorrectCard(null)} className="text-muted hover:text-white shrink-0"><I.X s={14} c="w-3.5 h-3.5" /></button>
+                </div>
+              )}
+              {!selectedCorrectCard && cardSearchResults.length > 0 && (
+                <div className="max-h-36 overflow-y-auto space-y-0.5 border border-border rounded-lg">
+                  {cardSearchResults.map(card => (
+                    <button
+                      key={card.scrydex_card_id}
+                      onClick={() => { setSelectedCorrectCard(card); setCardSearchResults([]); setCardSearchQuery(''); }}
+                      className="w-full text-left px-3 py-1.5 hover:bg-surface/80 transition-colors flex items-center gap-2"
+                    >
+                      <div className="flex-1 min-w-0">
+                        <div className="text-[11px] text-white truncate">{card.name}</div>
+                        <div className="text-[9px] text-muted font-mono">{card.number} &middot; {card.expansion_name}</div>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              )}
+              <div className="flex gap-2">
+                <button
+                  onClick={() => handleReview(false, pendingReason, selectedCorrectCard?.scrydex_card_id)}
+                  disabled={reviewLoading}
+                  className="flex-1 py-2 text-[11px] font-semibold rounded-lg bg-risk/20 border border-risk/40 text-risk hover:bg-risk/30 transition-all disabled:opacity-50"
+                >
+                  {reviewLoading ? 'Submitting...' : selectedCorrectCard ? 'Submit with correction' : 'Submit without correction'}
+                </button>
+                <button
+                  onClick={() => { setPendingReason(null); setSelectedCorrectCard(null); setCardSearchQuery(''); setCardSearchResults([]); }}
+                  className="px-3 py-2 text-[10px] text-muted hover:text-white/60 border border-border rounded-lg transition-colors"
+                >
+                  Back
+                </button>
+              </div>
             </div>
           )}
         </div>

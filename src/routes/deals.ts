@@ -3,6 +3,7 @@ import { z } from 'zod';
 import pino from 'pino';
 import { pool } from '../db/pool.js';
 import { validate } from '../middleware/validation.js';
+import { recordConfusion } from '../services/matching/confusion-checker.js';
 
 const log = pino({ name: 'deals-api' });
 const router = Router();
@@ -161,11 +162,12 @@ router.get('/:id', async (req: Request, res: Response) => {
 const reviewSchema = z.object({
   isCorrectMatch: z.boolean(),
   reason: z.enum(['wrong_card', 'wrong_set', 'wrong_condition', 'wrong_variant', 'wrong_price', 'bad_image']).optional(),
+  correctCardId: z.string().optional(),
 });
 
 router.post('/:id/review', validate(reviewSchema), async (req: Request, res: Response) => {
   try {
-    const { isCorrectMatch, reason } = req.body;
+    const { isCorrectMatch, reason, correctCardId } = req.body;
 
     // Correct matches stay active so they remain visible in the feed.
     // Incorrect matches move to 'reviewed' so the active filter hides them.
@@ -176,16 +178,47 @@ router.post('/:id/review', validate(reviewSchema), async (req: Request, res: Res
         status = $1,
         reviewed_at = NOW(),
         is_correct_match = $2,
-        incorrect_reason = $3
-      WHERE deal_id = $4 AND status IN ('active', 'expired')`,
-      [newStatus, isCorrectMatch, isCorrectMatch ? null : (reason || null), req.params.id],
+        incorrect_reason = $3,
+        correct_card_id = $4
+      WHERE deal_id = $5 AND status IN ('active', 'expired')`,
+      [
+        newStatus,
+        isCorrectMatch,
+        isCorrectMatch ? null : (reason || null),
+        isCorrectMatch ? null : (correctCardId || null),
+        req.params.id,
+      ],
     );
 
     if (rowCount === 0) {
       return res.status(404).json({ error: 'Deal not found or already reviewed' });
     }
 
-    log.info({ dealId: req.params.id, isCorrectMatch, reason }, 'Deal reviewed');
+    // Record confusion pair for match-related incorrect reviews
+    if (!isCorrectMatch && reason) {
+      const { rows: dealRows } = await pool.query(
+        `SELECT card_id, ebay_title,
+                match_signals->'confidence'->'signals' as signals,
+                (SELECT c.number_normalized FROM cards c WHERE c.scrydex_card_id = deals.card_id) as card_number_norm
+         FROM deals WHERE deal_id = $1`,
+        [req.params.id],
+      );
+
+      if (dealRows.length > 0 && dealRows[0].card_id && dealRows[0].card_number_norm) {
+        const deal = dealRows[0];
+        await recordConfusion({
+          cardNumberNorm: deal.card_number_norm,
+          wrongCardId: deal.card_id,
+          correctCardId: correctCardId || null,
+          reason,
+          dealId: req.params.id,
+          ebayTitle: deal.ebay_title,
+          signals: deal.signals,
+        });
+      }
+    }
+
+    log.info({ dealId: req.params.id, isCorrectMatch, reason, correctCardId }, 'Deal reviewed');
     return res.json({ success: true });
   } catch (err) {
     log.error({ err }, 'Failed to review deal');

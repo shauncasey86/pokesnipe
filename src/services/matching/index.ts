@@ -7,6 +7,11 @@ import { resolveVariant } from './variant-resolver.js';
 import { computeConfidence } from './confidence-scorer.js';
 import type { ConfidenceResult } from './confidence-scorer.js';
 import { passesGate } from './gates.js';
+import {
+  getConfusionsForNumber,
+  CONFUSION_PENALTY,
+  CORRECTION_BOOST,
+} from './confusion-checker.js';
 
 const log = pino({ name: 'matching' });
 
@@ -84,10 +89,15 @@ export async function matchListing(
 
   if (candidates.length === 0) return null;
 
-  // Step 2: Score each candidate
+  // Step 2: Score each candidate (with confusion pair awareness)
+  const confusions = listing.cardNumber
+    ? await getConfusionsForNumber(String(listing.cardNumber.number))
+    : new Map();
+
   let bestCandidate = candidates[0]!;
   let bestNameScore = 0;
   let bestExpansionScore = 0;
+  let bestCombined = 0;
 
   for (const candidate of candidates) {
     // Name validation
@@ -109,12 +119,41 @@ export async function matchListing(
     );
 
     // Pick the candidate with the best combined score
-    const combinedScore = nameScore * 0.7 + expansionScore * 0.3;
-    const bestCombined = bestNameScore * 0.7 + bestExpansionScore * 0.3;
+    let combinedScore = nameScore * 0.7 + expansionScore * 0.3;
+
+    // Apply confusion pair penalty: if this candidate was previously marked
+    // as an incorrect match for this card number, penalise it so a different
+    // candidate can win.
+    const confusion = confusions.get(candidate.scrydexCardId);
+    if (confusion) {
+      combinedScore = Math.max(0, combinedScore - CONFUSION_PENALTY);
+      log.debug({
+        card: candidate.name,
+        cardId: candidate.scrydexCardId,
+        penalty: CONFUSION_PENALTY,
+        reason: confusion.reason,
+      }, 'Applied confusion penalty');
+    }
+
+    // Apply correction boost: if a reviewer previously indicated this
+    // candidate is the CORRECT card for this number, boost it.
+    const isCorrection = Array.from(confusions.values()).some(
+      c => c.correctCardId === candidate.scrydexCardId,
+    );
+    if (isCorrection) {
+      combinedScore = Math.min(1, combinedScore + CORRECTION_BOOST);
+      log.debug({
+        card: candidate.name,
+        cardId: candidate.scrydexCardId,
+        boost: CORRECTION_BOOST,
+      }, 'Applied correction boost');
+    }
+
     if (combinedScore > bestCombined) {
       bestCandidate = candidate;
       bestNameScore = nameScore;
       bestExpansionScore = expansionScore;
+      bestCombined = combinedScore;
     }
   }
 
