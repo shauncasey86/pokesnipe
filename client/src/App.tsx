@@ -1,4 +1,5 @@
-import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import { useState, useEffect, useMemo, useRef, useCallback, Component } from 'react';
+import type { ReactNode, ErrorInfo } from 'react';
 import { I } from './icons';
 import {
   CONF_WEIGHTS, LIQ_WEIGHTS_V, LIQ_WEIGHTS_NV,
@@ -335,7 +336,7 @@ export default function App() {
                         <div className="flex flex-col items-end shrink-0 pl-3 min-w-[86px]">
                           <span className={'text-lg font-bold font-mono leading-none ' + ((d.profit_gbp ?? 0) >= 0 ? 'text-profit' : 'text-risk')}>{(d.profit_gbp ?? 0) >= 0 ? '+' : ''}&pound;{(d.profit_gbp ?? 0).toFixed(2)}</span>
                           <span className={'text-[10px] font-mono mt-0.5 ' + ((d.profit_gbp ?? 0) >= 0 ? 'text-profit/60' : 'text-risk/60')}>{(d.profit_percent ?? 0) >= 0 ? '+' : ''}{(d.profit_percent ?? 0).toFixed(0)}% ROI</span>
-                          <div className="text-[9px] font-mono text-muted/40 mt-1">&pound;{d.total_cost_gbp.toFixed(0)} &rarr; &pound;{(d.market_price_gbp ?? 0).toFixed(0)}</div>
+                          <div className="text-[9px] font-mono text-muted/40 mt-1">&pound;{(d.total_cost_gbp ?? 0).toFixed(0)} &rarr; &pound;{(d.market_price_gbp ?? 0).toFixed(0)}</div>
                         </div>
                       </div>
                     );
@@ -346,7 +347,7 @@ export default function App() {
             </div>
 
             {/* RIGHT: Deal Detail */}
-            {selectedDeal && <DealDetailPanel key={selectedDeal.deal_id} dealSummary={selectedDeal} />}
+            {selectedDeal && <DetailErrorBoundary key={selectedDeal.deal_id} onReset={() => setSelId(null)}><DealDetailPanel dealSummary={selectedDeal} /></DetailErrorBoundary>}
           </main>
         )}
       </div>
@@ -369,6 +370,26 @@ export default function App() {
       </footer>
     </div>
   );
+}
+
+// ═══════════ ERROR BOUNDARY ═══════════
+class DetailErrorBoundary extends Component<{ children: ReactNode; onReset: () => void }, { error: string | null }> {
+  state = { error: null as string | null };
+  static getDerivedStateFromError(err: Error) { return { error: err.message }; }
+  componentDidCatch(_: Error, info: ErrorInfo) { console.error('DealDetail crash:', info); }
+  render() {
+    if (this.state.error) {
+      return (
+        <div className="hidden lg:flex w-[45%] xl:w-[40%] bg-surface flex-col items-center justify-center">
+          <I.AlertTriangle s={32} c="text-warn mx-auto mb-3" />
+          <h3 className="text-sm font-bold text-white mb-1">Failed to render deal</h3>
+          <p className="text-xs text-muted mb-3 max-w-xs text-center">{this.state.error}</p>
+          <button onClick={() => { this.setState({ error: null }); this.props.onReset(); }} className="text-xs text-brand hover:underline">Select another deal</button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
 }
 
 // ═══════════ DEAL DETAIL PANEL ═══════════
@@ -469,7 +490,7 @@ function DealDetailPanel({ dealSummary }: { dealSummary: Deal }) {
         {/* Profit hero */}
         <div className="text-center py-3">
           <span className={'text-4xl font-mono font-bold ' + ((d.profit_gbp ?? 0) >= 0 ? 'text-profit' : 'text-risk')}>{(d.profit_gbp ?? 0) >= 0 ? '+' : ''}&pound;{(d.profit_gbp ?? 0).toFixed(2)}</span>
-          <div className={'text-sm font-mono mt-1 ' + ((d.profit_gbp ?? 0) >= 0 ? 'text-profit/70' : 'text-risk/70')}>{(d.profit_percent ?? 0) >= 0 ? '+' : ''}{(d.profit_percent ?? 0).toFixed(1)}% return on &pound;{d.total_cost_gbp.toFixed(2)} cost</div>
+          <div className={'text-sm font-mono mt-1 ' + ((d.profit_gbp ?? 0) >= 0 ? 'text-profit/70' : 'text-risk/70')}>{(d.profit_percent ?? 0) >= 0 ? '+' : ''}{(d.profit_percent ?? 0).toFixed(1)}% return on &pound;{(d.total_cost_gbp ?? 0).toFixed(2)} cost</div>
         </div>
 
         {/* Collapsible pricing */}
@@ -477,7 +498,7 @@ function DealDetailPanel({ dealSummary }: { dealSummary: Deal }) {
           <div className="absolute left-0 top-0 bottom-0 w-1 bg-brand" />
           <button onClick={() => setCostExpanded(p => !p)} className="w-full flex items-center justify-between p-4 text-left hover:bg-white/[.02] transition-colors">
             <div className="flex items-center gap-6 font-mono text-sm">
-              <div><span className="text-[9px] font-sans text-muted uppercase tracking-wider block mb-0.5">Cost</span><span className="text-white font-bold">&pound;{d.total_cost_gbp.toFixed(2)}</span></div>
+              <div><span className="text-[9px] font-sans text-muted uppercase tracking-wider block mb-0.5">Cost</span><span className="text-white font-bold">&pound;{(d.total_cost_gbp ?? 0).toFixed(2)}</span></div>
               <span className="text-muted/40">&rarr;</span>
               <div><span className="text-[9px] font-sans text-muted uppercase tracking-wider block mb-0.5">Market</span><span className="text-white font-bold">&pound;{(d.market_price_gbp ?? 0).toFixed(2)}</span></div>
               <span className="text-muted/40">=</span>
@@ -487,9 +508,9 @@ function DealDetailPanel({ dealSummary }: { dealSummary: Deal }) {
           </button>
           {costExpanded && (
             <div className="px-5 pb-4 space-y-2 font-mono text-sm border-t border-border/50 pt-3">
-              <div className="flex justify-between text-white"><span className="text-muted font-sans text-xs">eBay Listing</span><span>&pound;{d.ebay_price_gbp.toFixed(2)}</span></div>
-              <div className="flex justify-between text-white"><span className="text-muted font-sans text-xs">Shipping</span><span>{d.ebay_shipping_gbp > 0 ? '\u00a3' + d.ebay_shipping_gbp.toFixed(2) : 'Free'}</span></div>
-              <div className="flex justify-between text-white"><span className="text-muted font-sans text-xs">Buyer Protection</span><span>&pound;{d.buyer_prot_fee.toFixed(2)}</span></div>
+              <div className="flex justify-between text-white"><span className="text-muted font-sans text-xs">eBay Listing</span><span>&pound;{(d.ebay_price_gbp ?? 0).toFixed(2)}</span></div>
+              <div className="flex justify-between text-white"><span className="text-muted font-sans text-xs">Shipping</span><span>{(d.ebay_shipping_gbp ?? 0) > 0 ? '\u00a3' + (d.ebay_shipping_gbp ?? 0).toFixed(2) : 'Free'}</span></div>
+              <div className="flex justify-between text-white"><span className="text-muted font-sans text-xs">Buyer Protection</span><span>&pound;{(d.buyer_prot_fee ?? 0).toFixed(2)}</span></div>
               <div className="w-full h-px bg-border/50" />
               <div className="flex justify-between text-[10px] text-muted"><span className="font-sans">FX Rate</span><span>USD/GBP {(d.exchange_rate ?? 0).toFixed(4)}</span></div>
             </div>
@@ -551,7 +572,7 @@ function DealDetailPanel({ dealSummary }: { dealSummary: Deal }) {
                   <div key={c} className={'rounded-lg p-3 text-center border ' + (ac ? 'bg-brand/10 border-brand/30' : 'bg-surface border-border')}>
                     <div className={'text-[10px] font-bold mb-1 ' + (ac ? 'text-brand' : 'text-muted')}>{c}</div>
                     {cp ? (
-                      <><div className="text-sm font-mono font-bold text-white">&pound;{cp.market.toFixed(0)}</div><div className="text-[9px] font-mono text-muted">low &pound;{cp.low.toFixed(0)}</div></>
+                      <><div className="text-sm font-mono font-bold text-white">&pound;{(cp.market ?? 0).toFixed(0)}</div><div className="text-[9px] font-mono text-muted">low &pound;{(cp.low ?? 0).toFixed(0)}</div></>
                     ) : (
                       <div className="text-[10px] text-muted/50">&mdash;</div>
                     )}
