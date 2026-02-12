@@ -1,0 +1,124 @@
+@import "tailwindcss";
+
+@theme {
+  --color-obsidian: #0B0C10;
+  --color-surface: #12141A;
+  --color-surfaceHover: #1A1D24;
+  --color-border: #23262F;
+  --color-brand: #6366F1;
+  --color-profit: #10B981;
+  --color-risk: #EF4444;
+  --color-warn: #F59E0B;
+  --color-info: #60A5FA;
+  --color-muted: #8B92A5;
+  --color-grail: #FFB020;
+
+  --font-sans: 'Inter', sans-serif;
+  --font-mono: 'JetBrains Mono', monospace;
+}
+
+body {
+  background: #0B0C10;
+  color: #E2E8F0;
+  overflow: hidden;
+  margin: 0;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #23262F;
+  border-radius: 10px;
+}
+
+.glass-panel {
+  background: rgba(18, 20, 26, 0.7);
+  backdrop-filter: blur(12px);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.image-glow {
+  box-shadow: 0 0 40px rgba(99, 102, 241, 0.15);
+}
+
+.conf-ring {
+  transform: rotate(-90deg);
+}
+
+.tier-GRAIL {
+  background: linear-gradient(135deg, #FFB020, #ff6b2b);
+  color: #0B0C10;
+}
+
+.tier-HIT {
+  background: rgba(16, 185, 129, 0.12);
+  color: #10B981;
+  border: 1px solid rgba(16, 185, 129, 0.2);
+}
+
+.tier-FLIP {
+  background: rgba(96, 165, 250, 0.12);
+  color: #60A5FA;
+  border: 1px solid rgba(96, 165, 250, 0.2);
+}
+
+.tier-SLEEP {
+  background: rgba(139, 146, 165, 0.1);
+  color: #8B92A5;
+}
+
+@keyframes pd {
+  0%, 100% { box-shadow: 0 0 4px #10B981; }
+  50% { box-shadow: 0 0 12px #10B981; }
+}
+
+.pulse-dot {
+  animation: pd 2.5s ease-in-out infinite;
+}
+
+@keyframes scan-pulse {
+  0% { opacity: 0.4; }
+  50% { opacity: 1; }
+  100% { opacity: 0.4; }
+}
+
+.scan-anim {
+  animation: scan-pulse 1.5s ease-in-out infinite;
+}
+
+.deal-row:focus-visible {
+  outline: 2px solid #6366F1;
+  outline-offset: -2px;
+  border-radius: 12px;
+}
+
+.deal-stale {
+  opacity: 0.45;
+  filter: grayscale(0.35);
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.spinner {
+  animation: spin 0.8s linear infinite;
+}
+
+.exp-logo {
+  width: 20px;
+  height: 20px;
+  object-fit: contain;
+  image-rendering: auto;
+}
