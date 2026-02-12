@@ -122,3 +122,54 @@ body {
   object-fit: contain;
   image-rendering: auto;
 }
+
+/* Card tilt hover effect */
+.card-tilt {
+  perspective: 800px;
+}
+
+.card-tilt-inner {
+  transition: transform 0.3s ease;
+}
+
+.card-tilt:hover .card-tilt-inner {
+  transform: rotateY(5deg) rotateX(2deg);
+}
+
+/* Detail panel enter animation */
+@keyframes detail-enter {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.detail-enter {
+  animation: detail-enter 200ms ease-out;
+}
+
+/* Mobile drawer slide-in */
+@keyframes drawer-slide-in {
+  from {
+    transform: translateX(100%);
+  }
+  to {
+    transform: translateX(0);
+  }
+}
+
+.drawer-enter {
+  animation: drawer-slide-in 250ms ease-out;
+}
+
+/* Line clamp utility */
+.line-clamp-2 {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
