@@ -6,6 +6,8 @@ import { getDedupStats } from '../services/scanner/deduplicator.js';
 import { getJobStatuses, pauseJob, resumeJob } from '../services/jobs/index.js';
 import { getAccuracyStats } from '../services/accuracy/tracker.js';
 import { getAccountUsage } from '../services/scrydex/client.js';
+import { getActiveWeights, SPEC_DEFAULT_WEIGHTS, runCalibration } from '../services/accuracy/calibrator.js';
+import { getWeights, loadLearnedWeights, resetWeights } from '../services/matching/confidence-scorer.js';
 
 const log = pino({ name: 'status' });
 const router = Router();
@@ -92,6 +94,9 @@ router.get('/', async (req: Request, res: Response) => {
         totalCorrect: accuracyStats.totalCorrect,
         totalIncorrect: accuracyStats.totalIncorrect,
         incorrectReasons: accuracyStats.incorrectReasons,
+        weightsCalibrated: Object.entries(getWeights()).some(
+          ([k, v]) => v !== SPEC_DEFAULT_WEIGHTS[k as keyof typeof SPEC_DEFAULT_WEIGHTS],
+        ),
       },
       scrydex: scrydexUsage ? {
         creditsConsumed: scrydexUsage.total_credits_consumed,
@@ -139,6 +144,80 @@ router.post('/scanner', async (req: Request, res: Response) => {
   }
 
   return res.status(400).json({ error: 'Invalid action. Use "start" or "stop".' });
+});
+
+/**
+ * GET /api/status/weights — Current confidence weights and calibration history.
+ */
+router.get('/weights', async (_req: Request, res: Response) => {
+  try {
+    const active = getWeights();
+    const specDefaults = SPEC_DEFAULT_WEIGHTS;
+
+    // Compute drift from spec for each signal
+    const drift: Record<string, number> = {};
+    for (const key of Object.keys(specDefaults) as (keyof typeof specDefaults)[]) {
+      drift[key] = Math.round((active[key] - specDefaults[key]) * 1000) / 1000;
+    }
+
+    // Get last calibration info
+    let lastCalibration = null;
+    try {
+      const { rows } = await pool.query(
+        `SELECT * FROM weight_overrides ORDER BY calibrated_at DESC LIMIT 1`,
+      );
+      if (rows.length > 0) {
+        lastCalibration = {
+          calibratedAt: rows[0].calibrated_at,
+          sampleSize: rows[0].sample_size,
+          accuracyBefore: parseFloat(rows[0].accuracy_before),
+          accuracyAfter: parseFloat(rows[0].accuracy_after),
+          metadata: rows[0].metadata,
+        };
+      }
+    } catch {
+      // Table may not exist yet
+    }
+
+    return res.json({
+      active,
+      specDefaults,
+      drift,
+      isCalibrated: Object.values(drift).some(d => d !== 0),
+      lastCalibration,
+    });
+  } catch (err) {
+    log.error({ err }, 'Failed to fetch weights');
+    return res.status(500).json({ error: 'Failed to fetch weights' });
+  }
+});
+
+/**
+ * POST /api/status/weights/reset — Reset weights to spec defaults.
+ */
+router.post('/weights/reset', async (_req: Request, res: Response) => {
+  resetWeights();
+  log.info('Confidence weights reset to spec defaults via API');
+  return res.json({ success: true, weights: getWeights() });
+});
+
+/**
+ * POST /api/status/weights/calibrate — Trigger a calibration run immediately.
+ */
+router.post('/weights/calibrate', async (_req: Request, res: Response) => {
+  try {
+    const result = await runCalibration();
+
+    if (result.applied) {
+      loadLearnedWeights(result.newWeights as Record<'name' | 'denominator' | 'number' | 'expansion' | 'variant' | 'normalization', number>);
+    }
+
+    log.info({ applied: result.applied, reason: result.reason }, 'Manual calibration run');
+    return res.json(result);
+  } catch (err) {
+    log.error({ err }, 'Calibration failed');
+    return res.status(500).json({ error: 'Calibration failed' });
+  }
 });
 
 export default router;
