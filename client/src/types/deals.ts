@@ -48,6 +48,17 @@ export interface Deal {
   expansion_logo: string | null;
 }
 
+export interface ConditionCompEntry {
+  lowUSD: number;
+  marketUSD: number;
+  lowGBP: number;
+  marketGBP: number;
+  midUSD?: number;
+  midGBP?: number;
+  highUSD?: number;
+  highGBP?: number;
+}
+
 export interface DealDetail extends Deal {
   card_name: string | null;
   card_image_url: string | null;
@@ -61,6 +72,7 @@ export interface DealDetail extends Deal {
   variant_name: string | null;
   variant_prices: Record<string, { low: number; market: number }> | null;
   variant_trends: Record<string, Record<string, { price_change: number; percent_change: number }>> | null;
+  condition_comps: Record<string, ConditionCompEntry> | null;
   match_signals: {
     confidence?: {
       composite: number;
