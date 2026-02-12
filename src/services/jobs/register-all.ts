@@ -1,5 +1,5 @@
 import pino from 'pino';
-import { registerJob } from './scheduler.js';
+import { registerJob, pauseJob } from './scheduler.js';
 import { pool } from '../../db/pool.js';
 
 // Lifecycle
@@ -193,4 +193,16 @@ export function registerAllJobs(): void {
   });
 
   log.info('All background jobs registered');
+
+  // Restore scanner paused state from preferences (if previously persisted)
+  pool.query('SELECT data FROM preferences WHERE id = 1')
+    .then(res => {
+      if (res.rows[0]?.data?.scannerPaused === true) {
+        pauseJob('ebay-scan');
+        log.info('Scanner restored to paused state from preferences');
+      }
+    })
+    .catch(err => {
+      log.warn({ err }, 'Could not restore scanner state from preferences');
+    });
 }

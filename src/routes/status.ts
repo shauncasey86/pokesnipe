@@ -111,21 +111,30 @@ router.get('/', async (req: Request, res: Response) => {
  * POST /api/status/scanner — Toggle the scanner on/off.
  *
  * Body: { action: 'start' | 'stop' }
+ * Persists the paused state to preferences so it survives restarts.
  */
-router.post('/scanner', (req: Request, res: Response) => {
+router.post('/scanner', async (req: Request, res: Response) => {
   const { action } = req.body;
 
   if (action === 'stop') {
     const ok = pauseJob('ebay-scan');
     if (!ok) return res.status(404).json({ error: 'Scanner job not found' });
-    log.info('Scanner paused via API');
+    await pool.query(
+      `INSERT INTO preferences (id, data, updated_at) VALUES (1, '{"scannerPaused":true}', NOW())
+       ON CONFLICT (id) DO UPDATE SET data = preferences.data || '{"scannerPaused":true}'::jsonb, updated_at = NOW()`,
+    );
+    log.info('Scanner paused via API (persisted)');
     return res.json({ status: 'paused' });
   }
 
   if (action === 'start') {
     const ok = resumeJob('ebay-scan');
     if (!ok) return res.status(404).json({ error: 'Scanner job not found' });
-    log.info('Scanner resumed via API');
+    await pool.query(
+      `INSERT INTO preferences (id, data, updated_at) VALUES (1, '{"scannerPaused":false}', NOW())
+       ON CONFLICT (id) DO UPDATE SET data = preferences.data || '{"scannerPaused":false}'::jsonb, updated_at = NOW()`,
+    );
+    log.info('Scanner resumed via API (persisted)');
     return res.json({ status: 'running' });
   }
 

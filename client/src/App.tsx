@@ -10,7 +10,7 @@ import SystemView from './components/SystemView';
 import AuditView from './components/AuditView';
 import LookupView from './components/LookupView';
 import SettingsView from './components/SettingsView';
-import { getDeals, getDealDetail, reviewDeal, getStatus, checkAuth, login, logout } from './api/deals';
+import { getDeals, getDealDetail, reviewDeal, getStatus, toggleScanner, checkAuth, login, logout } from './api/deals';
 import type { Deal, DealDetail as DealDetailType, SystemStatus } from './types/deals';
 
 type ViewName = 'opportunities' | 'system' | 'audit' | 'lookup' | 'settings';
@@ -61,6 +61,19 @@ export default function App() {
     setAuthed(false);
     setDeals([]);
     setStatus(null);
+  };
+
+  const [scannerToggling, setScannerToggling] = useState(false);
+  const handleToggleScanner = async () => {
+    if (!status || scannerToggling) return;
+    const action = status.scanner.status === 'paused' ? 'start' : 'stop';
+    setScannerToggling(true);
+    try {
+      await toggleScanner(action);
+      const s = await getStatus();
+      setStatus(s);
+    } catch { /* ignore */ }
+    setScannerToggling(false);
   };
 
   // Fetch deals
@@ -204,10 +217,15 @@ export default function App() {
           </div>
         </div>
         <div className="flex items-center gap-4">
-          <div className={'flex items-center gap-2 px-3 py-1.5 rounded-full border ' + (status?.scanner.isRunning !== false ? 'bg-profit/10 text-profit border-profit/20' : 'bg-warn/10 text-warn border-warn/20')}>
-            <div className={'w-2 h-2 rounded-full ' + (status?.scanner.isRunning !== false ? 'bg-profit pulse-dot' : 'bg-warn')} />
-            <span className="text-xs font-bold tracking-wide">{status?.scanner.status === 'paused' ? 'PAUSED' : 'SCANNING'}</span>
-          </div>
+          <button
+            onClick={handleToggleScanner}
+            disabled={scannerToggling || !status}
+            title={status?.scanner.status === 'paused' ? 'Click to resume scanner' : 'Click to pause scanner'}
+            className={'flex items-center gap-2 px-3 py-1.5 rounded-full border cursor-pointer transition-all hover:opacity-80 disabled:opacity-50 ' + (status?.scanner.isRunning !== false && status?.scanner.status !== 'paused' ? 'bg-profit/10 text-profit border-profit/20' : 'bg-warn/10 text-warn border-warn/20')}
+          >
+            <div className={'w-2 h-2 rounded-full ' + (status?.scanner.isRunning !== false && status?.scanner.status !== 'paused' ? 'bg-profit pulse-dot' : 'bg-warn')} />
+            <span className="text-xs font-bold tracking-wide">{scannerToggling ? 'TOGGLING\u2026' : status?.scanner.status === 'paused' ? 'PAUSED' : 'SCANNING'}</span>
+          </button>
           <div className="text-xs font-mono text-muted">{time}</div>
           <div className="w-px h-6 bg-border mx-2" />
           <button className="w-8 h-8 rounded-full bg-surface border border-border flex items-center justify-center hover:bg-surfaceHover transition-colors" title="Notifications">
@@ -469,15 +487,15 @@ function DealDetailPanel({ dealSummary }: { dealSummary: Deal }) {
           <h2 className="text-2xl font-bold text-white leading-tight mb-1">{d.cardName || d.ebay_title}</h2>
           <p className="text-sm text-muted font-mono mb-3">{d.card_number ?? '?'}{detail?.variant_name ? ' \u00b7 ' + detail.variant_name : ''}</p>
           {detail?.expansion_name && (
-            <div className="flex items-center gap-2.5 mb-3 bg-obsidian rounded-lg px-3 py-2.5 border border-border/50 h-11">
+            <div className="flex items-center gap-2.5 mb-3 bg-obsidian rounded-lg px-3 py-2 border border-border/50">
               {detail.expansion_logo && <img src={detail.expansion_logo} alt={detail.expansion_name} className="w-5 h-5 object-contain shrink-0 opacity-80" onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }} />}
               <div className="flex-1 min-w-0">
-                <div className="text-[10px] font-bold text-white truncate leading-tight">{detail.expansion_name}</div>
-                <div className="text-[9px] text-muted font-mono leading-tight truncate">{detail.expansion_series}{detail.expansion_card_count ? ' \u00b7 ' + detail.expansion_card_count + ' cards' : ''}{detail.expansion_release_date ? ' \u00b7 ' + detail.expansion_release_date : ''}</div>
+                <div className="text-[10px] font-bold text-white truncate">{detail.expansion_name}</div>
+                <div className="text-[9px] text-muted font-mono truncate">{detail.expansion_series}{detail.expansion_card_count ? ' \u00b7 ' + detail.expansion_card_count + ' cards' : ''}{detail.expansion_release_date ? ' \u00b7 ' + detail.expansion_release_date : ''}</div>
               </div>
             </div>
           )}
-          <div className="flex items-center justify-center gap-4 text-sm">
+          <div className="flex items-center gap-4 text-sm">
             {d.seller_name && <div className="flex items-center gap-1.5 text-muted"><I.User s={16} c="w-4 h-4" />{d.seller_name} {d.seller_feedback != null && <span className="text-white">({d.seller_feedback.toLocaleString()})</span>}</div>}
             <div className="flex items-center gap-1.5 text-muted"><I.Clock s={16} c="w-4 h-4" /><span title={fmtListedTime(d.created_at)}>{timeAgo(d.created_at)}</span></div>
           </div>
