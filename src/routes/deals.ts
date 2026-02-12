@@ -211,7 +211,7 @@ router.post('/:id/review', validate(reviewSchema), async (req: Request, res: Res
           wrongCardId: deal.card_id,
           correctCardId: correctCardId || null,
           reason,
-          dealId: req.params.id,
+          dealId: req.params.id as string,
           ebayTitle: deal.ebay_title,
           signals: deal.signals,
         });
