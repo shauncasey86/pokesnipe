@@ -84,15 +84,15 @@ export function assignGrade(score: number): 'high' | 'medium' | 'low' | 'illiqui
  * @param velocityData - Tier 3 velocity data (null if not fetched)
  */
 export function calculateLiquidity(
-  variant: { prices: Record<string, any>; trends?: Record<string, any> },
+  variant: { prices: Record<string, any>; gradedPrices?: Record<string, any> | null; trends?: Record<string, any> },
   condition: string,
   ebaySignals: { concurrentSupply: number; quantitySold: number },
   velocityData: VelocityData | null
 ): LiquidityAssessment {
   const signals: LiquiditySignals = {
     trendActivity: scoreTrendActivity(variant.trends?.[condition]),
-    priceCompleteness: scorePriceCompleteness(variant.prices),
-    priceSpread: scorePriceSpread(variant.prices, condition),
+    priceCompleteness: scorePriceCompleteness(variant.prices, variant.gradedPrices),
+    priceSpread: scorePriceSpread(variant.prices, condition, variant.gradedPrices),
     supply: scoreSupply(ebaySignals.concurrentSupply),
     sold: scoreSold(ebaySignals.quantitySold),
     velocity: velocityData?.fetched ? scoreVelocity(velocityData) : null,

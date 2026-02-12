@@ -27,7 +27,7 @@ import { sendDealAlert } from '../notifications/deal-alerts.js';
 
 const log = pino({ name: 'scanner' });
 
-type Condition = 'NM' | 'LP' | 'MP' | 'HP';
+type Condition = 'NM' | 'LP' | 'MP' | 'HP' | 'DM';
 
 /**
  * Build a condition comps snapshot for all conditions (not just the matched one).
@@ -40,7 +40,7 @@ function buildConditionComps(
   gradedPrices?: Record<string, { low: number; market: number; mid?: number; high?: number }> | null,
 ): Record<string, unknown> {
   const comps: Record<string, unknown> = {};
-  for (const condition of ['NM', 'LP', 'MP', 'HP'] as Condition[]) {
+  for (const condition of ['NM', 'LP', 'MP', 'HP', 'DM'] as Condition[]) {
     const price = prices[condition];
     if (price) {
       comps[condition] = {
@@ -82,16 +82,26 @@ export interface ScanResult {
 
 /**
  * Transform eBay conditionDescriptors from API format to extraction format.
- * eBay returns values as { content: string }[], extraction expects string[].
+ * eBay returns values as { content: string; additionalInfo?: string[] }[],
+ * extraction expects string[]. AdditionalInfo is captured alongside content.
  */
 function toExtractionDescriptors(
   descriptors?: EbayItemDetail['conditionDescriptors'],
-): Array<{ name: string; values: string[] }> | undefined {
+): Array<{ name: string; values: string[]; additionalInfo?: string[] }> | undefined {
   if (!descriptors?.length) return undefined;
-  return descriptors.map((d) => ({
-    name: d.name,
-    values: d.values.map((v) => v.content),
-  }));
+  return descriptors.map((d) => {
+    const additionalInfo: string[] = [];
+    for (const v of d.values) {
+      if (v.additionalInfo?.length) {
+        additionalInfo.push(...v.additionalInfo);
+      }
+    }
+    return {
+      name: d.name,
+      values: d.values.map((v) => v.content),
+      ...(additionalInfo.length > 0 ? { additionalInfo } : {}),
+    };
+  });
 }
 
 /**

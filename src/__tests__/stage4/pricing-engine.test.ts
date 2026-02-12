@@ -49,7 +49,7 @@ describe('calculateProfit', () => {
     expect(lpResult!.marketValueUSD).toBe(38); // Used LP, not NM
   });
 
-  it('falls back to LP when MP condition price is missing', () => {
+  it('falls back to NM when MP condition price is missing (NM first in chain)', () => {
     const fallback = calculateProfit({
       ebayPriceGBP: 10,
       shippingGBP: 1,
@@ -59,7 +59,7 @@ describe('calculateProfit', () => {
     });
 
     expect(fallback).not.toBeNull();
-    expect(fallback!.marketValueUSD).toBe(38); // MP missing, fell back to LP
+    expect(fallback!.marketValueUSD).toBe(52); // MP missing, fell back to NM (first in chain)
   });
 
   it('returns null when no condition prices are available', () => {
@@ -90,6 +90,63 @@ describe('calculateProfit', () => {
     expect(result!.breakdown.fxRate).toBe(0.8);
     expect(result!.breakdown.marketUSD).toBe(100);
     expect(result!.breakdown.marketGBP).toBe(80);
+  });
+
+  // ── DM condition tests ──────────────────────────────────────────────
+
+  it('handles DM (Damaged) condition', () => {
+    const result = calculateProfit({
+      ebayPriceGBP: 5,
+      shippingGBP: 1,
+      condition: 'DM',
+      variantPrices: { DM: { low: 8, market: 12 } },
+      exchangeRate: 0.789,
+    });
+    expect(result).not.toBeNull();
+    expect(result!.marketValueUSD).toBe(12);
+  });
+
+  it('falls back from DM to available conditions', () => {
+    const result = calculateProfit({
+      ebayPriceGBP: 5,
+      shippingGBP: 1,
+      condition: 'DM',
+      variantPrices: { NM: { low: 45, market: 52 } },
+      exchangeRate: 0.789,
+    });
+    expect(result).not.toBeNull();
+    expect(result!.marketValueUSD).toBe(52); // Falls back to NM
+  });
+
+  // ── Conservative profit estimate tests ─────────────────────────────
+
+  it('includes conservative profit using low price', () => {
+    const result = calculateProfit({
+      ebayPriceGBP: 12.5,
+      shippingGBP: 1.99,
+      condition: 'NM',
+      variantPrices: { NM: { low: 45, market: 52 } },
+      exchangeRate: 0.789,
+    });
+    expect(result).not.toBeNull();
+    expect(result!.lowValueUSD).toBe(45);
+    expect(result!.lowValueGBP).toBeCloseTo(45 * 0.789);
+    expect(result!.conservativeProfitGBP).not.toBeNull();
+    expect(result!.conservativeProfitGBP!).toBeLessThan(result!.profitGBP);
+  });
+
+  it('conservative profit is null when low price is missing', () => {
+    const result = calculateProfit({
+      ebayPriceGBP: 12.5,
+      shippingGBP: 1.99,
+      condition: 'LP',
+      variantPrices: { NM: { low: 45, market: 52 } },
+      exchangeRate: 0.789,
+    });
+    expect(result).not.toBeNull();
+    // LP price doesn't exist, falls back to NM for market but LP low doesn't exist
+    expect(result!.lowValueUSD).toBeNull();
+    expect(result!.conservativeProfitGBP).toBeNull();
   });
 
   // ── Graded card pricing tests ────────────────────────────────────────

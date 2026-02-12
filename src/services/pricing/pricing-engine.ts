@@ -1,6 +1,6 @@
 import { calculateBuyerProtection } from './buyer-protection.js';
 
-type Condition = 'NM' | 'LP' | 'MP' | 'HP';
+type Condition = 'NM' | 'LP' | 'MP' | 'HP' | 'DM';
 
 interface ConditionPrice {
   low: number;
@@ -34,6 +34,9 @@ export interface ProfitResult {
   marketValueGBP: number;
   profitGBP: number;
   profitPercent: number;
+  lowValueUSD: number | null;
+  lowValueGBP: number | null;
+  conservativeProfitGBP: number | null;
   priceSource: 'graded' | 'raw';
   breakdown: {
     ebayPrice: number;
@@ -65,7 +68,7 @@ function resolveGradedPrice(
 
 /**
  * Resolve the market price for the given condition, falling back through
- * LP → MP → HP if the exact condition is unavailable.
+ * NM → LP → MP → HP → DM if the exact condition is unavailable.
  */
 function resolveMarketPrice(
   condition: Condition,
@@ -76,14 +79,27 @@ function resolveMarketPrice(
     return prices[condition]!.market;
   }
 
-  // Fallback chain: LP → MP → HP
-  const fallbacks: Condition[] = ['LP', 'MP', 'HP'];
+  // Fallback chain: NM → LP → MP → HP → DM
+  const fallbacks: Condition[] = ['NM', 'LP', 'MP', 'HP', 'DM'];
   for (const fb of fallbacks) {
     if (fb !== condition && prices[fb]?.market != null) {
       return prices[fb]!.market;
     }
   }
 
+  return null;
+}
+
+/**
+ * Resolve the low price for the given condition (conservative estimate).
+ */
+function resolveLowPrice(
+  condition: Condition,
+  prices: Partial<Record<Condition, ConditionPrice>>,
+): number | null {
+  if (prices[condition]?.low != null) {
+    return prices[condition]!.low;
+  }
   return null;
 }
 
@@ -117,6 +133,23 @@ export function calculateProfit(input: ProfitInput): ProfitResult | null {
   const profitGBP = marketValueGBP - totalCostGBP;
   const profitPercent = totalCostGBP > 0 ? (profitGBP / totalCostGBP) * 100 : 0;
 
+  // Conservative estimate using low price
+  let lowValueUSD: number | null = null;
+  let lowValueGBP: number | null = null;
+  let conservativeProfitGBP: number | null = null;
+  if (priceSource === 'graded' && isGraded && gradingCompany && grade && gradedPrices) {
+    const key = `${gradingCompany}_${grade}`;
+    if (gradedPrices[key]?.low != null) {
+      lowValueUSD = gradedPrices[key]!.low;
+    }
+  } else {
+    lowValueUSD = resolveLowPrice(condition, variantPrices);
+  }
+  if (lowValueUSD != null) {
+    lowValueGBP = lowValueUSD * exchangeRate;
+    conservativeProfitGBP = lowValueGBP - totalCostGBP;
+  }
+
   return {
     totalCostGBP,
     buyerProtectionFee,
@@ -124,6 +157,9 @@ export function calculateProfit(input: ProfitInput): ProfitResult | null {
     marketValueGBP,
     profitGBP,
     profitPercent,
+    lowValueUSD,
+    lowValueGBP,
+    conservativeProfitGBP,
     priceSource,
     breakdown: {
       ebayPrice: ebayPriceGBP,

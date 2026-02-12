@@ -1,7 +1,7 @@
 import { pool } from '../../db/pool.js';
 import type { CardNumber } from '../extraction/number-extractor.js';
 
-type Condition = 'NM' | 'LP' | 'MP' | 'HP';
+type Condition = 'NM' | 'LP' | 'MP' | 'HP' | 'DM';
 
 interface ConditionPrice {
   low: number;
