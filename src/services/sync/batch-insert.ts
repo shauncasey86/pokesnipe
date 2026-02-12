@@ -70,6 +70,8 @@ export async function batchUpsertExpansions(expansions: ExpansionRow[]): Promise
   return total;
 }
 
+const CARD_COLUMNS_PER_ROW = 34;
+
 export async function batchUpsertCards(cards: CardRow[]): Promise<number> {
   let total = 0;
   const dedupedCards = dedup(cards, (c) => c.scrydex_card_id);
@@ -80,10 +82,12 @@ export async function batchUpsertCards(cards: CardRow[]): Promise<number> {
 
     for (let i = 0; i < batch.length; i++) {
       const c = batch[i];
-      const offset = i * 16;
-      rows.push(
-        `($${offset + 1}, $${offset + 2}, $${offset + 3}, $${offset + 4}, $${offset + 5}, $${offset + 6}, $${offset + 7}, $${offset + 8}, $${offset + 9}, $${offset + 10}, $${offset + 11}, $${offset + 12}, $${offset + 13}, $${offset + 14}, $${offset + 15}, $${offset + 16})`,
-      );
+      const offset = i * CARD_COLUMNS_PER_ROW;
+      const placeholders = Array.from(
+        { length: CARD_COLUMNS_PER_ROW },
+        (_, j) => `$${offset + j + 1}`,
+      ).join(', ');
+      rows.push(`(${placeholders})`);
       values.push(
         c.scrydex_card_id,
         c.name,
@@ -94,8 +98,26 @@ export async function batchUpsertCards(cards: CardRow[]): Promise<number> {
         c.expansion_code,
         c.printed_total,
         c.rarity,
+        c.rarity_code,
         c.supertype,
         c.subtypes,
+        c.types,
+        c.hp,
+        c.level,
+        c.evolves_from,
+        c.rules,
+        JSON.stringify(c.ancient_trait),
+        JSON.stringify(c.abilities),
+        JSON.stringify(c.attacks),
+        JSON.stringify(c.weaknesses),
+        JSON.stringify(c.resistances),
+        c.retreat_cost,
+        c.converted_retreat_cost,
+        c.printed_number,
+        c.national_pokedex_numbers,
+        c.flavor_text,
+        c.regulation_mark,
+        c.expansion_sort_order,
         c.artist,
         c.image_small,
         c.image_medium,
@@ -105,7 +127,17 @@ export async function batchUpsertCards(cards: CardRow[]): Promise<number> {
     }
 
     const query = `
-      INSERT INTO cards (scrydex_card_id, name, number, number_normalized, expansion_id, expansion_name, expansion_code, printed_total, rarity, supertype, subtypes, artist, image_small, image_medium, image_large, market_price_usd)
+      INSERT INTO cards (
+        scrydex_card_id, name, number, number_normalized,
+        expansion_id, expansion_name, expansion_code, printed_total,
+        rarity, rarity_code, supertype, subtypes, types,
+        hp, level, evolves_from, rules,
+        ancient_trait, abilities, attacks, weaknesses, resistances,
+        retreat_cost, converted_retreat_cost,
+        printed_number, national_pokedex_numbers,
+        flavor_text, regulation_mark, expansion_sort_order,
+        artist, image_small, image_medium, image_large, market_price_usd
+      )
       VALUES ${rows.join(', ')}
       ON CONFLICT (scrydex_card_id) DO UPDATE SET
         name = EXCLUDED.name,
@@ -115,8 +147,26 @@ export async function batchUpsertCards(cards: CardRow[]): Promise<number> {
         expansion_code = EXCLUDED.expansion_code,
         printed_total = EXCLUDED.printed_total,
         rarity = EXCLUDED.rarity,
+        rarity_code = EXCLUDED.rarity_code,
         supertype = EXCLUDED.supertype,
         subtypes = EXCLUDED.subtypes,
+        types = EXCLUDED.types,
+        hp = EXCLUDED.hp,
+        level = EXCLUDED.level,
+        evolves_from = EXCLUDED.evolves_from,
+        rules = EXCLUDED.rules,
+        ancient_trait = EXCLUDED.ancient_trait,
+        abilities = EXCLUDED.abilities,
+        attacks = EXCLUDED.attacks,
+        weaknesses = EXCLUDED.weaknesses,
+        resistances = EXCLUDED.resistances,
+        retreat_cost = EXCLUDED.retreat_cost,
+        converted_retreat_cost = EXCLUDED.converted_retreat_cost,
+        printed_number = EXCLUDED.printed_number,
+        national_pokedex_numbers = EXCLUDED.national_pokedex_numbers,
+        flavor_text = EXCLUDED.flavor_text,
+        regulation_mark = EXCLUDED.regulation_mark,
+        expansion_sort_order = EXCLUDED.expansion_sort_order,
         artist = EXCLUDED.artist,
         image_small = EXCLUDED.image_small,
         image_medium = EXCLUDED.image_medium,

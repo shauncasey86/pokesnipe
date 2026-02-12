@@ -4,6 +4,10 @@ import type {
   ScrydexCard,
   ScrydexVariant,
   ScrydexPrice,
+  ScrydexAncientTrait,
+  ScrydexAbility,
+  ScrydexAttack,
+  ScrydexWeaknessResistance,
 } from '../scrydex/client.js';
 
 const logger = pino({ name: 'transformers' });
@@ -33,8 +37,26 @@ export interface CardRow {
   expansion_code: string;
   printed_total: number;
   rarity: string | null;
+  rarity_code: string | null;
   supertype: string | null;
   subtypes: string[];
+  types: string[];
+  hp: string | null;
+  level: string | null;
+  evolves_from: string[];
+  rules: string[];
+  ancient_trait: ScrydexAncientTrait | null;
+  abilities: ScrydexAbility[];
+  attacks: ScrydexAttack[];
+  weaknesses: ScrydexWeaknessResistance[];
+  resistances: ScrydexWeaknessResistance[];
+  retreat_cost: string[];
+  converted_retreat_cost: number | null;
+  printed_number: string | null;
+  national_pokedex_numbers: number[];
+  flavor_text: string | null;
+  regulation_mark: string | null;
+  expansion_sort_order: number | null;
   artist: string | null;
   image_small: string | null;
   image_medium: string | null;
@@ -48,8 +70,8 @@ export interface VariantRow {
   image_small: string | null;
   image_medium: string | null;
   image_large: string | null;
-  prices: Record<string, { low: number; market: number }>;
-  graded_prices: Record<string, { low: number; market: number; mid?: number; high?: number }> | null;
+  prices: Record<string, RawPriceEntry>;
+  graded_prices: Record<string, GradedPriceEntry> | null;
   trends: Record<string, Record<string, { price_change: number; percent_change: number }>>;
 }
 
@@ -93,31 +115,59 @@ const TREND_KEY_MAP: Record<string, string> = {
   days_180: '180d',
 };
 
+export interface RawPriceEntry {
+  low: number;
+  market: number;
+  currency: string;
+  is_perfect?: boolean;
+  is_signed?: boolean;
+  is_error?: boolean;
+}
+
 export function buildPricesJsonb(
   prices: ScrydexPrice[],
-): Record<string, { low: number; market: number }> {
-  const result: Record<string, { low: number; market: number }> = {};
+): Record<string, RawPriceEntry> {
+  const result: Record<string, RawPriceEntry> = {};
   for (const p of prices) {
     if (p.type !== 'raw') continue;
-    result[p.condition] = { low: p.low, market: p.market };
+    const entry: RawPriceEntry = { low: p.low, market: p.market, currency: p.currency };
+    if (p.is_perfect) entry.is_perfect = true;
+    if (p.is_signed) entry.is_signed = true;
+    if (p.is_error) entry.is_error = true;
+    result[p.condition] = entry;
   }
   return result;
 }
 
+export interface GradedPriceEntry {
+  low: number;
+  market: number;
+  mid?: number;
+  high?: number;
+  currency: string;
+  is_perfect?: boolean;
+  is_signed?: boolean;
+  is_error?: boolean;
+}
+
 export function buildGradedPricesJsonb(
   prices: ScrydexPrice[],
-): Record<string, { low: number; market: number; mid?: number; high?: number }> | null {
-  const result: Record<string, { low: number; market: number; mid?: number; high?: number }> = {};
+): Record<string, GradedPriceEntry> | null {
+  const result: Record<string, GradedPriceEntry> = {};
   let count = 0;
   for (const p of prices) {
     if (p.type !== 'graded') continue;
     const key = `${p.company ?? 'UNKNOWN'}_${p.grade ?? '0'}`;
-    const entry: { low: number; market: number; mid?: number; high?: number } = {
+    const entry: GradedPriceEntry = {
       low: p.low,
       market: p.market,
+      currency: p.currency,
     };
     if (p.mid != null) entry.mid = p.mid;
     if (p.high != null) entry.high = p.high;
+    if (p.is_perfect) entry.is_perfect = true;
+    if (p.is_signed) entry.is_signed = true;
+    if (p.is_error) entry.is_error = true;
     result[key] = entry;
     count++;
   }
@@ -199,8 +249,26 @@ export function transformCard(apiCard: ScrydexCard, expansionId: string): CardRo
     expansion_code: apiCard.expansion.code || '',
     printed_total: apiCard.expansion.printed_total ?? 0,
     rarity: apiCard.rarity || null,
+    rarity_code: apiCard.rarity_code || null,
     supertype: apiCard.supertype || null,
     subtypes: apiCard.subtypes || [],
+    types: apiCard.types || [],
+    hp: apiCard.hp || null,
+    level: apiCard.level || null,
+    evolves_from: apiCard.evolves_from || [],
+    rules: apiCard.rules || [],
+    ancient_trait: apiCard.ancient_trait || null,
+    abilities: apiCard.abilities || [],
+    attacks: apiCard.attacks || [],
+    weaknesses: apiCard.weaknesses || [],
+    resistances: apiCard.resistances || [],
+    retreat_cost: apiCard.retreat_cost || [],
+    converted_retreat_cost: apiCard.converted_retreat_cost ?? null,
+    printed_number: apiCard.printed_number || null,
+    national_pokedex_numbers: apiCard.national_pokedex_numbers || [],
+    flavor_text: apiCard.flavor_text || null,
+    regulation_mark: apiCard.regulation_mark || null,
+    expansion_sort_order: apiCard.expansion_sort_order ?? null,
     artist: apiCard.artist || null,
     image_small: apiCard.images?.[0]?.small || null,
     image_medium: apiCard.images?.[0]?.medium || null,

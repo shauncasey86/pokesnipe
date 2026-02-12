@@ -1,4 +1,4 @@
-import type { DealsResponse, DealDetail, SystemStatus, Preferences, LookupResult } from '../types/deals';
+import type { DealsResponse, DealDetail, SystemStatus, Preferences, LookupResult, SyncLogResponse } from '../types/deals';
 
 async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
   const res = await fetch(path, {
@@ -105,6 +105,26 @@ export async function testTelegram(): Promise<{ success: boolean; message?: stri
   return apiFetch<{ success: boolean; message?: string }>('/api/notifications/telegram/test', {
     method: 'POST',
   });
+}
+
+export async function deleteAllDeals(status?: string): Promise<{ deleted: number }> {
+  const qs = status ? `?status=${encodeURIComponent(status)}` : '';
+  return apiFetch<{ deleted: number }>(`/api/deals${qs}`, { method: 'DELETE' });
+}
+
+export async function getSyncLog(params?: {
+  page?: number;
+  limit?: number;
+  sync_type?: string;
+  status?: string;
+}): Promise<SyncLogResponse> {
+  const qs = new URLSearchParams();
+  if (params?.page) qs.set('page', String(params.page));
+  if (params?.limit) qs.set('limit', String(params.limit));
+  if (params?.sync_type) qs.set('sync_type', params.sync_type);
+  if (params?.status) qs.set('status', params.status);
+  const query = qs.toString();
+  return apiFetch<SyncLogResponse>(`/api/audit${query ? `?${query}` : ''}`);
 }
 
 export async function checkAuth(): Promise<boolean> {

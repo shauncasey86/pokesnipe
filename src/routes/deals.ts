@@ -189,4 +189,33 @@ router.post('/:id/review', validate(reviewSchema), async (req: Request, res: Res
   }
 });
 
+/**
+ * DELETE /api/deals — Bulk-delete deals.
+ *
+ * Query params:
+ *   status — Only delete deals with this status (default: all)
+ */
+router.delete('/', async (req: Request, res: Response) => {
+  try {
+    const status = req.query.status as string | undefined;
+
+    let result;
+    if (status) {
+      result = await pool.query(
+        'DELETE FROM deals WHERE status = $1 RETURNING deal_id',
+        [status],
+      );
+    } else {
+      result = await pool.query('DELETE FROM deals RETURNING deal_id');
+    }
+
+    const count = result.rowCount ?? 0;
+    log.info({ count, status: status || 'all' }, 'Bulk-deleted deals');
+    return res.json({ deleted: count });
+  } catch (err) {
+    log.error({ err }, 'Failed to delete deals');
+    return res.status(500).json({ error: 'Failed to delete deals' });
+  }
+});
+
 export default router;
