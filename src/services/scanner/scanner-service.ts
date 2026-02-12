@@ -9,7 +9,7 @@ import { searchItems, getItem, canMakeCall, getBudgetStatus } from '../ebay/inde
 import type { EbayItemSummary, EbayItemDetail } from '../ebay/index.js';
 
 // Stage 6 — Signal extraction
-import { extractSignals } from '../extraction/index.js';
+import { extractSignals, detectDescriptionJunk } from '../extraction/index.js';
 
 // Stage 7 — Matching engine
 import { matchListing } from '../matching/index.js';
@@ -281,6 +281,14 @@ export async function runScanCycle(): Promise<ScanResult> {
       }
 
       log.debug({ ...ctx, enriched: true }, 'Enriched listing');
+
+      // Check description for fake/fan-art signals
+      const descJunk = detectDescriptionJunk(enriched.description, enriched.shortDescription);
+      if (descJunk.isJunk) {
+        log.debug({ ...ctx, rejected: true, reason: descJunk.reason }, 'Description junk detected');
+        stats.skippedJunk++;
+        continue;
+      }
 
       // Re-extract signals with enriched data (conditionDescriptors, localizedAspects)
       const enrichedExtractionResult = extractSignals(

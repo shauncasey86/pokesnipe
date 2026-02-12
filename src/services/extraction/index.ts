@@ -51,7 +51,7 @@ export function extractSignals(listing: {
 }
 
 export { cleanTitle } from './title-cleaner.js';
-export { detectJunk } from './junk-detector.js';
+export { detectJunk, detectDescriptionJunk } from './junk-detector.js';
 export { extractCardNumber } from './number-extractor.js';
 export type { CardNumber } from './number-extractor.js';
 export { detectVariant } from './variant-detector.js';
