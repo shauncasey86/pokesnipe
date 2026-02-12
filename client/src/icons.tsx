@@ -85,6 +85,9 @@ export const I = {
   Loader: ({ s = 20, c = "" }: IconProps) => (
     <svg className={`spinner ${c}`} width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>
   ),
+  ShieldOff: ({ s = 20, c = "" }: IconProps) => (
+    <svg className={c} width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m2 2 20 20"/><path d="M5 5a1 1 0 0 0-1 1v7c0 5 3.5 7.5 8 8.5a14.6 14.6 0 0 0 4-1.5"/><path d="M9.8 3.5A1 1 0 0 1 11 3h1a1 1 0 0 1 1 1v7a4.8 4.8 0 0 0 4 4.3"/><path d="M20 13V4a1 1 0 0 0-1-1h-1"/></svg>
+  ),
 };
 
 export type IconComponent = (props: IconProps) => React.JSX.Element;

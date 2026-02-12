@@ -687,7 +687,7 @@ function DealDetailPanel({ dealSummary, onReviewDeal }: { dealSummary: Deal; onR
               <div className="text-[10px] font-bold text-muted uppercase tracking-wider">Match Review</div>
               {rv != null ? (
                 <div className={'text-[11px] mt-1 font-semibold ' + (rv ? 'text-profit' : 'text-risk')}>
-                  Marked as {rv ? 'correct' : 'incorrect'}{d.incorrect_reason ? ` — ${({ wrong_card: 'Wrong card', wrong_set: 'Wrong set', wrong_condition: 'Wrong condition', wrong_variant: 'Wrong variant', wrong_price: 'Wrong price', bad_image: 'Bad image' } as Record<string, string>)[d.incorrect_reason] || d.incorrect_reason}` : ''}
+                  Marked as {rv ? 'correct' : 'incorrect'}{d.incorrect_reason ? ` — ${({ wrong_card: 'Wrong card', wrong_set: 'Wrong set', wrong_condition: 'Wrong condition', wrong_variant: 'Wrong variant', wrong_price: 'Wrong price', bad_image: 'Bad image', junk_listing: 'Junk listing' } as Record<string, string>)[d.incorrect_reason] || d.incorrect_reason}` : ''}
                 </div>
               ) : showReasonPicker ? (
                 <div className="text-[11px] text-muted mt-1">What was wrong?</div>
@@ -810,6 +810,27 @@ function DealDetailPanel({ dealSummary, onReviewDeal }: { dealSummary: Deal; onR
             </div>
           )}
         </div>
+
+        {/* Report Junk — separate from match review */}
+        {rv == null && !showReasonPicker && (
+          <button
+            onClick={() => handleReview(false, 'junk_listing')}
+            disabled={reviewLoading}
+            className="w-full flex items-center gap-2.5 p-3 rounded-xl border border-warn/20 bg-warn/5 hover:bg-warn/10 hover:border-warn/40 transition-all group disabled:opacity-50"
+          >
+            <I.ShieldOff s={14} c="text-warn shrink-0" />
+            <div className="text-left flex-1">
+              <div className="text-[11px] font-semibold text-warn/80 group-hover:text-warn">Report Junk</div>
+              <div className="text-[9px] text-muted leading-tight">Fake, fan art, proxy, or not a real card</div>
+            </div>
+          </button>
+        )}
+        {d.incorrect_reason === 'junk_listing' && (
+          <div className="flex items-center gap-2.5 p-3 rounded-xl border border-warn/30 bg-warn/5">
+            <I.ShieldOff s={14} c="text-warn shrink-0" />
+            <div className="text-[11px] font-semibold text-warn">Reported as junk listing</div>
+          </div>
+        )}
       </div>
 
       {/* CTA */}

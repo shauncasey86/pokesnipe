@@ -4,6 +4,7 @@ import pino from 'pino';
 import { pool } from '../db/pool.js';
 import { validate } from '../middleware/validation.js';
 import { recordConfusion } from '../services/matching/confusion-checker.js';
+import { recordJunkReport } from '../services/extraction/junk-scorer.js';
 
 const log = pino({ name: 'deals-api' });
 const router = Router();
@@ -161,7 +162,7 @@ router.get('/:id', async (req: Request, res: Response) => {
  */
 const reviewSchema = z.object({
   isCorrectMatch: z.boolean(),
-  reason: z.enum(['wrong_card', 'wrong_set', 'wrong_condition', 'wrong_variant', 'wrong_price', 'bad_image']).optional(),
+  reason: z.enum(['wrong_card', 'wrong_set', 'wrong_condition', 'wrong_variant', 'wrong_price', 'bad_image', 'junk_listing']).optional(),
   correctCardId: z.string().optional(),
 });
 
@@ -195,7 +196,7 @@ router.post('/:id/review', validate(reviewSchema), async (req: Request, res: Res
     }
 
     // Record confusion pair for match-related incorrect reviews
-    if (!isCorrectMatch && reason) {
+    if (!isCorrectMatch && reason && reason !== 'junk_listing') {
       const { rows: dealRows } = await pool.query(
         `SELECT card_id, ebay_title,
                 match_signals->'confidence'->'signals' as signals,
@@ -214,6 +215,26 @@ router.post('/:id/review', validate(reviewSchema), async (req: Request, res: Res
           dealId: req.params.id as string,
           ebayTitle: deal.ebay_title,
           signals: deal.signals,
+        });
+      }
+    }
+
+    // Record junk report for junk_listing reviews
+    if (!isCorrectMatch && reason === 'junk_listing') {
+      const { rows: dealRows } = await pool.query(
+        `SELECT card_id, ebay_item_id, ebay_title, seller_name
+         FROM deals WHERE deal_id = $1`,
+        [req.params.id],
+      );
+
+      if (dealRows.length > 0) {
+        const deal = dealRows[0];
+        await recordJunkReport({
+          dealId: req.params.id as string,
+          ebayItemId: deal.ebay_item_id,
+          ebayTitle: deal.ebay_title,
+          sellerName: deal.seller_name || null,
+          cardId: deal.card_id || null,
         });
       }
     }

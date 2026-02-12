@@ -61,3 +61,5 @@ export { extractStructuredData } from './structured-extractor.js';
 export type { StructuredSignals } from './structured-extractor.js';
 export { mergeSignals } from './signal-merger.js';
 export type { NormalizedListing } from './signal-merger.js';
+export { scoreJunkSignals, recordJunkReport, extractNovelTokens, refreshJunkCaches } from './junk-scorer.js';
+export type { JunkScoreResult } from './junk-scorer.js';
