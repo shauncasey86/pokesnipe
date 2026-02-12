@@ -78,17 +78,57 @@ export interface ScrydexCardExpansion {
   code?: string;
 }
 
+export interface ScrydexAncientTrait {
+  name: string;
+  text: string;
+}
+
+export interface ScrydexAbility {
+  type: string;
+  name: string;
+  text: string;
+}
+
+export interface ScrydexAttack {
+  cost: string[];
+  converted_energy_cost: number;
+  name: string;
+  text: string;
+  damage: string;
+}
+
+export interface ScrydexWeaknessResistance {
+  type: string;
+  value: string;
+}
+
 export interface ScrydexCard {
   id: string;
   name: string;
   supertype: string;
   subtypes: string[];
   types?: string[];
+  hp?: string;
+  level?: string;
+  evolves_from?: string[];
+  rules?: string[];
+  ancient_trait?: ScrydexAncientTrait;
+  abilities?: ScrydexAbility[];
+  attacks?: ScrydexAttack[];
+  weaknesses?: ScrydexWeaknessResistance[];
+  resistances?: ScrydexWeaknessResistance[];
+  retreat_cost?: string[];
+  converted_retreat_cost?: number;
   number: string;
   printed_number?: string;
   rarity: string;
+  rarity_code?: string;
   artist: string;
+  national_pokedex_numbers?: number[];
+  flavor_text?: string;
+  regulation_mark?: string;
   language_code: string;
+  expansion_sort_order?: number;
   images: ScrydexImage[];
   expansion: ScrydexCardExpansion;
   variants: ScrydexVariant[];
