@@ -27,6 +27,9 @@ import { getVelocity } from '../liquidity/tier3-velocity.js';
 import { sendAlert } from '../notifications/telegram.js';
 import { checkAccuracyThreshold } from '../accuracy/tracker.js';
 
+// Audit persistence
+import { logAuditEvent } from '../audit/log-event.js';
+
 // Helpers
 import { getRecentExpansions, checkForNewExpansions, getTopMatchedCards } from './helpers.js';
 
@@ -83,15 +86,50 @@ export function registerAllJobs(): void {
 
   // -- Scanner -- every 5 minutes
   registerJob('ebay-scan', '*/5 * * * *', async () => {
+    const start = Date.now();
     const result = await runScanCycle();
+    const durationMs = Date.now() - start;
     log.info(result, 'Scan cycle result');
+
+    // Only persist to audit log if something happened (avoid filling the table with empty scans)
+    if (result.listingsProcessed > 0 || result.dealsCreated > 0 || result.errors > 0) {
+      await logAuditEvent({
+        syncType: 'ebay_scan',
+        status: result.errors > 0 && result.dealsCreated === 0 ? 'failed' : 'completed',
+        durationMs,
+        metadata: {
+          deals_created: result.dealsCreated,
+          listings_processed: result.listingsProcessed,
+          enrichment_calls: result.enrichmentCalls,
+          skipped_duplicate: result.skippedDuplicate,
+          skipped_junk: result.skippedJunk,
+          skipped_no_match: result.skippedNoMatch,
+          skipped_gate: result.skippedGate,
+          errors: result.errors,
+        },
+      }).catch(err => log.warn({ err }, 'Failed to persist scan audit event'));
+    }
   });
 
   // -- Deal cleanup -- every hour at :00
   registerJob('deal-cleanup', '0 * * * *', async () => {
+    const start = Date.now();
     const expired = await expireOldDeals();
     const pruned = await pruneStaleDeals();
+    const durationMs = Date.now() - start;
     log.info({ expired, pruned }, 'Deal cleanup complete');
+
+    if (expired > 0 || pruned > 0) {
+      await logAuditEvent({
+        syncType: 'deal_cleanup',
+        status: 'completed',
+        durationMs,
+        metadata: {
+          expired,
+          pruned,
+        },
+      }).catch(err => log.warn({ err }, 'Failed to persist cleanup audit event'));
+    }
   });
 
   // -- Exchange rate refresh -- every hour at :30
@@ -102,6 +140,7 @@ export function registerAllJobs(): void {
   // -- Hot refresh -- daily at 03:00 (re-sync 10 most recent expansions)
   // Prices for new sets change rapidly. Re-syncing keeps our market prices current.
   registerJob('hot-refresh', '0 3 * * *', async () => {
+    const start = Date.now();
     const recent = await getRecentExpansions(10);
     log.info({ count: recent.length, expansions: recent.map(e => e.name) }, 'Starting hot refresh');
 
@@ -118,11 +157,23 @@ export function registerAllJobs(): void {
       }
     }
 
+    const durationMs = Date.now() - start;
     log.info({ totalCards, totalVariants, expansions: recent.length }, 'Hot refresh complete');
+
+    await logAuditEvent({
+      syncType: 'hot_refresh',
+      status: 'completed',
+      durationMs,
+      expansionsSynced: recent.length,
+      cardsUpserted: totalCards,
+      variantsUpserted: totalVariants,
+      metadata: { expansions: recent.map(e => e.name) },
+    }).catch(err => log.warn({ err }, 'Failed to persist hot-refresh audit event'));
   });
 
   // -- Expansion check -- daily at 04:00 (detect new sets)
   registerJob('expansion-check', '0 4 * * *', async () => {
+    const start = Date.now();
     const fetchExpansions = async () => {
       const allExpansions: Array<{ id: string; name: string }> = [];
       let page = 1;
@@ -137,13 +188,30 @@ export function registerAllJobs(): void {
     };
 
     const newExps = await checkForNewExpansions(fetchExpansions);
+    let totalCards = 0;
+    let totalVariants = 0;
     for (const exp of newExps) {
       try {
         const result = await syncExpansionCards(exp.id);
+        totalCards += result.cards;
+        totalVariants += result.variants;
         log.info({ expansion: exp.name, ...result }, 'Synced new expansion');
       } catch (err) {
         log.error({ err, expansion: exp.name }, 'Failed to sync new expansion');
       }
+    }
+
+    const durationMs = Date.now() - start;
+    if (newExps.length > 0) {
+      await logAuditEvent({
+        syncType: 'expansion_check',
+        status: 'completed',
+        durationMs,
+        expansionsSynced: newExps.length,
+        cardsUpserted: totalCards,
+        variantsUpserted: totalVariants,
+        metadata: { new_expansions: newExps.map(e => e.name) },
+      }).catch(err => log.warn({ err }, 'Failed to persist expansion-check audit event'));
     }
   });
 
