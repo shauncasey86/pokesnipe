@@ -27,6 +27,10 @@ import { getVelocity } from '../liquidity/tier3-velocity.js';
 import { sendAlert } from '../notifications/telegram.js';
 import { checkAccuracyThreshold } from '../accuracy/tracker.js';
 
+// Feedback calibration
+import { runCalibration, getActiveWeights } from '../accuracy/calibrator.js';
+import { loadLearnedWeights } from '../matching/confidence-scorer.js';
+
 // Audit persistence
 import { logAuditEvent } from '../audit/log-event.js';
 
@@ -247,6 +251,44 @@ export function registerAllJobs(): void {
     await checkAccuracyThreshold();
   });
 
+  // -- Weight calibration -- daily at 05:00
+  // Analyzes reviewed deals to learn which confidence signals best predict
+  // correct vs incorrect matches. Adjusts weights if accuracy improves.
+  registerJob('weight-calibration', '0 5 * * *', async () => {
+    const start = Date.now();
+    const result = await runCalibration();
+    const durationMs = Date.now() - start;
+
+    log.info({
+      applied: result.applied,
+      reason: result.reason,
+      sampleSize: result.sampleSize,
+      accuracyBefore: result.accuracyBefore,
+      accuracyAfter: result.accuracyAfter,
+    }, 'Weight calibration complete');
+
+    // If calibration produced new weights, hot-load them into the scorer
+    if (result.applied) {
+      loadLearnedWeights(result.newWeights as Record<'name' | 'denominator' | 'number' | 'expansion' | 'variant' | 'normalization', number>);
+    }
+
+    await logAuditEvent({
+      syncType: 'weight_calibration',
+      status: result.applied ? 'completed' : 'completed',
+      durationMs,
+      metadata: {
+        applied: result.applied,
+        reason: result.reason,
+        sample_size: result.sampleSize,
+        accuracy_before: result.accuracyBefore,
+        accuracy_after: result.accuracyAfter,
+        old_weights: result.oldWeights,
+        new_weights: result.newWeights,
+        signal_stats: result.signalStats,
+      },
+    }).catch(err => log.warn({ err }, 'Failed to persist calibration audit event'));
+  });
+
   // -- Card index staleness check -- every 12 hours
   registerJob('card-index-check', '0 */12 * * *', async () => {
     const lastSync = await pool.query(
@@ -272,5 +314,15 @@ export function registerAllJobs(): void {
     })
     .catch(err => {
       log.warn({ err }, 'Could not restore scanner state from preferences');
+    });
+
+  // Load learned confidence weights from last calibration run
+  getActiveWeights()
+    .then(weights => {
+      loadLearnedWeights(weights);
+      log.info({ weights }, 'Loaded confidence weights');
+    })
+    .catch(err => {
+      log.warn({ err }, 'Could not load learned weights, using spec defaults');
     });
 }

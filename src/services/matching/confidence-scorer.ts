@@ -1,9 +1,12 @@
 /**
  * Weighted geometric mean confidence scoring.
- * Pure function — no I/O.
  *
  * Geometric mean prevents one high score from masking a low one.
  * A single poor signal dimension drags down the composite significantly.
+ *
+ * Weights can be dynamically overridden by the calibration feedback loop.
+ * Learned weights are loaded from the weight_overrides table at startup
+ * and refreshed after each calibration run.
  */
 
 export interface ConfidenceSignals {
@@ -21,9 +24,10 @@ export interface ConfidenceResult {
 }
 
 /**
- * Weights from the spec (Section 4.5).
+ * Spec-defined default weights (Section 4.5).
+ * Used when no calibration data exists.
  */
-const WEIGHTS: Record<keyof ConfidenceSignals, number> = {
+const SPEC_WEIGHTS: Record<keyof ConfidenceSignals, number> = {
   name: 0.30,
   denominator: 0.25,
   number: 0.15,
@@ -31,6 +35,27 @@ const WEIGHTS: Record<keyof ConfidenceSignals, number> = {
   variant: 0.10,
   normalization: 0.10,
 };
+
+/** Active weights — starts as spec defaults, updated by loadLearnedWeights() */
+let activeWeights: Record<keyof ConfidenceSignals, number> = { ...SPEC_WEIGHTS };
+
+/**
+ * Replace the active weights with learned weights from the calibrator.
+ * Called at startup and after each calibration run.
+ */
+export function loadLearnedWeights(weights: Record<keyof ConfidenceSignals, number>): void {
+  activeWeights = { ...weights };
+}
+
+/** Get the currently active weights (for API/diagnostics). */
+export function getWeights(): Record<keyof ConfidenceSignals, number> {
+  return { ...activeWeights };
+}
+
+/** Reset to spec defaults (for testing or manual override). */
+export function resetWeights(): void {
+  activeWeights = { ...SPEC_WEIGHTS };
+}
 
 /**
  * Compute weighted geometric mean of confidence signals.
@@ -42,7 +67,7 @@ export function computeConfidence(signals: ConfidenceSignals): ConfidenceResult 
   let weightedLogSum = 0;
   let totalWeight = 0;
 
-  for (const [key, weight] of Object.entries(WEIGHTS)) {
+  for (const [key, weight] of Object.entries(activeWeights)) {
     const score = Math.max(0.01, Math.min(1.0, signals[key as keyof ConfidenceSignals]));
     weightedLogSum += weight * Math.log(score);
     totalWeight += weight;

@@ -34,6 +34,7 @@ function syncTypeLabel(type: string): string {
     case 'expansion_check': return 'Expansion Check';
     case 'ebay_scan': return 'eBay Scan';
     case 'deal_cleanup': return 'Deal Cleanup';
+    case 'weight_calibration': return 'Weight Calibration';
     default: return type;
   }
 }
@@ -46,8 +47,12 @@ function isCleanupEvent(type: string): boolean {
   return type === 'deal_cleanup';
 }
 
+function isCalibrationEvent(type: string): boolean {
+  return type === 'weight_calibration';
+}
+
 function isSyncEvent(type: string): boolean {
-  return !isScanEvent(type) && !isCleanupEvent(type);
+  return !isScanEvent(type) && !isCleanupEvent(type) && !isCalibrationEvent(type);
 }
 
 /** Build a concise summary string for the table row */
@@ -67,6 +72,14 @@ function summaryText(entry: SyncLogEntry): string {
     if (pruned > 0) parts.push(`${pruned} pruned`);
     return parts.join(', ') || 'No changes';
   }
+  if (isCalibrationEvent(entry.sync_type)) {
+    const meta = entry.metadata as Record<string, unknown> | null;
+    const applied = meta?.applied;
+    if (!applied) return meta?.reason as string || 'No change';
+    const before = meta?.accuracy_before as number;
+    const after = meta?.accuracy_after as number;
+    return `Applied: ${before?.toFixed(1)}% -> ${after?.toFixed(1)}%`;
+  }
   // Sync events
   const parts: string[] = [];
   if (entry.expansions_synced) parts.push(`${entry.expansions_synced} exp`);
@@ -76,10 +89,11 @@ function summaryText(entry: SyncLogEntry): string {
 }
 
 const STATUS_OPTIONS = ['', 'completed', 'failed', 'running'] as const;
-const TYPE_OPTIONS = ['', 'ebay_scan', 'deal_cleanup', 'full_sync', 'hot_refresh', 'expansion_check', 'expansion-check'] as const;
+const TYPE_OPTIONS = ['', 'ebay_scan', 'deal_cleanup', 'weight_calibration', 'full_sync', 'hot_refresh', 'expansion_check', 'expansion-check'] as const;
 const TYPE_LABELS: Record<string, string> = {
   'ebay_scan': 'eBay Scan',
   'deal_cleanup': 'Deal Cleanup',
+  'weight_calibration': 'Weight Calibration',
   'full_sync': 'Full Sync',
   'hot_refresh': 'Hot Refresh',
   'expansion_check': 'Expansion Check',
@@ -277,6 +291,70 @@ export default function AuditView() {
                               </div>
                             )}
 
+                            {/* Calibration-specific stats */}
+                            {isCalibrationEvent(entry.sync_type) && entry.metadata && (() => {
+                              const meta = entry.metadata as Record<string, unknown>;
+                              const applied = meta.applied as boolean;
+                              const signalStats = meta.signal_stats as Record<string, { correctMean: number; incorrectMean: number; separation: number }> | undefined;
+                              const oldW = meta.old_weights as Record<string, number> | undefined;
+                              const newW = meta.new_weights as Record<string, number> | undefined;
+                              return (
+                                <div className="space-y-2">
+                                  <div className="grid grid-cols-3 gap-2">
+                                    <div className="bg-obsidian rounded px-3 py-2 text-center">
+                                      <div className="text-[9px] text-muted uppercase tracking-wider">Applied</div>
+                                      <div className={'text-sm font-mono font-bold ' + (applied ? 'text-emerald-400' : 'text-muted')}>{applied ? 'Yes' : 'No'}</div>
+                                    </div>
+                                    <div className="bg-obsidian rounded px-3 py-2 text-center">
+                                      <div className="text-[9px] text-muted uppercase tracking-wider">Sample</div>
+                                      <div className="text-sm font-mono font-bold text-white/80">{meta.sample_size as number}</div>
+                                    </div>
+                                    <div className="bg-obsidian rounded px-3 py-2 text-center">
+                                      <div className="text-[9px] text-muted uppercase tracking-wider">Accuracy</div>
+                                      <div className="text-sm font-mono font-bold text-white/80">{(meta.accuracy_before as number)?.toFixed(1)}% &rarr; {(meta.accuracy_after as number)?.toFixed(1)}%</div>
+                                    </div>
+                                  </div>
+                                  {signalStats && (
+                                    <div>
+                                      <div className="text-[9px] text-muted uppercase tracking-wider mb-1">Signal Discrimination</div>
+                                      <div className="grid grid-cols-3 gap-1">
+                                        {Object.entries(signalStats).map(([key, s]) => (
+                                          <div key={key} className="bg-obsidian rounded px-2 py-1.5 text-center">
+                                            <div className="text-[9px] text-muted">{key}</div>
+                                            <div className={'text-[11px] font-mono ' + (s.separation > 0.1 ? 'text-emerald-400' : s.separation < -0.05 ? 'text-red-400' : 'text-white/60')}>
+                                              {s.separation > 0 ? '+' : ''}{s.separation.toFixed(3)}
+                                            </div>
+                                          </div>
+                                        ))}
+                                      </div>
+                                    </div>
+                                  )}
+                                  {oldW && newW && (
+                                    <div>
+                                      <div className="text-[9px] text-muted uppercase tracking-wider mb-1">Weight Changes</div>
+                                      <div className="grid grid-cols-3 gap-1">
+                                        {Object.keys(newW).map(key => {
+                                          const delta = (newW[key] - (oldW[key] ?? 0));
+                                          return (
+                                            <div key={key} className="bg-obsidian rounded px-2 py-1.5 text-center">
+                                              <div className="text-[9px] text-muted">{key}</div>
+                                              <div className="text-[11px] font-mono text-white/80">{newW[key].toFixed(3)}</div>
+                                              {delta !== 0 && <div className={'text-[9px] font-mono ' + (delta > 0 ? 'text-emerald-400' : 'text-red-400')}>{delta > 0 ? '+' : ''}{delta.toFixed(3)}</div>}
+                                            </div>
+                                          );
+                                        })}
+                                      </div>
+                                    </div>
+                                  )}
+                                  {!applied && meta.reason && (
+                                    <div className="bg-amber-900/20 border border-amber-800/30 rounded px-3 py-2 text-amber-300 text-[11px]">
+                                      {meta.reason as string}
+                                    </div>
+                                  )}
+                                </div>
+                              );
+                            })()}
+
                             {/* Sync-specific stats */}
                             {isSyncEvent(entry.sync_type) && (
                               <div className="grid grid-cols-3 gap-2">
@@ -298,7 +376,7 @@ export default function AuditView() {
                                 {entry.error_message}
                               </div>
                             )}
-                            {entry.metadata && Object.keys(entry.metadata).length > 0 && !isScanEvent(entry.sync_type) && !isCleanupEvent(entry.sync_type) && (
+                            {entry.metadata && Object.keys(entry.metadata).length > 0 && !isScanEvent(entry.sync_type) && !isCleanupEvent(entry.sync_type) && !isCalibrationEvent(entry.sync_type) && (
                               <div className="bg-black/20 rounded px-3 py-2 font-mono text-[11px] text-muted break-all whitespace-pre-wrap">
                                 {JSON.stringify(entry.metadata, null, 2)}
                               </div>
