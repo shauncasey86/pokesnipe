@@ -9,7 +9,7 @@ import { searchItems, getItem, canMakeCall, getBudgetStatus } from '../ebay/inde
 import type { EbayItemSummary, EbayItemDetail } from '../ebay/index.js';
 
 // Stage 6 — Signal extraction
-import { extractSignals } from '../extraction/index.js';
+import { extractSignals, detectDescriptionJunk } from '../extraction/index.js';
 
 // Stage 7 — Matching engine
 import { matchListing } from '../matching/index.js';
@@ -20,6 +20,9 @@ import { getValidRate } from '../exchange-rate/exchange-rate-service.js';
 
 // Stage 9 — Liquidity engine
 import { calculateLiquidity, getVelocity, adjustTierForLiquidity } from '../liquidity/index.js';
+
+// Learned junk scorer (soft confidence penalty from user reports)
+import { scoreJunkSignals } from '../extraction/junk-scorer.js';
 
 // Stage 13 — Observability
 import { createPipelineContext } from '../logger/correlation.js';
@@ -282,6 +285,14 @@ export async function runScanCycle(): Promise<ScanResult> {
 
       log.debug({ ...ctx, enriched: true }, 'Enriched listing');
 
+      // Check description for fake/fan-art signals
+      const descJunk = detectDescriptionJunk(enriched.description, enriched.shortDescription);
+      if (descJunk.isJunk) {
+        log.debug({ ...ctx, rejected: true, reason: descJunk.reason }, 'Description junk detected');
+        stats.skippedJunk++;
+        continue;
+      }
+
       // Re-extract signals with enriched data (conditionDescriptors, localizedAspects)
       const enrichedExtractionResult = extractSignals(
         toExtractionInput(listing, enriched),
@@ -321,13 +332,33 @@ export async function runScanCycle(): Promise<ScanResult> {
       // Skip if not profitable after enrichment
       if (realProfit.profitPercent < 5) continue;
 
+      // Apply learned junk signals as a soft confidence penalty.
+      // This runs BEFORE the confidence gate so borderline junk listings
+      // get pushed below 0.65, but strong matches survive.
+      const junkScore = await scoreJunkSignals(
+        enrichedSignals.cleanedTitle ?? listing.title.toLowerCase(),
+        listing.seller?.username ?? null,
+      );
+      const adjustedConfidence = Math.max(0, enrichedMatch.confidence.composite - junkScore.penalty);
+
+      if (junkScore.penalty > 0) {
+        log.debug({
+          ...ctx,
+          originalConfidence: enrichedMatch.confidence.composite,
+          adjustedConfidence,
+          junkPenalty: junkScore.penalty,
+          matchedKeywords: junkScore.matchedKeywords,
+          sellerReports: junkScore.sellerReportCount,
+        }, 'Applied learned junk penalty');
+      }
+
       // Confidence gate: spec requires >= 0.65 to create a deal
-      if (enrichedMatch.confidence.composite < 0.65) continue;
+      if (adjustedConfidence < 0.65) continue;
 
       // 3g. Classify base tier
       const baseTier = classifyTier(
         realProfit.profitPercent,
-        enrichedMatch.confidence.composite,
+        adjustedConfidence,
         'unknown',
       );
 
@@ -362,9 +393,9 @@ export async function runScanCycle(): Promise<ScanResult> {
       const tier = adjustTierForLiquidity(baseTier, liquidity.grade);
 
       const confidenceTier =
-        enrichedMatch.confidence.composite >= 0.85
+        adjustedConfidence >= 0.85
           ? 'high'
-          : enrichedMatch.confidence.composite >= 0.65
+          : adjustedConfidence >= 0.65
             ? 'medium'
             : 'low';
 
@@ -389,7 +420,7 @@ export async function runScanCycle(): Promise<ScanResult> {
         profitGBP: realProfit.profitGBP,
         profitPercent: realProfit.profitPercent,
         tier,
-        confidence: enrichedMatch.confidence.composite,
+        confidence: adjustedConfidence,
         confidenceTier,
         condition: realCondition,
         conditionSource: enrichedSignals.condition?.source || 'default',
@@ -408,6 +439,14 @@ export async function runScanCycle(): Promise<ScanResult> {
             signals: liquidity.signals,
             velocityFetched: velocityData?.fetched || false,
           },
+          ...(junkScore.penalty > 0 ? {
+            junkPenalty: {
+              penalty: junkScore.penalty,
+              matchedKeywords: junkScore.matchedKeywords,
+              sellerReportCount: junkScore.sellerReportCount,
+              adjustedConfidence,
+            },
+          } : {}),
         },
         conditionComps: buildConditionComps(enrichedMatch.variant.prices, exchangeRate, enrichedMatch.variant.gradedPrices),
         liquidityScore: liquidity.composite,
@@ -422,7 +461,7 @@ export async function runScanCycle(): Promise<ScanResult> {
             dealId: deal.dealId,
             tier,
             profit: deal.profitGBP,
-            confidence: enrichedMatch.confidence.composite,
+            confidence: adjustedConfidence,
             liquidityGrade: liquidity.grade,
             liquidityScore: liquidity.composite,
           },
@@ -439,7 +478,7 @@ export async function runScanCycle(): Promise<ScanResult> {
           profitPercent: realProfit.profitPercent,
           tier,
           condition: realCondition,
-          confidence: enrichedMatch.confidence.composite,
+          confidence: adjustedConfidence,
           ebayUrl: listing.itemWebUrl,
         }).catch(err => log.warn({ err, ...ctx }, 'Deal alert failed'));
       }

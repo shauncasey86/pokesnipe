@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { detectJunk } from '../../services/extraction/junk-detector.js';
+import { detectJunk, detectDescriptionJunk } from '../../services/extraction/junk-detector.js';
 
 describe('detectJunk', () => {
   describe('bulk_lot detection', () => {
@@ -35,6 +35,22 @@ describe('detectJunk', () => {
 
     it('detects fan made cards', () => {
       expect(detectJunk('fan made pikachu card')).toEqual({ isJunk: true, reason: 'fake' });
+    });
+
+    it('detects fan art cards', () => {
+      expect(detectJunk('fan art charizard card')).toEqual({ isJunk: true, reason: 'fake' });
+    });
+
+    it('detects fanart (no space)', () => {
+      expect(detectJunk('fanart pikachu custom')).toEqual({ isJunk: true, reason: 'fake' });
+    });
+
+    it('detects hand painted cards', () => {
+      expect(detectJunk('hand painted charizard card')).toEqual({ isJunk: true, reason: 'fake' });
+    });
+
+    it('detects hand drawn cards', () => {
+      expect(detectJunk('hand drawn pikachu card')).toEqual({ isJunk: true, reason: 'fake' });
     });
   });
 
@@ -98,5 +114,34 @@ describe('detectJunk', () => {
     it('allows graded cards', () => {
       expect(detectJunk('psa 10 charizard base set')).toEqual({ isJunk: false });
     });
+  });
+});
+
+describe('detectDescriptionJunk', () => {
+  it('detects fan art in HTML description', () => {
+    const desc = '<p>Beautiful <b>fan art</b> Charizard card, hand made with love!</p>';
+    expect(detectDescriptionJunk(desc, null)).toEqual({ isJunk: true, reason: 'fake_description' });
+  });
+
+  it('detects fanart in shortDescription', () => {
+    expect(detectDescriptionJunk(null, 'Custom fanart Pokemon card')).toEqual({ isJunk: true, reason: 'fake_description' });
+  });
+
+  it('detects proxy in description', () => {
+    const desc = 'This is a high-quality proxy card for casual play.';
+    expect(detectDescriptionJunk(desc, null)).toEqual({ isJunk: true, reason: 'fake_description' });
+  });
+
+  it('passes clean descriptions', () => {
+    const desc = '<p>Near mint Charizard ex from Obsidian Flames. Ships in toploader.</p>';
+    expect(detectDescriptionJunk(desc, null)).toEqual({ isJunk: false });
+  });
+
+  it('returns clean when both fields are null', () => {
+    expect(detectDescriptionJunk(null, null)).toEqual({ isJunk: false });
+  });
+
+  it('returns clean when both fields are undefined', () => {
+    expect(detectDescriptionJunk(undefined, undefined)).toEqual({ isJunk: false });
   });
 });

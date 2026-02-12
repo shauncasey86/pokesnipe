@@ -51,7 +51,7 @@ export function extractSignals(listing: {
 }
 
 export { cleanTitle } from './title-cleaner.js';
-export { detectJunk } from './junk-detector.js';
+export { detectJunk, detectDescriptionJunk } from './junk-detector.js';
 export { extractCardNumber } from './number-extractor.js';
 export type { CardNumber } from './number-extractor.js';
 export { detectVariant } from './variant-detector.js';
@@ -61,3 +61,5 @@ export { extractStructuredData } from './structured-extractor.js';
 export type { StructuredSignals } from './structured-extractor.js';
 export { mergeSignals } from './signal-merger.js';
 export type { NormalizedListing } from './signal-merger.js';
+export { scoreJunkSignals, recordJunkReport, extractNovelTokens, refreshJunkCaches } from './junk-scorer.js';
+export type { JunkScoreResult } from './junk-scorer.js';

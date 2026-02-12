@@ -21,6 +21,10 @@ const FAKE_PATTERNS = [
   /\bfake\b/,
   /\bunofficial\b/,
   /\bfan made\b/,
+  /\bfan art\b/,
+  /\bfanart\b/,
+  /\bhand painted\b/,
+  /\bhand drawn\b/,
   /\baltered art\b/,
 ];
 
@@ -85,6 +89,34 @@ export function detectJunk(cleanedTitle: string): { isJunk: boolean; reason?: st
   for (const pattern of LANGUAGE_WORD_PATTERNS) {
     if (pattern.test(cleanedTitle)) {
       return { isJunk: true, reason: 'non_english' };
+    }
+  }
+
+  return { isJunk: false };
+}
+
+/**
+ * Check eBay item description HTML for fake/fan-art signals.
+ * Only runs FAKE_PATTERNS — descriptions legitimately contain words
+ * like "booster" or "bundle" in marketing copy without being junk.
+ */
+export function detectDescriptionJunk(
+  description: string | undefined | null,
+  shortDescription: string | undefined | null,
+): { isJunk: boolean; reason?: string } {
+  if (!description && !shortDescription) return { isJunk: false };
+
+  // Strip HTML tags and collapse whitespace, then lowercase
+  const text = [description, shortDescription]
+    .filter(Boolean)
+    .join(' ')
+    .replace(/<[^>]*>/g, ' ')
+    .replace(/\s+/g, ' ')
+    .toLowerCase();
+
+  for (const pattern of FAKE_PATTERNS) {
+    if (pattern.test(text)) {
+      return { isJunk: true, reason: 'fake_description' };
     }
   }
 
