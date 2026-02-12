@@ -469,15 +469,15 @@ function DealDetailPanel({ dealSummary }: { dealSummary: Deal }) {
           <h2 className="text-2xl font-bold text-white leading-tight mb-1">{d.cardName || d.ebay_title}</h2>
           <p className="text-sm text-muted font-mono mb-3">{d.card_number ?? '?'}{detail?.variant_name ? ' \u00b7 ' + detail.variant_name : ''}</p>
           {detail?.expansion_name && (
-            <div className="flex items-center gap-2 mb-3 bg-obsidian rounded-lg px-3 py-2 border border-border/50">
-              {detail.expansion_logo && <img src={detail.expansion_logo} alt={detail.expansion_name} className="h-5 object-contain opacity-80" onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }} />}
+            <div className="flex items-center gap-2.5 mb-3 bg-obsidian rounded-lg px-3 py-2.5 border border-border/50 h-11">
+              {detail.expansion_logo && <img src={detail.expansion_logo} alt={detail.expansion_name} className="w-5 h-5 object-contain shrink-0 opacity-80" onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }} />}
               <div className="flex-1 min-w-0">
-                <div className="text-[10px] font-bold text-white truncate">{detail.expansion_name}</div>
-                <div className="text-[9px] text-muted font-mono">{detail.expansion_series}{detail.expansion_card_count ? ' \u00b7 ' + detail.expansion_card_count + ' cards' : ''}{detail.expansion_release_date ? ' \u00b7 ' + detail.expansion_release_date : ''}</div>
+                <div className="text-[10px] font-bold text-white truncate leading-tight">{detail.expansion_name}</div>
+                <div className="text-[9px] text-muted font-mono leading-tight truncate">{detail.expansion_series}{detail.expansion_card_count ? ' \u00b7 ' + detail.expansion_card_count + ' cards' : ''}{detail.expansion_release_date ? ' \u00b7 ' + detail.expansion_release_date : ''}</div>
               </div>
             </div>
           )}
-          <div className="flex items-center gap-4 text-sm">
+          <div className="flex items-center justify-center gap-4 text-sm">
             {d.seller_name && <div className="flex items-center gap-1.5 text-muted"><I.User s={16} c="w-4 h-4" />{d.seller_name} {d.seller_feedback != null && <span className="text-white">({d.seller_feedback.toLocaleString()})</span>}</div>}
             <div className="flex items-center gap-1.5 text-muted"><I.Clock s={16} c="w-4 h-4" /><span title={fmtListedTime(d.created_at)}>{timeAgo(d.created_at)}</span></div>
           </div>
