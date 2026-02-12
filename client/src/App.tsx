@@ -541,7 +541,7 @@ function DealDetailPanel({ dealSummary, onReviewDeal }: { dealSummary: Deal; onR
           <div className="absolute inset-0 bg-linear-to-tr from-transparent via-white/10 to-transparent opacity-50 mix-blend-overlay" />
           {canFlipImg && <div className={'absolute bottom-1 left-1 text-[8px] font-mono font-bold px-1.5 py-0.5 rounded ' + (detailScr ? 'bg-brand/90 text-white' : 'bg-white/80 text-obsidian')}>{detailScr ? 'Scrydex' : 'eBay'}</div>}
         </div>
-        <div className="flex-1 pt-2">
+        <div className="flex-1 min-w-0 pt-2">
           <div className="flex flex-wrap gap-2 mb-3">
             <Tier t={d.tier} />
             <span className="text-[10px] font-mono text-muted bg-surfaceHover px-2 py-0.5 rounded border border-border">{d.condition}{d.is_graded ? ' \u00b7 ' + d.grading_company + ' ' + d.grade : ''}</span>
@@ -553,7 +553,7 @@ function DealDetailPanel({ dealSummary, onReviewDeal }: { dealSummary: Deal; onR
               {detail.expansion_logo && <img src={detail.expansion_logo} alt={detail.expansion_name} className="w-5 h-5 object-contain shrink-0 opacity-80" onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }} />}
               <div className="flex-1 min-w-0">
                 <div className="text-[10px] font-bold text-white truncate">{detail.expansion_name}</div>
-                <div className="text-[9px] text-muted font-mono truncate">{detail.expansion_series}{detail.expansion_card_count ? ' \u00b7 ' + detail.expansion_card_count + ' cards' : ''}{detail.expansion_release_date ? ' \u00b7 ' + detail.expansion_release_date : ''}</div>
+                <div className="text-[9px] text-muted font-mono truncate">{detail.expansion_series}{detail.expansion_card_count ? ' \u00b7 ' + detail.expansion_card_count + ' cards' : ''}{detail.expansion_release_date ? ' \u00b7 ' + new Date(detail.expansion_release_date).toLocaleDateString('en-GB', { month: 'short', year: 'numeric' }) : ''}</div>
               </div>
             </div>
           )}

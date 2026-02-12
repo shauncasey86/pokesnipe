@@ -24,7 +24,7 @@ export async function getAccuracyStats(): Promise<AccuracyStats> {
       COUNT(*) FILTER (WHERE is_correct_match = true) as total_correct,
       COUNT(*) FILTER (WHERE is_correct_match = false) as total_incorrect
     FROM deals
-    WHERE status = 'reviewed'
+    WHERE is_correct_match IS NOT NULL
   `);
 
   const row = rows[0];
