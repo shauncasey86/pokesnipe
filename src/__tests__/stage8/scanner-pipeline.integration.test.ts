@@ -38,6 +38,10 @@ vi.mock('../../services/notifications/deal-alerts.js', () => ({
   sendDealAlert: vi.fn(),
 }));
 
+vi.mock('../../services/extraction/junk-scorer.js', () => ({
+  scoreJunkSignals: vi.fn().mockResolvedValue({ penalty: 0, matchedKeywords: [], sellerReportCount: 0 }),
+}));
+
 // Suppress pino log noise in tests
 vi.mock('pino', () => ({
   default: () => ({
@@ -58,6 +62,7 @@ import { isDuplicate, markProcessed } from '../../services/scanner/deduplicator.
 import { createDeal } from '../../services/scanner/deal-creator.js';
 import { calculateLiquidity, getVelocity, adjustTierForLiquidity } from '../../services/liquidity/index.js';
 import { sendDealAlert } from '../../services/notifications/deal-alerts.js';
+import { scoreJunkSignals } from '../../services/extraction/junk-scorer.js';
 
 // ── Import module under test ─────────────────────────────────────────────
 
@@ -167,6 +172,7 @@ beforeEach(() => {
   });
   vi.mocked(adjustTierForLiquidity).mockImplementation((tier: any) => tier);
   vi.mocked(sendDealAlert).mockResolvedValue(undefined as any);
+  vi.mocked(scoreJunkSignals).mockResolvedValue({ penalty: 0, matchedKeywords: [], sellerReportCount: 0 });
 });
 
 // ── Tests ────────────────────────────────────────────────────────────────

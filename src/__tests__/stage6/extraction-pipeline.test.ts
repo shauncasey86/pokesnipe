@@ -1,4 +1,16 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+
+// Mock pino and db pool — needed because extraction/index.ts re-exports junk-scorer
+// which transitively imports pool → config (env validation).
+vi.mock('pino', () => ({
+  default: () => ({
+    info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn(),
+  }),
+}));
+vi.mock('../../db/pool.js', () => ({
+  pool: { query: vi.fn().mockResolvedValue({ rows: [] }) },
+}));
+
 import { extractSignals } from '../../services/extraction/index.js';
 
 describe('extractSignals (full pipeline)', () => {
