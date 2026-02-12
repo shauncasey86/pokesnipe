@@ -27,9 +27,24 @@ const MAX_DRIFT = 0.10;
 /** Minimum weight for any signal (prevents zeroing out a dimension) */
 const MIN_WEIGHT = 0.03;
 
+/** Minimum incorrect deals with a specific reason to apply targeted penalty */
+const MIN_REASON_SAMPLE = 3;
+
+/**
+ * Maps incorrect_reason → the signal dimensions that are implicated.
+ * Non-match reasons (wrong_condition, wrong_price, bad_image) are excluded
+ * because they don't indicate a matching/confidence problem.
+ */
+const REASON_SIGNAL_MAP: Record<string, (keyof ConfidenceSignals)[]> = {
+  wrong_card: ['name', 'number'],
+  wrong_set: ['expansion', 'denominator'],
+  wrong_variant: ['variant'],
+};
+
 interface ReviewedDeal {
   isCorrect: boolean;
   signals: ConfidenceSignals;
+  incorrectReason: string | null;
 }
 
 interface CalibrationResult {
@@ -41,18 +56,21 @@ interface CalibrationResult {
   oldWeights: Record<string, number>;
   newWeights: Record<string, number>;
   signalStats: Record<string, { correctMean: number; incorrectMean: number; separation: number }>;
+  reasonStats?: Record<string, { count: number; targetedSignals: string[]; applied: boolean }>;
 }
 
 /**
  * Fetch all reviewed deals that have match_signals with confidence data.
+ * Now also fetches incorrect_reason for reason-aware calibration.
  */
 async function fetchReviewedDeals(): Promise<ReviewedDeal[]> {
   const { rows } = await pool.query(`
     SELECT
       is_correct_match,
+      incorrect_reason,
       match_signals->'confidence'->'signals' as signals
     FROM deals
-    WHERE status = 'reviewed'
+    WHERE (status = 'reviewed' OR (status = 'active' AND is_correct_match = TRUE))
       AND is_correct_match IS NOT NULL
       AND match_signals->'confidence'->'signals' IS NOT NULL
     ORDER BY reviewed_at DESC
@@ -63,6 +81,7 @@ async function fetchReviewedDeals(): Promise<ReviewedDeal[]> {
     .map(r => ({
       isCorrect: r.is_correct_match,
       signals: r.signals as ConfidenceSignals,
+      incorrectReason: r.incorrect_reason || null,
     }));
 }
 
@@ -141,43 +160,105 @@ function computeSignalStats(deals: ReviewedDeal[]) {
 }
 
 /**
- * Propose new weights based on signal separation analysis.
+ * Compute reason-aware adjustments.
  *
- * Strategy: signals that discriminate well between correct/incorrect matches
- * get a weight boost; signals that don't discriminate get reduced.
+ * Groups incorrect deals by their reason and computes a targeted penalty
+ * for the signal dimensions that are implicated by that reason.
  *
- * Uses the "separation" (correctMean - incorrectMean) as a measure of
- * predictive power. Higher separation = more useful signal = higher weight.
+ * For example, if 5 deals are marked "wrong_set", their expansion and
+ * denominator signal scores are averaged. If those averages are HIGH
+ * (the signals looked confident but were wrong), the signals get a
+ * stronger downward adjustment.
  *
- * Bounded to prevent catastrophic drift: each weight can only move ±MAX_DRIFT
- * from the spec default, and total weights are renormalized to 1.0.
+ * Returns per-signal adjustment values in [-0.06, 0] that should be
+ * ADDED to the base separation-derived adjustments.
+ */
+function computeReasonPenalties(
+  deals: ReviewedDeal[],
+): { penalties: Record<keyof ConfidenceSignals, number>; reasonStats: Record<string, { count: number; targetedSignals: string[]; applied: boolean }> } {
+  const penalties: Record<keyof ConfidenceSignals, number> = {
+    name: 0, denominator: 0, number: 0, expansion: 0, variant: 0, normalization: 0,
+  };
+  const reasonStats: Record<string, { count: number; targetedSignals: string[]; applied: boolean }> = {};
+
+  const incorrectDeals = deals.filter(d => !d.isCorrect && d.incorrectReason);
+
+  // Group by reason
+  const byReason = new Map<string, ReviewedDeal[]>();
+  for (const deal of incorrectDeals) {
+    const reason = deal.incorrectReason!;
+    if (!byReason.has(reason)) byReason.set(reason, []);
+    byReason.get(reason)!.push(deal);
+  }
+
+  for (const [reason, reasonDeals] of byReason) {
+    const targetSignals = REASON_SIGNAL_MAP[reason];
+    reasonStats[reason] = {
+      count: reasonDeals.length,
+      targetedSignals: targetSignals ? [...targetSignals] : [],
+      applied: false,
+    };
+
+    if (!targetSignals || reasonDeals.length < MIN_REASON_SAMPLE) continue;
+
+    // For each targeted signal, compute the mean score among these
+    // incorrect deals.  If the signal was HIGH but the match was wrong,
+    // that signal was misleading and deserves a penalty.
+    for (const signalKey of targetSignals) {
+      const scores = reasonDeals.map(d => d.signals[signalKey]);
+      const mean = scores.reduce((a, b) => a + b, 0) / scores.length;
+
+      // Penalty scales with how misleadingly high the signal was.
+      // A mean of 0.90 (very misleading) → penalty of -0.054
+      // A mean of 0.50 (ambiguous) → penalty of -0.030
+      // A mean of 0.20 (already low) → penalty of -0.012
+      // Cap at -0.06 to prevent over-correction.
+      const penalty = -Math.min(0.06, mean * 0.06);
+      penalties[signalKey] += penalty;
+    }
+
+    reasonStats[reason].applied = true;
+  }
+
+  return { penalties, reasonStats };
+}
+
+/**
+ * Propose new weights based on signal separation analysis,
+ * enhanced with reason-aware penalties.
+ *
+ * Strategy:
+ * 1. Compute base adjustments from global signal separation (as before)
+ * 2. Layer on reason-aware penalties for signals implicated by specific
+ *    error types (wrong_card → name/number, wrong_set → expansion/denom)
+ * 3. Bound, clamp, and renormalize
  */
 function proposeWeights(
   signalStats: Record<string, { correctMean: number; incorrectMean: number; separation: number }>,
   currentWeights: Record<keyof ConfidenceSignals, number>,
+  reasonPenalties: Record<keyof ConfidenceSignals, number>,
 ): Record<keyof ConfidenceSignals, number> {
   const proposed = { ...currentWeights };
 
-  // Compute raw adjustment factors from separation
-  // A positive separation (correct > incorrect) means the signal is useful
-  // A negative separation (incorrect > correct) means the signal is misleading
   const separations = SIGNAL_KEYS.map(k => signalStats[k]?.separation ?? 0);
-  const maxSep = Math.max(...separations.map(Math.abs), 0.01); // avoid div-by-zero
+  const maxSep = Math.max(...separations.map(Math.abs), 0.01);
 
   for (const key of SIGNAL_KEYS) {
     const sep = signalStats[key]?.separation ?? 0;
 
-    // Normalized adjustment: [-1, 1] range based on relative separation
+    // Base adjustment from global signal separation
     const normalizedAdj = sep / maxSep;
+    const baseAdjustment = normalizedAdj * MAX_DRIFT * 0.6;
 
-    // Scale to bounded drift: at most MAX_DRIFT absolute change
-    // Use 60% of max drift to be conservative (don't always hit the limit)
-    const adjustment = normalizedAdj * MAX_DRIFT * 0.6;
+    // Reason-aware penalty (negative or zero)
+    const reasonAdj = reasonPenalties[key];
+
+    // Combined adjustment: base + targeted reason penalty
+    const totalAdjustment = baseAdjustment + reasonAdj;
 
     // Blend: 70% current weight, 30% spec default, then apply adjustment
-    // This pulls weights back toward spec over time (mean reversion)
     const blended = currentWeights[key] * 0.7 + SPEC_WEIGHTS[key] * 0.3;
-    proposed[key] = Math.max(MIN_WEIGHT, blended + adjustment);
+    proposed[key] = Math.max(MIN_WEIGHT, blended + totalAdjustment);
 
     // Hard clamp: never drift more than MAX_DRIFT from spec
     proposed[key] = Math.max(
@@ -196,7 +277,6 @@ function proposeWeights(
   const roundedTotal = SIGNAL_KEYS.reduce((s, k) => s + proposed[k], 0);
   const diff = Math.round((1.0 - roundedTotal) * 1000) / 1000;
   if (diff !== 0) {
-    // Add/subtract the rounding error to the largest weight
     const largestKey = SIGNAL_KEYS.reduce((a, b) => proposed[a] >= proposed[b] ? a : b);
     proposed[largestKey] = Math.round((proposed[largestKey] + diff) * 1000) / 1000;
   }
@@ -227,12 +307,13 @@ export async function getActiveWeights(): Promise<Record<keyof ConfidenceSignals
 /**
  * Run the calibration loop.
  *
- * 1. Fetch all reviewed deals with signal data
+ * 1. Fetch all reviewed deals with signal data and incorrect reasons
  * 2. Compute signal-level statistics (mean scores for correct vs incorrect)
- * 3. Propose new weights based on signal discrimination power
- * 4. Evaluate: do new weights improve accuracy on the review corpus?
- * 5. If yes AND improvement > 0.5%, persist the new weights
- * 6. If no, keep current weights (do nothing)
+ * 3. Compute reason-aware penalties (targeted adjustments per error type)
+ * 4. Propose new weights combining global separation + reason penalties
+ * 5. Evaluate: do new weights improve accuracy on the review corpus?
+ * 6. If yes AND improvement > 0.5%, persist the new weights
+ * 7. If no, keep current weights (do nothing)
  */
 export async function runCalibration(): Promise<CalibrationResult> {
   const deals = await fetchReviewedDeals();
@@ -272,8 +353,11 @@ export async function runCalibration(): Promise<CalibrationResult> {
   const signalStats = computeSignalStats(deals);
   const accuracyBefore = evaluateAccuracy(deals, currentWeights);
 
-  // Propose new weights
-  const newWeights = proposeWeights(signalStats, currentWeights);
+  // Compute reason-aware penalties
+  const { penalties: reasonPenalties, reasonStats } = computeReasonPenalties(deals);
+
+  // Propose new weights (global separation + reason-aware penalties)
+  const newWeights = proposeWeights(signalStats, currentWeights, reasonPenalties);
   const accuracyAfter = evaluateAccuracy(deals, newWeights);
 
   const improvement = accuracyAfter - accuracyBefore;
@@ -286,6 +370,8 @@ export async function runCalibration(): Promise<CalibrationResult> {
     accuracyAfter,
     improvement,
     signalStats,
+    reasonPenalties,
+    reasonStats,
     currentWeights,
     newWeights,
   }, 'Calibration analysis complete');
@@ -303,6 +389,7 @@ export async function runCalibration(): Promise<CalibrationResult> {
       oldWeights: currentWeights,
       newWeights,
       signalStats,
+      reasonStats,
     };
   }
 
@@ -321,6 +408,8 @@ export async function runCalibration(): Promise<CalibrationResult> {
         incorrect_count: incorrectCount,
         improvement,
         signal_stats: signalStats,
+        reason_penalties: reasonPenalties,
+        reason_stats: reasonStats,
       }),
     ],
   );
@@ -330,6 +419,7 @@ export async function runCalibration(): Promise<CalibrationResult> {
     accuracyBefore,
     accuracyAfter,
     newWeights,
+    reasonStats,
   }, 'Calibration applied — new weights persisted');
 
   return {
@@ -341,6 +431,7 @@ export async function runCalibration(): Promise<CalibrationResult> {
     oldWeights: currentWeights,
     newWeights,
     signalStats,
+    reasonStats,
   };
 }
 

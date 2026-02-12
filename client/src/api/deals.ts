@@ -40,11 +40,28 @@ export async function getDealDetail(id: string): Promise<DealDetail> {
   return apiFetch<DealDetail>(`/api/deals/${id}`);
 }
 
-export async function reviewDeal(id: string, isCorrectMatch: boolean, reason?: string): Promise<{ success: boolean }> {
+export async function reviewDeal(id: string, isCorrectMatch: boolean, reason?: string, correctCardId?: string): Promise<{ success: boolean }> {
   return apiFetch<{ success: boolean }>(`/api/deals/${id}/review`, {
     method: 'POST',
-    body: JSON.stringify({ isCorrectMatch, reason: reason || undefined }),
+    body: JSON.stringify({
+      isCorrectMatch,
+      reason: reason || undefined,
+      correctCardId: correctCardId || undefined,
+    }),
   });
+}
+
+export interface CardSearchResult {
+  scrydex_card_id: string;
+  name: string;
+  number: string;
+  expansion_name: string;
+  expansion_code: string;
+  image_small?: string;
+}
+
+export async function searchCards(query: string, limit = 10): Promise<{ data: CardSearchResult[] }> {
+  return apiFetch<{ data: CardSearchResult[] }>(`/api/catalog/cards/search?q=${encodeURIComponent(query)}&limit=${limit}`);
 }
 
 export async function fetchVelocity(dealId: string) {
