@@ -9,13 +9,16 @@ import SystemView from './components/SystemView';
 import AuditView from './components/AuditView';
 import LookupView from './components/LookupView';
 import SettingsView from './components/SettingsView';
-import { getDeals, getDealDetail, reviewDeal, getStatus } from './api/deals';
+import { getDeals, getDealDetail, reviewDeal, getStatus, checkAuth, login, logout } from './api/deals';
 import type { Deal, DealDetail as DealDetailType, SystemStatus } from './types/deals';
 
 type ViewName = 'opportunities' | 'system' | 'audit' | 'lookup' | 'settings';
 type TierFilter = Record<string, boolean>;
 
 export default function App() {
+  const [authed, setAuthed] = useState<boolean | null>(null); // null = checking
+  const [loginError, setLoginError] = useState<string | null>(null);
+  const [loginLoading, setLoginLoading] = useState(false);
   const [deals, setDeals] = useState<Deal[]>([]);
   const [dealsLoading, setDealsLoading] = useState(true);
   const [dealsError, setDealsError] = useState<string | null>(null);
@@ -27,8 +30,41 @@ export default function App() {
   const [searchQ, setSearchQ] = useState('');
   const listRef = useRef<HTMLDivElement>(null);
 
+  // Check auth on mount
+  useEffect(() => {
+    checkAuth().then(ok => setAuthed(ok));
+  }, []);
+
+  // Listen for 401s and redirect to login
+  useEffect(() => {
+    const handler = () => setAuthed(false);
+    window.addEventListener('auth:unauthorized', handler);
+    return () => window.removeEventListener('auth:unauthorized', handler);
+  }, []);
+
+  const handleLogin = async (password: string) => {
+    setLoginLoading(true);
+    setLoginError(null);
+    try {
+      await login(password);
+      setAuthed(true);
+    } catch (err) {
+      setLoginError(err instanceof Error ? err.message : 'Login failed');
+    } finally {
+      setLoginLoading(false);
+    }
+  };
+
+  const handleLogout = async () => {
+    await logout();
+    setAuthed(false);
+    setDeals([]);
+    setStatus(null);
+  };
+
   // Fetch deals
   useEffect(() => {
+    if (!authed) return;
     let cancelled = false;
     async function load() {
       try {
@@ -48,10 +84,11 @@ export default function App() {
     load();
     const interval = setInterval(load, 60_000);
     return () => { cancelled = true; clearInterval(interval); };
-  }, []);
+  }, [authed]);
 
   // Fetch system status
   useEffect(() => {
+    if (!authed) return;
     let cancelled = false;
     async function load() {
       try {
@@ -64,11 +101,12 @@ export default function App() {
     load();
     const interval = setInterval(load, 30_000);
     return () => { cancelled = true; clearInterval(interval); };
-  }, []);
+  }, [authed]);
 
   // SSE for real-time deal updates
   useEffect(() => {
-    const es = new EventSource('/api/deals/stream');
+    if (!authed) return;
+    const es = new EventSource('/api/deals/stream', { withCredentials: true });
     es.addEventListener('deal', (e) => {
       try {
         const newDeal = JSON.parse(e.data) as Deal;
@@ -81,7 +119,7 @@ export default function App() {
     });
     es.onerror = () => { /* EventSource auto-reconnects */ };
     return () => es.close();
-  }, []);
+  }, [authed]);
 
   // Clock
   useEffect(() => {
@@ -128,6 +166,22 @@ export default function App() {
   const dealsToday = status?.scanner.dealsToday ?? deals.length;
   const accuracy = status?.accuracy.rolling7d != null ? (status.accuracy.rolling7d * 100).toFixed(1) + '%' : '\u2014';
 
+  // Auth checking / login screen
+  if (authed === null) {
+    return (
+      <div className="h-screen w-screen flex items-center justify-center bg-obsidian">
+        <div className="text-center">
+          <I.Loader s={32} c="text-brand mx-auto mb-3" />
+          <p className="text-sm text-muted">Checking authentication&hellip;</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!authed) {
+    return <LoginScreen onLogin={handleLogin} error={loginError} loading={loginLoading} />;
+  }
+
   return (
     <div className="h-screen w-screen flex flex-col font-sans text-sm selection:bg-brand/30">
       {/* ═══════════ HEADER ═══════════ */}
@@ -155,8 +209,11 @@ export default function App() {
           </div>
           <div className="text-xs font-mono text-muted">{time}</div>
           <div className="w-px h-6 bg-border mx-2" />
-          <button className="w-8 h-8 rounded-full bg-surface border border-border flex items-center justify-center hover:bg-surfaceHover transition-colors">
+          <button className="w-8 h-8 rounded-full bg-surface border border-border flex items-center justify-center hover:bg-surfaceHover transition-colors" title="Notifications">
             <I.Bell c="text-muted w-4 h-4" />
+          </button>
+          <button onClick={handleLogout} className="w-8 h-8 rounded-full bg-surface border border-border flex items-center justify-center hover:bg-risk/20 hover:border-risk/30 transition-colors" title="Logout">
+            <I.X c="text-muted w-4 h-4" />
           </button>
         </div>
       </header>
@@ -561,6 +618,51 @@ function DealDetailPanel({ dealSummary }: { dealSummary: Deal }) {
         </a>
         <div className="text-center text-[10px] text-muted mt-2">{d.seller_name}{d.seller_feedback != null ? ' \u00b7 ' + d.seller_feedback.toLocaleString() + ' feedback' : ''} &middot; Enter &#8629; to open</div>
       </div>
+    </div>
+  );
+}
+
+// ═══════════ LOGIN SCREEN ═══════════
+function LoginScreen({ onLogin, error, loading }: { onLogin: (pw: string) => void; error: string | null; loading: boolean }) {
+  const [pw, setPw] = useState('');
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (pw.trim()) onLogin(pw);
+  };
+  return (
+    <div className="h-screen w-screen flex items-center justify-center bg-obsidian">
+      <form onSubmit={handleSubmit} className="w-full max-w-sm mx-auto p-8">
+        <div className="flex items-center justify-center gap-2 mb-8">
+          <div className="w-10 h-10 rounded-lg bg-linear-to-br from-brand to-purple-600 flex items-center justify-center shadow-[0_0_15px_rgba(99,102,241,0.4)]">
+            <I.Crosshair c="text-white w-6 h-6" />
+          </div>
+          <span className="font-bold text-xl tracking-tight text-white">
+            Pok&eacute;Snipe <span className="text-brand font-mono text-xs ml-1 bg-brand/10 px-1.5 py-0.5 rounded">PRO</span>
+          </span>
+        </div>
+        <div className="bg-surface border border-border rounded-xl p-6 space-y-4">
+          <div>
+            <label htmlFor="password" className="text-xs font-bold text-muted uppercase tracking-wider block mb-2">Password</label>
+            <input
+              id="password"
+              type="password"
+              value={pw}
+              onChange={e => setPw(e.target.value)}
+              placeholder="Enter access password"
+              autoFocus
+              className="w-full bg-obsidian border border-border rounded-lg px-4 py-2.5 text-sm font-mono text-white focus:outline-none focus:border-brand placeholder:text-muted/50"
+            />
+          </div>
+          {error && <div className="text-xs text-risk bg-risk/10 border border-risk/20 rounded-lg px-3 py-2">{error}</div>}
+          <button
+            type="submit"
+            disabled={loading || !pw.trim()}
+            className="w-full bg-brand hover:bg-brand/90 disabled:opacity-50 disabled:cursor-not-allowed text-white font-bold py-2.5 px-4 rounded-xl transition-all shadow-[0_0_15px_rgba(99,102,241,0.3)]"
+          >
+            {loading ? 'Signing in\u2026' : 'Sign In'}
+          </button>
+        </div>
+      </form>
     </div>
   );
 }

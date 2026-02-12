@@ -2,6 +2,7 @@ import type { DealsResponse, DealDetail, SystemStatus, Preferences, LookupResult
 
 async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
   const res = await fetch(path, {
+    credentials: 'include',
     ...options,
     headers: { 'Content-Type': 'application/json', ...options?.headers },
   });
@@ -86,6 +87,7 @@ export async function toggleScanner(action: 'start' | 'stop'): Promise<{ status:
 export async function login(password: string): Promise<void> {
   const res = await fetch('/auth/login', {
     method: 'POST',
+    credentials: 'include',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ password }),
   });
@@ -96,7 +98,7 @@ export async function login(password: string): Promise<void> {
 }
 
 export async function logout(): Promise<void> {
-  await fetch('/auth/logout', { method: 'POST' });
+  await fetch('/auth/logout', { method: 'POST', credentials: 'include' });
 }
 
 export async function testTelegram(): Promise<{ success: boolean; message?: string }> {
@@ -107,7 +109,7 @@ export async function testTelegram(): Promise<{ success: boolean; message?: stri
 
 export async function checkAuth(): Promise<boolean> {
   try {
-    const res = await fetch('/auth/check');
+    const res = await fetch('/auth/check', { credentials: 'include' });
     const data = await res.json();
     return data.authenticated === true;
   } catch {
