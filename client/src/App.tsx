@@ -512,9 +512,13 @@ function DealDetailPanel({ dealSummary, onReviewDeal }: { dealSummary: Deal; onR
   const confSignals = detail?.match_signals?.confidence ?? null;
   const liqSignals = detail?.match_signals?.liquidity ?? null;
 
-  // Condition comps — use deal's condition_comps (GBP-converted) with variant_prices as fallback
-  const comps = detail?.condition_comps ?? detail?.variant_prices ?? null;
-  const compsAreGBP = !!detail?.condition_comps;
+  // Condition comps — prefer deal's condition_comps (GBP-converted), fall back to variant_prices (USD)
+  const condComps = detail?.condition_comps;
+  const rawComps = detail?.variant_prices;
+  const compsGBP: Record<string, { market: number; low: number }> | null =
+    condComps ? Object.fromEntries(
+      Object.entries(condComps).map(([k, v]) => [k, { market: v.marketGBP, low: v.lowGBP }])
+    ) : rawComps;
 
   // Trends from variant_trends
   const variantTrends = detail?.variant_trends ?? null;
@@ -637,20 +641,18 @@ function DealDetailPanel({ dealSummary, onReviewDeal }: { dealSummary: Deal; onR
         </div>
 
         {/* Condition Comps */}
-        {comps && (
+        {compsGBP && (
           <div className="bg-obsidian border border-border rounded-xl p-5">
             <h3 className="text-[10px] font-bold text-muted uppercase tracking-wider mb-3">Condition Comps (Scrydex)</h3>
             <div className="grid grid-cols-4 gap-2">
               {(['NM', 'LP', 'MP', 'HP'] as const).map(c => {
-                const cp = comps[c];
+                const cp = compsGBP[c];
                 const ac = d.condition === c;
-                const mkt = cp ? (compsAreGBP ? (cp as any).marketGBP ?? cp.market : cp.market) ?? 0 : 0;
-                const lo = cp ? (compsAreGBP ? (cp as any).lowGBP ?? cp.low : cp.low) ?? 0 : 0;
                 return (
                   <div key={c} className={'rounded-lg p-3 text-center border ' + (ac ? 'bg-brand/10 border-brand/30' : 'bg-surface border-border')}>
                     <div className={'text-[10px] font-bold mb-1 ' + (ac ? 'text-brand' : 'text-muted')}>{c}</div>
                     {cp ? (
-                      <><div className="text-sm font-mono font-bold text-white">&pound;{mkt.toFixed(0)}</div><div className="text-[9px] font-mono text-muted">low &pound;{lo.toFixed(0)}</div></>
+                      <><div className="text-sm font-mono font-bold text-white">&pound;{(cp.market ?? 0).toFixed(0)}</div><div className="text-[9px] font-mono text-muted">low &pound;{(cp.low ?? 0).toFixed(0)}</div></>
                     ) : (
                       <div className="text-[10px] text-muted/50">&mdash;</div>
                     )}
