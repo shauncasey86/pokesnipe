@@ -294,7 +294,11 @@ export default function AuditView() {
                             {/* Calibration-specific stats */}
                             {isCalibrationEvent(entry.sync_type) && entry.metadata && (() => {
                               const meta = entry.metadata as Record<string, unknown>;
-                              const applied = meta.applied as boolean;
+                              const applied = !!meta.applied;
+                              const sampleSize = Number(meta.sample_size ?? 0);
+                              const accBefore = Number(meta.accuracy_before ?? 0);
+                              const accAfter = Number(meta.accuracy_after ?? 0);
+                              const reasonText = String(meta.reason ?? '');
                               const signalStats = meta.signal_stats as Record<string, { correctMean: number; incorrectMean: number; separation: number }> | undefined;
                               const oldW = meta.old_weights as Record<string, number> | undefined;
                               const newW = meta.new_weights as Record<string, number> | undefined;
@@ -307,11 +311,11 @@ export default function AuditView() {
                                     </div>
                                     <div className="bg-obsidian rounded px-3 py-2 text-center">
                                       <div className="text-[9px] text-muted uppercase tracking-wider">Sample</div>
-                                      <div className="text-sm font-mono font-bold text-white/80">{meta.sample_size as number}</div>
+                                      <div className="text-sm font-mono font-bold text-white/80">{sampleSize}</div>
                                     </div>
                                     <div className="bg-obsidian rounded px-3 py-2 text-center">
                                       <div className="text-[9px] text-muted uppercase tracking-wider">Accuracy</div>
-                                      <div className="text-sm font-mono font-bold text-white/80">{(meta.accuracy_before as number)?.toFixed(1)}% &rarr; {(meta.accuracy_after as number)?.toFixed(1)}%</div>
+                                      <div className="text-sm font-mono font-bold text-white/80">{accBefore.toFixed(1)}% &rarr; {accAfter.toFixed(1)}%</div>
                                     </div>
                                   </div>
                                   {signalStats && (
@@ -346,9 +350,9 @@ export default function AuditView() {
                                       </div>
                                     </div>
                                   )}
-                                  {!applied && meta.reason && (
+                                  {!applied && reasonText && (
                                     <div className="bg-amber-900/20 border border-amber-800/30 rounded px-3 py-2 text-amber-300 text-[11px]">
-                                      {meta.reason as string}
+                                      {reasonText}
                                     </div>
                                   )}
                                 </div>
