@@ -81,6 +81,7 @@ export async function searchItems(
     'buyingOptions:{FIXED_PRICE}',
     'conditionIds:{2750|4000|1000|1500|2000|2500|3000}',
     'deliveryCountry:GB',
+    'itemLocationCountry:GB',
   ].join(',');
 
   const params = new URLSearchParams({
