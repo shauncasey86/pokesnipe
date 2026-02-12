@@ -518,7 +518,7 @@ function DealDetailPanel({ dealSummary, onReviewDeal }: { dealSummary: Deal; onR
   const compsGBP: Record<string, { market: number; low: number }> | null =
     condComps ? Object.fromEntries(
       Object.entries(condComps).map(([k, v]) => [k, { market: v.marketGBP, low: v.lowGBP }])
-    ) : rawComps;
+    ) : rawComps ?? null;
 
   // Trends from variant_trends
   const variantTrends = detail?.variant_trends ?? null;
