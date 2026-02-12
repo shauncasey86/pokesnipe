@@ -1,17 +1,63 @@
+import { useState, useEffect } from 'react';
 import { I } from '../icons';
-import { DEALS, SYNC_LOG, timeAgo, fmtTime } from '../data/mock';
+import { timeAgo } from '../data/mock';
 import { MetricCard, Progress, StatusDot } from './shared';
-
-const now = Date.now();
-const scannerMetrics = { scansTotal: 1247, listingsProcessed: 14964, matched: 892, rejected: 14072, dealsCreated: DEALS.length, avgCycleSec: 14.2, lastScan: new Date(now - 12000), interval: 5 };
-const apiMetrics = { ebay: { used: 1847, limit: 5000, search: 288, getItem: 1559, oauthValid: true, lastError: null }, scrydex: { credits: 47600, total: 75000, lastSync: new Date(now - 10 * 60000) }, fx: { rate: 0.789, lastFetch: new Date(now - 47 * 60000), stale: false } };
-const catalogMetrics = { expansions: 347, cards: 18420, variants: 52800, lastFull: new Date(now - 48 * 3600000), lastDelta: new Date(now - 10 * 60000) };
-const alerts = [
-  { sev: 'warn' as const, msg: 'Exchange rate last fetched 47m ago \u2014 approaching staleness threshold (4h)', ts: new Date(now - 47 * 60000) },
-  { sev: 'warn' as const, msg: 'eBay rate limit: 2 consecutive 429s detected this cycle', ts: new Date(now - 8 * 60000) },
-];
+import { getStatus } from '../api/deals';
+import type { SystemStatus } from '../types/deals';
 
 export default function SystemView() {
+  const [status, setStatus] = useState<SystemStatus | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      try {
+        const s = await getStatus();
+        if (!cancelled) { setStatus(s); setError(null); }
+      } catch (err) {
+        if (!cancelled) setError(err instanceof Error ? err.message : 'Failed to load');
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+    load();
+    const interval = setInterval(load, 30_000);
+    return () => { cancelled = true; clearInterval(interval); };
+  }, []);
+
+  if (loading && !status) {
+    return (
+      <div className="flex-1 flex items-center justify-center bg-obsidian">
+        <div className="text-center">
+          <I.Loader s={32} c="text-brand mx-auto mb-3" />
+          <p className="text-sm text-muted">Loading system status&hellip;</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (error && !status) {
+    return (
+      <div className="flex-1 flex items-center justify-center bg-obsidian">
+        <div className="text-center max-w-xs">
+          <I.AlertTriangle s={32} c="text-risk mx-auto mb-3" />
+          <h3 className="text-base font-bold text-white mb-1">Failed to load</h3>
+          <p className="text-xs text-muted">{error}</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!status) return null;
+
+  const fxStaleWarning = status.exchangeRate.isStale;
+  const ebayLow = status.ebay.status === 'low';
+  const alerts: { sev: 'warn' | 'error'; msg: string }[] = [];
+  if (fxStaleWarning) alerts.push({ sev: 'warn', msg: `Exchange rate is stale${status.exchangeRate.fetchedAt ? ' \u2014 last fetched ' + timeAgo(status.exchangeRate.fetchedAt) : ''}` });
+  if (ebayLow) alerts.push({ sev: 'warn', msg: `eBay API budget running low \u2014 ${status.ebay.remaining} calls remaining` });
+  if (status.scanner.lastError) alerts.push({ sev: 'error', msg: `Scanner error: ${status.scanner.lastError}` });
 
   return (
     <div className="flex-1 overflow-y-auto p-6 bg-obsidian">
@@ -27,10 +73,7 @@ export default function SystemView() {
             {alerts.map((a, i) => (
               <div key={i} className={`flex items-start gap-3 p-3 rounded-xl border ${a.sev === 'warn' ? 'bg-warn/5 border-warn/20' : 'bg-risk/5 border-risk/20'}`}>
                 <I.AlertTriangle s={16} c={`shrink-0 mt-0.5 ${a.sev === 'warn' ? 'text-warn' : 'text-risk'}`} />
-                <div className="flex-1">
-                  <p className={`text-sm ${a.sev === 'warn' ? 'text-warn' : 'text-risk'}`}>{a.msg}</p>
-                  <p className="text-[10px] text-muted mt-0.5">{timeAgo(a.ts)}</p>
-                </div>
+                <p className={`text-sm ${a.sev === 'warn' ? 'text-warn' : 'text-risk'}`}>{a.msg}</p>
               </div>
             ))}
           </div>
@@ -41,16 +84,16 @@ export default function SystemView() {
           <div className="flex items-center justify-between mb-4">
             <div className="flex items-center gap-2"><I.Radar s={18} c="text-brand" /><h2 className="text-sm font-bold text-white">Scanner</h2></div>
             <div className="flex items-center gap-2 text-xs">
-              <StatusDot ok={true} />
-              <span className="text-profit font-semibold">Running</span>
-              <span className="text-muted">&middot; every {scannerMetrics.interval}min &middot; last {timeAgo(scannerMetrics.lastScan)}</span>
+              <StatusDot ok={status.scanner.isRunning} />
+              <span className={status.scanner.isRunning ? 'text-profit font-semibold' : 'text-warn font-semibold'}>{status.scanner.status === 'paused' ? 'Paused' : status.scanner.isRunning ? 'Running' : 'Idle'}</span>
+              {status.scanner.lastRun && <span className="text-muted">&middot; last {timeAgo(status.scanner.lastRun)}</span>}
             </div>
           </div>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-            <MetricCard icon={I.Activity} label="Scans Total" value={scannerMetrics.scansTotal.toLocaleString()} sub={`${scannerMetrics.avgCycleSec}s avg cycle`} />
-            <MetricCard icon={I.Search} label="Listings Processed" value={scannerMetrics.listingsProcessed.toLocaleString()} sub={`${scannerMetrics.matched} matched \u00b7 ${scannerMetrics.rejected} rejected`} />
-            <MetricCard icon={I.Zap} label="Deals Created" value={scannerMetrics.dealsCreated} color="text-profit" />
-            <MetricCard icon={I.Check} label="Match Rate" value={`${((scannerMetrics.matched / scannerMetrics.listingsProcessed) * 100).toFixed(1)}%`} sub="matched / processed" />
+            <MetricCard icon={I.Activity} label="Deals Today" value={status.scanner.dealsToday} />
+            <MetricCard icon={I.Zap} label="Grails Today" value={status.scanner.grailsToday} color="text-grail" />
+            <MetricCard icon={I.Database} label="Active Deals" value={status.scanner.activeDeals} />
+            <MetricCard icon={I.Check} label="Accuracy (7d)" value={status.accuracy.rolling7d != null ? (status.accuracy.rolling7d * 100).toFixed(1) + '%' : '\u2014'} sub={`${status.accuracy.totalReviewed} reviewed`} />
           </div>
         </div>
 
@@ -61,29 +104,28 @@ export default function SystemView() {
             <div className="bg-obsidian rounded-xl p-4 border border-border">
               <div className="flex items-center justify-between mb-3">
                 <span className="text-xs font-bold text-white">eBay Browse API</span>
-                <div className="flex items-center gap-1.5"><StatusDot ok={apiMetrics.ebay.oauthValid} /><span className="text-[10px] text-muted">OAuth valid</span></div>
+                <div className="flex items-center gap-1.5"><StatusDot ok={status.ebay.status === 'healthy'} /><span className="text-[10px] text-muted">{status.ebay.status}</span></div>
               </div>
-              <Progress value={apiMetrics.ebay.used} max={apiMetrics.ebay.limit} warn={80} label="Daily calls" />
-              <div className="flex gap-4 mt-3 text-[10px] text-muted">
-                <span>search <span className="text-white/70 font-mono">{apiMetrics.ebay.search}</span></span>
-                <span>getItem <span className="text-white/70 font-mono">{apiMetrics.ebay.getItem}</span></span>
-              </div>
+              <Progress value={status.ebay.callsToday} max={status.ebay.dailyLimit} warn={80} label="Daily calls" />
+              <div className="text-[10px] text-muted mt-2"><span className="text-white/70 font-mono">{status.ebay.remaining.toLocaleString()}</span> remaining</div>
             </div>
-            <div className="bg-obsidian rounded-xl p-4 border border-border">
-              <div className="flex items-center justify-between mb-3">
-                <span className="text-xs font-bold text-white">Scrydex</span>
-                <span className="text-[10px] text-muted">Last sync {timeAgo(apiMetrics.scrydex.lastSync)}</span>
+            {status.scrydex && (
+              <div className="bg-obsidian rounded-xl p-4 border border-border">
+                <div className="flex items-center justify-between mb-3">
+                  <span className="text-xs font-bold text-white">Scrydex</span>
+                  <StatusDot ok={status.scrydex.status === 'healthy'} />
+                </div>
+                <Progress value={status.scrydex.creditsConsumed} max={status.scrydex.creditsConsumed + 10000} color="bg-brand" warn={80} label="Credits used" />
+                <div className="text-[10px] text-muted mt-2">Period ends <span className="text-white/70 font-mono">{new Date(status.scrydex.periodEnd).toLocaleDateString()}</span></div>
               </div>
-              <Progress value={apiMetrics.scrydex.total - apiMetrics.scrydex.credits} max={apiMetrics.scrydex.total} color="bg-brand" warn={80} label="Credits used" />
-              <div className="text-[10px] text-muted mt-2"><span className="text-white/70 font-mono">{apiMetrics.scrydex.credits.toLocaleString()}</span> credits remaining</div>
-            </div>
+            )}
             <div className="bg-obsidian rounded-xl p-4 border border-border">
               <div className="flex items-center justify-between mb-3">
                 <span className="text-xs font-bold text-white">Exchange Rate</span>
-                <StatusDot ok={!apiMetrics.fx.stale} />
+                <StatusDot ok={!status.exchangeRate.isStale} />
               </div>
-              <div className="text-3xl font-mono font-bold text-white mb-1">{apiMetrics.fx.rate}</div>
-              <div className="text-[10px] text-muted">USD &rarr; GBP &middot; fetched {timeAgo(apiMetrics.fx.lastFetch)}</div>
+              <div className="text-3xl font-mono font-bold text-white mb-1">{status.exchangeRate.rate?.toFixed(4) ?? '\u2014'}</div>
+              <div className="text-[10px] text-muted">USD &rarr; GBP{status.exchangeRate.fetchedAt ? ' \u00b7 fetched ' + timeAgo(status.exchangeRate.fetchedAt) : ''}</div>
               <div className="text-[10px] text-muted mt-1">Staleness threshold: 4 hours</div>
             </div>
           </div>
@@ -93,48 +135,36 @@ export default function SystemView() {
         <div className="bg-surface border border-border rounded-xl p-5">
           <div className="flex items-center gap-2 mb-4"><I.Database s={18} c="text-brand" /><h2 className="text-sm font-bold text-white">Card Catalog</h2></div>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-            <MetricCard icon={I.Database} label="Expansions" value={catalogMetrics.expansions} />
-            <MetricCard icon={I.Database} label="Cards" value={catalogMetrics.cards.toLocaleString()} />
-            <MetricCard icon={I.Database} label="Variants" value={catalogMetrics.variants.toLocaleString()} />
-            <MetricCard icon={I.Clock} label="Last Full Sync" value={timeAgo(catalogMetrics.lastFull)} sub={`Delta: ${timeAgo(catalogMetrics.lastDelta)}`} />
-          </div>
-          <div className="mt-4 pt-3 border-t border-border/50">
-            <h3 className="text-[10px] font-bold text-muted uppercase tracking-wider mb-2">Recent Syncs</h3>
-            <div className="space-y-1.5">
-              {SYNC_LOG.map(s => (
-                <div key={s.id} className="flex items-center gap-3 text-[11px] font-mono py-1.5 px-3 rounded-lg bg-obsidian">
-                  <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold ${s.type === 'full' ? 'bg-brand/10 text-brand' : 'bg-surfaceHover text-muted'}`}>{s.type.toUpperCase()}</span>
-                  <span className="text-muted">{fmtTime(s.startedAt)}</span>
-                  <span className={`${s.status === 'completed' ? 'text-profit' : 'text-risk'}`}>{s.status}</span>
-                  <span className="text-muted/60">&middot;</span><span className="text-white/70">{s.cards.toLocaleString()} cards</span>
-                  <span className="text-muted/60">&middot;</span><span className="text-white/70">{s.variants.toLocaleString()} variants</span>
-                  <span className="text-muted/60">&middot;</span><span className="text-muted">{s.credits} cr</span>
-                </div>
-              ))}
-            </div>
+            <MetricCard icon={I.Database} label="Expansions" value={status.sync.totalExpansions.toLocaleString()} />
+            <MetricCard icon={I.Database} label="Cards" value={status.sync.totalCards.toLocaleString()} />
+            <MetricCard icon={I.Clock} label="Last Sync" value={status.sync.lastSync ? timeAgo(status.sync.lastSync) : 'Never'} />
+            <MetricCard icon={I.Check} label="Dedup Memory" value={status.scanner.dedupMemorySize.toLocaleString()} sub="listings tracked" />
           </div>
         </div>
 
         {/* Background Jobs */}
-        <div className="bg-surface border border-border rounded-xl p-5">
-          <div className="flex items-center gap-2 mb-4"><I.Clock s={18} c="text-brand" /><h2 className="text-sm font-bold text-white">Background Jobs (&sect;14.3)</h2></div>
-          <div className="space-y-2">
-            {[
-              { name: 'eBay Scan', interval: '5 min', last: '12s ago', ok: true },
-              { name: 'Deal Cleanup', interval: '1 hour', last: '18m ago', ok: true },
-              { name: 'Exchange Rate', interval: '1 hour', last: '47m ago', ok: true },
-              { name: 'Hot Refresh', interval: 'Daily 03:00', last: '21h ago', ok: true },
-              { name: 'Expansion Check', interval: 'Daily 04:00', last: '22h ago', ok: true },
-              { name: 'Full Sync', interval: 'Weekly Sun 03:00', last: '2d ago', ok: true },
-              { name: 'Listings Pre-fetch', interval: 'Weekly Sun 05:00', last: '2d ago', ok: true },
-            ].map(j => (
-              <div key={j.name} className="flex items-center justify-between py-2 px-3 rounded-lg bg-obsidian text-sm">
-                <div className="flex items-center gap-3"><StatusDot ok={j.ok} /><span className="text-white font-medium">{j.name}</span></div>
-                <div className="flex items-center gap-4 text-[11px] font-mono"><span className="text-muted">{j.interval}</span><span className="text-white/60">{j.last}</span></div>
-              </div>
-            ))}
+        {status.jobs && Object.keys(status.jobs).length > 0 && (
+          <div className="bg-surface border border-border rounded-xl p-5">
+            <div className="flex items-center gap-2 mb-4"><I.Clock s={18} c="text-brand" /><h2 className="text-sm font-bold text-white">Background Jobs</h2></div>
+            <div className="space-y-2">
+              {Object.entries(status.jobs).map(([name, job]) => {
+                const j = job as Record<string, unknown>;
+                return (
+                  <div key={name} className="flex items-center justify-between py-2 px-3 rounded-lg bg-obsidian text-sm">
+                    <div className="flex items-center gap-3">
+                      <StatusDot ok={j.isRunning as boolean || !(j.isPaused as boolean)} />
+                      <span className="text-white font-medium">{name}</span>
+                    </div>
+                    <div className="flex items-center gap-4 text-[11px] font-mono">
+                      {j.isPaused && <span className="text-warn">paused</span>}
+                      {j.lastRun && <span className="text-muted">{timeAgo(j.lastRun as string)}</span>}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
           </div>
-        </div>
+        )}
       </div>
     </div>
   );
