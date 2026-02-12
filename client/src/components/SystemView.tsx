@@ -156,8 +156,8 @@ export default function SystemView() {
                       <span className="text-white font-medium">{name}</span>
                     </div>
                     <div className="flex items-center gap-4 text-[11px] font-mono">
-                      {j.isPaused && <span className="text-warn">paused</span>}
-                      {j.lastRun && <span className="text-muted">{timeAgo(j.lastRun as string)}</span>}
+                      {Boolean(j.isPaused) && <span className="text-warn">paused</span>}
+                      {Boolean(j.lastRun) && <span className="text-muted">{timeAgo(j.lastRun as string)}</span>}
                     </div>
                   </div>
                 );
