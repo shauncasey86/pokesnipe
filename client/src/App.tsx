@@ -116,14 +116,14 @@ const SilphScope = ({ reason }: { reason: string | null }) => {
 // Recent Comps — sales-style list
 const RecentComps = ({ comps }: { comps: Record<string, { lowGBP: number; marketGBP: number }> | null }) => {
   return (
-    <div className="col-span-1 bg-panel border border-border/50 rounded-xl p-4 h-full">
+    <div className="col-span-1 bg-panel border border-border/50 rounded-xl p-4">
       <div className="flex items-center justify-between mb-3">
         <span className="text-[10px] uppercase font-bold text-gray-500 tracking-wider">Recent Comps</span>
         <I.Activity s={12} c="text-gray-600" />
       </div>
       {comps && Object.keys(comps).length > 0 ? (
         <div className="space-y-2">
-          {Object.entries(comps).map(([cond, prices]) => (
+          {Object.entries(comps).slice(0, 3).map(([cond, prices]) => (
             <div key={cond} className="flex justify-between items-center">
               <div>
                 <span className="text-gray-500 text-xs font-mono">{cond}</span>
