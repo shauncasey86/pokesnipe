@@ -36,6 +36,22 @@ A 5-priority fallback chain ensures the most accurate condition classification:
 
 Supports both numeric descriptor IDs and text-based names. Graded cards are automatically detected and priced against graded market values. Unknown descriptors are logged for visibility rather than silently dropped.
 
+### Junk Detection
+
+Two-stage junk filtering prevents non-card and low-quality listings from entering the pipeline:
+
+**Title-based (Phase 1):** Pattern matching against the cleaned title to detect bulk lots, fakes/proxies, non-card products (booster boxes, tins, sleeves, playmats, code cards), and non-English text (Unicode character ranges for Japanese, Korean, Chinese scripts, plus language keywords like "japanese", "french", "german").
+
+**Description-based (Phase 2):** After enrichment fetches the full eBay item details, the description HTML is stripped of tags, collapsed, and scanned for fake/fan-art signals. Only fake patterns are checked at this stage — words like "booster" or "bundle" appear legitimately in seller marketing copy and would cause false positives.
+
+### Foreign Card Filtering
+
+All listings are filtered to English-only cards through multiple layers:
+
+- **eBay search filter:** Queries are restricted to `itemLocationCountry:GB` and `deliveryCountry:GB`, limiting results to UK-based sellers
+- **Title detection:** Junk detector catches language keywords (japanese, korean, french, etc.) and non-Latin Unicode characters (Hiragana, Katakana, CJK, Hangul) in the listing title
+- **Structured language data:** After signal extraction, the eBay-reported language field is checked — cards where the language doesn't start with "English" are rejected
+
 ---
 
 ## Matching Engine
@@ -59,9 +75,29 @@ A weighted composite score from 6 independent signals (name similarity, number m
 - **Medium confidence (0.65–0.84):** Processed with caution badge
 - **Low confidence (below 0.65):** Rejected, not shown
 
+Confidence weights are not fixed — they are automatically calibrated based on user feedback (see [Feedback Learning](#feedback-learning)).
+
 ### Variant Resolution
 
 Correctly distinguishes between card variants (holofoil vs. reverse holo vs. 1st edition). When multiple variants exist, defaults to the cheapest to ensure a conservative profit estimate.
+
+### Confusion Pair Awareness
+
+When a user marks a deal as incorrectly matched (`wrong_card`, `wrong_set`, or `wrong_variant`), the system records the card number and the wrongly-matched card as a confusion pair. On future matches:
+
+- **Penalty (–0.15):** Candidates that previously caused an incorrect match receive a confidence penalty
+- **Boost (+0.10):** If the reviewer provided the correct card ID, that candidate receives a confidence boost
+
+Only match-related review reasons trigger confusion pairs — condition or price issues don't indicate a matching error.
+
+### Learned Junk Scoring
+
+The system learns from user-reported junk listings and applies soft confidence penalties to future listings showing similar signals:
+
+- **Learned keywords:** When a listing is reported as junk, novel tokens (words not found in the card catalog or common stop words) are extracted from the title and stored. Future listings containing these tokens receive a confidence penalty of 0.15.
+- **Seller reputation:** Sellers with 3 or more junk reports receive a scaled penalty (0.05 per report, capped at 0.20). A seller with 5 junk reports gets a 0.15 penalty; one with 7+ gets the maximum 0.20.
+
+These are soft penalties subtracted from the confidence composite, not hard blocks. A genuinely good deal with strong match signals can overcome them. Caches refresh every 30 minutes.
 
 ---
 
@@ -84,7 +120,7 @@ Every profit calculation includes:
 - eBay listing price
 - Shipping cost
 - Buyer protection fee (eBay UK tiered fee schedule)
-- USD → GBP exchange rate conversion (refreshed hourly)
+- USD → GBP exchange rate conversion (refreshed every 4 hours)
 
 ### Conservative Estimate
 
@@ -113,6 +149,10 @@ Assesses how quickly and easily a card can be resold, using 6 real data signals.
 - **eBay Supply** — How many copies of this card appeared in the current scan batch?
 - **Quantity Sold** — eBay's sold count for this specific listing
 - **Sales Velocity** — Real sales data from Scrydex (how many sold in the last 7/30 days), fetched on-demand and cached for 7 days
+
+### On-Demand Velocity Refresh
+
+Users can manually refresh Tier 3 velocity data for any specific deal's card via the deal detail panel. This costs 3 Scrydex credits, updates the deal's liquidity score and grade in real-time, and the result is cached for 7 days.
 
 ### Liquidity Grades
 
@@ -147,7 +187,7 @@ Clicking a deal opens a detailed sidebar showing:
 - **Expansion info** — Logo, set name, release date, card count
 - **Card metadata** — Rarity, supertype, artist
 - **Quick action** — "Snag on eBay" button linking directly to the listing
-- **Accuracy feedback** — Mark deals as correct or incorrect with reason selection
+- **Accuracy feedback** — Mark deals as correct or incorrect with reason selection and optional correct card ID
 
 ### Filter Bar
 
@@ -222,7 +262,7 @@ The entire synced card database is exposed as a public, browsable catalog — no
 
 ### Telegram Deal Alerts
 
-Real-time Telegram messages for high-value deals. Each alert includes card name, set, eBay price, market price, profit, condition, confidence, and a direct link to the eBay listing. Configurable by tier (GRAIL only, GRAIL + HIT, or all tiers). 30-second cooldown prevents spam during large scan batches.
+Real-time Telegram messages for high-value deals. Each alert includes card name, set, eBay price, market price, profit, condition, confidence, and a direct link to the eBay listing. Configurable by tier (GRAIL only, GRAIL + HIT, or all tiers). 30-second cooldown prevents spam during large scan batches. A test message endpoint verifies that Telegram credentials are correctly configured.
 
 ### System Alerts
 
@@ -230,10 +270,57 @@ Automated warnings for operational issues:
 
 - Sync failures
 - Scrydex credit thresholds (low and critical)
-- eBay rate limiting
+- eBay rate limiting (3+ consecutive 429 responses)
 - Stale exchange rate (>4 hours old)
-- Accuracy drops (7-day rolling below 80%)
+- Accuracy drops (7-day rolling below 80%, minimum 10 reviewed deals)
 - Stale card index (no sync in >48 hours)
+
+---
+
+## Deal Lifecycle
+
+Deals move through a defined lifecycle to keep the feed current and manage storage.
+
+### Status Flow
+
+- **Active** — Visible in the deal feed. Created when the scanner identifies a profitable listing.
+- **Reviewed** — User marked the deal as incorrect. Removed from the active feed but preserved for accuracy tracking.
+- **Expired** — Automatically set when a deal passes its 72-hour expiry window. No longer shown in the feed.
+
+### Automatic Expiry
+
+Active deals expire 72 hours after creation. An hourly background job checks for deals past their `expires_at` timestamp and transitions them to expired status.
+
+### Pruning
+
+Unreviewed deals older than 30 days are permanently deleted by the hourly cleanup job. Reviewed deals (whether correct or incorrect) are kept indefinitely — they form the accuracy tracking corpus used for confidence calibration.
+
+---
+
+## Feedback Learning
+
+The system learns from user reviews to improve matching accuracy over time. Three feedback mechanisms work together.
+
+### Confusion Pairs
+
+When a deal is reviewed as `wrong_card`, `wrong_set`, or `wrong_variant`, the card number and incorrectly matched card ID are recorded as a confusion pair. If the reviewer provides the correct card ID, it's stored as a correction. The matching engine queries these pairs during candidate scoring and applies penalties (–0.15) to previously confused cards and boosts (+0.10) to known corrections.
+
+### Learned Junk Keywords
+
+When a deal is reported as a junk listing, novel tokens are extracted from the eBay title by subtracting known card names, expansion names, common Pokemon TCG terminology, and standard eBay listing words. The remaining tokens — words unique to junk listings — are stored and matched against future listings. Sellers accumulating 3+ junk reports receive an additional scaled penalty.
+
+### Confidence Weight Calibration
+
+The confidence scorer uses 6 weighted signals. Rather than relying solely on hand-tuned weights, the system can learn better weights from reviewed deals:
+
+- **Calibration runs daily at 05:00** or can be triggered manually via API
+- **Signal separation analysis:** Computes the mean score of each signal for correct vs. incorrect matches. Signals with higher separation (high scores on correct matches, low on incorrect) get more weight.
+- **Reason-aware penalties:** Groups incorrect deals by review reason and applies targeted adjustments. For example, if many `wrong_set` errors have high expansion and denominator signal scores (misleadingly confident), those signals receive a downward adjustment.
+- **Safety constraints:** Weights can drift at most ±0.10 from spec defaults, with a minimum weight of 0.03 per signal. Weights are renormalized to sum to 1.0.
+- **Improvement gate:** New weights are only applied if they improve accuracy on the review corpus by more than 0.5%. If not, the current weights are kept.
+- **Minimum sample:** Requires at least 20 reviewed deals (including at least 3 incorrect) before calibration runs.
+
+Default signal weights: name (0.30), denominator (0.25), number (0.15), expansion (0.10), variant (0.10), normalization (0.10).
 
 ---
 
@@ -257,7 +344,34 @@ Automated warnings for operational issues:
 
 ### Exchange Rate
 
-USD → GBP exchange rate fetched hourly. No deals are created if the rate is stale (>6 hours). The boot sequence requires a fresh rate before starting the scanner.
+USD → GBP exchange rate fetched every 4 hours. No deals are created if the rate is stale (>4 hours). The boot sequence requires a fresh rate before starting the scanner.
+
+---
+
+## Background Jobs
+
+All background jobs are managed by a central scheduler. Each job logs audit events to the `sync_log` table for observability.
+
+| Job | Schedule | Purpose |
+|-----|----------|---------|
+| `ebay-scan` | Every 5 min | Search eBay and create deals |
+| `deal-cleanup` | Every hour | Expire old deals + prune unreviewed stale deals |
+| `exchange-rate` | Every 4h (:30) | Refresh GBP/USD exchange rate |
+| `hot-refresh` | Daily at 03:00 | Re-sync 10 most recent expansions |
+| `expansion-check` | Daily at 04:00 | Detect and sync new expansions |
+| `weight-calibration` | Daily at 05:00 | Calibrate confidence weights from reviewed deals |
+| `full-sync` | Weekly (Sunday 03:00) | Full card database re-sync |
+| `velocity-prefetch` | Weekly (Sunday 05:00) | Cache velocity for top 200 matched cards |
+| `accuracy-check` | Every 6 hours | Alert if 7-day accuracy drops below 80% |
+| `card-index-check` | Every 12 hours | Alert if no sync in >48 hours |
+
+### Audit Logging
+
+Every background job persists its results to the `sync_log` table — job type, status, duration, counts of items processed (expansions synced, cards upserted, variants upserted, deals created, listings processed, enrichment calls), and error details. These logs are viewable via the Audit view in the dashboard.
+
+### Scanner State Persistence
+
+When the scanner is paused or resumed via the API, the state is persisted to the preferences table. On application restart, the scanner restores its previous paused/running state automatically.
 
 ---
 
@@ -270,21 +384,29 @@ USD → GBP exchange rate fetched hourly. No deals are created if the rate is st
 - ~2,880 enrichment calls/day (~10 per cycle)
 - 37% daily headroom. Enrichment threshold tightens automatically when budget runs low
 
+### eBay Rate Limiting
+
+The eBay client tracks consecutive 429 (rate limit) responses and implements exponential backoff using the `Retry-After` header (or a 5-second default). After 3 consecutive 429s, a Telegram alert is sent. The counter resets on the next successful request.
+
 ### Scrydex Credits
 
 - 50,000 monthly budget
 - Full sync: ~400 credits. Weekly refresh: ~400. Daily hot refresh: ~50
 - Typical monthly usage: ~2,500 credits (5% of budget)
 - Sales velocity lookups: 3 credits each, cached 7 days
+- Overage status fetched from Scrydex API and displayed in the system status bar
 
 ---
 
 ## Accuracy Tracking
 
 - Every deal can be marked as correct or incorrect by the user
-- Incorrect matches include a reason: wrong card, wrong set, wrong variant, or wrong price
-- 7-day rolling accuracy metric displayed in the status bar
-- All match signals stored in the deal record for audit and future improvement
+- Incorrect matches include a reason: `wrong_card`, `wrong_set`, `wrong_variant`, `wrong_condition`, `wrong_price`, `bad_image`, or `junk_listing`
+- Reviewers can optionally provide the correct card ID when reporting `wrong_card`, `wrong_set`, or `wrong_variant` — this feeds into confusion pair learning
+- Marking a deal as `junk_listing` triggers learned keyword extraction and seller reputation tracking
+- 7-day rolling accuracy metric displayed in the status bar, with breakdowns by incorrect reason
+- Accuracy check runs every 6 hours — alerts via Telegram if accuracy drops below 80% (minimum 10 reviewed deals)
+- All match signals stored in the deal record for audit and future calibration
 
 ---
 
@@ -307,3 +429,4 @@ USD → GBP exchange rate fetched hourly. No deals are created if the rate is st
 - Automatic database migrations on boot
 - Configuration validated at startup — fails fast on missing environment variables
 - Graceful shutdown: completes in-flight scans, flushes pending writes, closes connections
+- Scanner paused state restored from preferences on restart
