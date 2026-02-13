@@ -2,14 +2,19 @@
 <html lang="en" class="dark">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>PokéSnipe Pro | Arbitrage Terminal</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <title>PokéSnipe v1.3.2 | Silph Co. Terminal</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Space+Grotesk:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root" class="h-screen w-full flex flex-col items-center justify-center text-center">
+      <div class="relative w-16 h-16 animate-spin">
+        <div class="absolute inset-0 border-4 border-t-[#FF3E3E] border-r-transparent border-b-[#2A2A35] border-l-transparent rounded-full"></div>
+      </div>
+      <div class="mt-4 font-mono text-xs text-[#2A2A35] uppercase tracking-[0.2em] animate-pulse">Initializing System</div>
+    </div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, Fragment } from 'react';
 import { I } from '../icons';
 import { getSyncLog } from '../api/deals';
 import type { SyncLogEntry } from '../types/deals';
@@ -17,13 +17,26 @@ function formatTimestamp(ts: string | null): string {
   return d.toLocaleString('en-GB', { day: '2-digit', month: 'short', year: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' });
 }
 
-function statusColor(status: string): string {
-  switch (status) {
-    case 'completed': return 'text-emerald-400';
-    case 'failed': return 'text-red-400';
-    case 'running': return 'text-amber-400';
-    default: return 'text-muted';
-  }
+/** Terminal-style short timestamp: HH:MM:SS */
+function terminalTs(ts: string | null): string {
+  if (!ts) return '--:--:--';
+  const d = new Date(ts);
+  return d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+}
+
+/** Terminal-style date prefix: DD MMM */
+function terminalDate(ts: string | null): string {
+  if (!ts) return '';
+  const d = new Date(ts);
+  return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short' }).toUpperCase();
+}
+
+/** Map entry to a log-level style */
+function logLevel(entry: SyncLogEntry): { tag: string; color: string } {
+  if (entry.status === 'failed') return { tag: 'ERR', color: 'text-dexRed' };
+  if (entry.status === 'running') return { tag: 'WARN', color: 'text-dexYellow' };
+  if (isScanEvent(entry.sync_type) || isCleanupEvent(entry.sync_type)) return { tag: 'HIT', color: 'text-dexGreen' };
+  return { tag: 'INFO', color: 'text-dexBlue' };
 }
 
 function syncTypeLabel(type: string): string {
@@ -141,15 +154,20 @@ export default function AuditView() {
       <div className="max-w-5xl mx-auto space-y-5">
         {/* Header */}
         <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-xl font-bold text-white mb-1">Audit Log</h1>
-            <p className="text-sm text-muted">Pipeline events: scans, syncs, and cleanup. {total} total entries.</p>
+          <div className="flex items-center gap-3">
+            <I.Terminal s={20} c="text-dexGreen" />
+            <div>
+              <h1 className="text-2xl font-bold text-white">Audit Log</h1>
+              <p className="text-xs font-mono text-muted mt-0.5">
+                {total} events recorded &middot; pipeline telemetry
+              </p>
+            </div>
           </div>
           <button
             onClick={fetchData}
-            className="px-3 py-1.5 text-xs font-medium rounded-md bg-surface border border-border text-muted hover:text-white hover:border-white/20 transition-colors"
+            className="px-3 py-1.5 text-xs font-mono font-medium rounded-md bg-black/40 border border-border text-muted hover:text-dexGreen hover:border-dexGreen/30 transition-colors"
           >
-            Refresh
+            refresh
           </button>
         </div>
 
@@ -158,7 +176,7 @@ export default function AuditView() {
           <select
             value={filterStatus}
             onChange={e => setFilterStatus(e.target.value)}
-            className="px-3 py-1.5 text-xs rounded-md bg-surface border border-border text-white focus:outline-none focus:border-white/30"
+            className="px-3 py-1.5 text-xs font-mono rounded-md bg-black/40 border border-border text-white focus:outline-none focus:border-dexGreen/40"
           >
             <option value="">All statuses</option>
             {STATUS_OPTIONS.filter(Boolean).map(s => (
@@ -168,7 +186,7 @@ export default function AuditView() {
           <select
             value={filterType}
             onChange={e => setFilterType(e.target.value)}
-            className="px-3 py-1.5 text-xs rounded-md bg-surface border border-border text-white focus:outline-none focus:border-white/30"
+            className="px-3 py-1.5 text-xs font-mono rounded-md bg-black/40 border border-border text-white focus:outline-none focus:border-dexGreen/40"
           >
             <option value="">All types</option>
             {TYPE_OPTIONS.filter(Boolean).map(t => (
@@ -179,241 +197,288 @@ export default function AuditView() {
 
         {/* Error */}
         {error && (
-          <div className="bg-red-900/20 border border-red-800/40 rounded-lg px-4 py-3 text-sm text-red-300">
-            {error}
+          <div className="bg-dexRed/10 border border-dexRed/30 rounded-xl px-4 py-3 text-sm font-mono text-dexRed">
+            <span className="text-dexRed/60">[ERR]</span> {error}
           </div>
         )}
 
         {/* Loading */}
         {loading && (
-          <div className="flex justify-center py-12">
-            <I.Loader s={24} c="text-muted animate-spin" />
+          <div className="bg-black/40 border border-border rounded-xl p-8 flex justify-center">
+            <div className="flex items-center gap-3 font-mono text-sm text-muted">
+              <I.Loader s={18} c="text-dexGreen" />
+              <span>Loading audit stream...</span>
+              <span className="animate-pulse text-dexGreen">_</span>
+            </div>
           </div>
         )}
 
         {/* Empty state */}
         {!loading && !error && entries.length === 0 && (
-          <div className="flex-1 flex items-center justify-center py-20">
-            <div className="text-center max-w-sm">
-              <I.ScrollText s={48} c="text-muted/20 mx-auto mb-4" />
-              <h3 className="text-base font-bold text-white mb-2">No audit log entries</h3>
-              <p className="text-xs text-muted leading-relaxed">
-                Pipeline events will appear here once the scanner runs or a sync completes.
+          <div className="bg-black/40 border border-border rounded-xl p-12">
+            <div className="text-center font-mono">
+              <I.ScrollText s={40} c="text-muted/20 mx-auto mb-4" />
+              <p className="text-sm text-muted mb-1">no log entries found</p>
+              <p className="text-xs text-muted/60">
+                pipeline events will stream here once the scanner runs
               </p>
+              <span className="inline-block mt-3 animate-pulse text-dexGreen">_</span>
             </div>
           </div>
         )}
 
-        {/* Table */}
+        {/* Terminal Log Table */}
         {!loading && entries.length > 0 && (
-          <div className="bg-surface border border-border rounded-lg overflow-hidden">
-            <table className="w-full text-xs">
+          <div className="bg-black/40 border border-border rounded-xl overflow-hidden">
+            {/* Terminal header bar */}
+            <div className="flex items-center gap-2 px-4 py-2 border-b border-border bg-panel/50">
+              <div className="w-2.5 h-2.5 rounded-full bg-dexRed/60" />
+              <div className="w-2.5 h-2.5 rounded-full bg-dexYellow/60" />
+              <div className="w-2.5 h-2.5 rounded-full bg-dexGreen/60" />
+              <span className="ml-2 text-[10px] font-mono text-muted/60 uppercase tracking-widest">
+                audit &mdash; {total} entries
+              </span>
+            </div>
+
+            <table className="w-full text-xs font-mono">
               <thead>
-                <tr className="border-b border-border text-muted text-left">
-                  <th className="px-4 py-2.5 font-medium">Type</th>
-                  <th className="px-4 py-2.5 font-medium">Status</th>
-                  <th className="px-4 py-2.5 font-medium">Time</th>
-                  <th className="px-4 py-2.5 font-medium text-right">Duration</th>
-                  <th className="px-4 py-2.5 font-medium">Summary</th>
+                <tr className="border-b border-border/60 text-muted/70 text-left">
+                  <th className="px-4 py-2 font-normal w-14">LVL</th>
+                  <th className="px-4 py-2 font-normal">TYPE</th>
+                  <th className="px-4 py-2 font-normal">STATUS</th>
+                  <th className="px-4 py-2 font-normal">TIME</th>
+                  <th className="px-4 py-2 font-normal text-right">DUR</th>
+                  <th className="px-4 py-2 font-normal">SUMMARY</th>
                 </tr>
               </thead>
               <tbody>
-                {entries.map(entry => (
-                  <>
-                    <tr
-                      key={entry.id}
-                      onClick={() => setExpandedId(expandedId === entry.id ? null : entry.id)}
-                      className="border-b border-border/50 hover:bg-white/[0.02] cursor-pointer transition-colors"
-                    >
-                      <td className="px-4 py-2.5 font-mono text-white/80">{syncTypeLabel(entry.sync_type)}</td>
-                      <td className={`px-4 py-2.5 font-semibold ${statusColor(entry.status)}`}>
-                        {entry.status === 'running' && <I.Loader s={12} c="inline mr-1 animate-spin" />}
-                        {entry.status}
-                      </td>
-                      <td className="px-4 py-2.5 text-muted">{formatTimestamp(entry.started_at)}</td>
-                      <td className="px-4 py-2.5 text-right text-muted">{formatDuration(entry.duration_seconds)}</td>
-                      <td className="px-4 py-2.5 text-white/70">{summaryText(entry)}</td>
-                    </tr>
-                    {expandedId === entry.id && (
-                      <tr key={`${entry.id}-detail`} className="border-b border-border/50 bg-white/[0.01]">
-                        <td colSpan={5} className="px-4 py-3">
-                          <div className="space-y-3 text-xs">
-                            <div className="grid grid-cols-2 gap-4">
-                              <div>
-                                <span className="text-muted">Started:</span>{' '}
-                                <span className="text-white/80">{formatTimestamp(entry.started_at)}</span>
-                              </div>
-                              <div>
-                                <span className="text-muted">Completed:</span>{' '}
-                                <span className="text-white/80">{formatTimestamp(entry.completed_at)}</span>
-                              </div>
-                            </div>
-
-                            {/* Scan-specific stats */}
-                            {isScanEvent(entry.sync_type) && entry.metadata && (
-                              <div className="grid grid-cols-4 gap-2">
-                                {([
-                                  ['Listings', 'listings_processed'],
-                                  ['Deals', 'deals_created'],
-                                  ['Enrichments', 'enrichment_calls'],
-                                  ['Errors', 'errors'],
-                                  ['Dupes', 'skipped_duplicate'],
-                                  ['Junk', 'skipped_junk'],
-                                  ['No Match', 'skipped_no_match'],
-                                  ['Gated', 'skipped_gate'],
-                                ] as const).map(([label, key]) => {
-                                  const val = (entry.metadata as Record<string, number>)?.[key] ?? 0;
-                                  return (
-                                    <div key={key} className="bg-obsidian rounded px-3 py-2 text-center">
-                                      <div className="text-[9px] text-muted uppercase tracking-wider">{label}</div>
-                                      <div className={'text-sm font-mono font-bold ' + (key === 'errors' && val > 0 ? 'text-red-400' : key === 'deals_created' && val > 0 ? 'text-emerald-400' : 'text-white/80')}>{val}</div>
-                                    </div>
-                                  );
-                                })}
-                              </div>
-                            )}
-
-                            {/* Cleanup-specific stats */}
-                            {isCleanupEvent(entry.sync_type) && entry.metadata && (
-                              <div className="grid grid-cols-2 gap-2">
-                                {([
-                                  ['Expired', 'expired'],
-                                  ['Pruned', 'pruned'],
-                                ] as const).map(([label, key]) => {
-                                  const val = (entry.metadata as Record<string, number>)?.[key] ?? 0;
-                                  return (
-                                    <div key={key} className="bg-obsidian rounded px-3 py-2 text-center">
-                                      <div className="text-[9px] text-muted uppercase tracking-wider">{label}</div>
-                                      <div className="text-sm font-mono font-bold text-white/80">{val}</div>
-                                    </div>
-                                  );
-                                })}
-                              </div>
-                            )}
-
-                            {/* Calibration-specific stats */}
-                            {isCalibrationEvent(entry.sync_type) && entry.metadata && (() => {
-                              const meta = entry.metadata as Record<string, unknown>;
-                              const applied = !!meta.applied;
-                              const sampleSize = Number(meta.sample_size ?? 0);
-                              const accBefore = Number(meta.accuracy_before ?? 0);
-                              const accAfter = Number(meta.accuracy_after ?? 0);
-                              const reasonText = String(meta.reason ?? '');
-                              const signalStats = meta.signal_stats as Record<string, { correctMean: number; incorrectMean: number; separation: number }> | undefined;
-                              const oldW = meta.old_weights as Record<string, number> | undefined;
-                              const newW = meta.new_weights as Record<string, number> | undefined;
-                              return (
-                                <div className="space-y-2">
-                                  <div className="grid grid-cols-3 gap-2">
-                                    <div className="bg-obsidian rounded px-3 py-2 text-center">
-                                      <div className="text-[9px] text-muted uppercase tracking-wider">Applied</div>
-                                      <div className={'text-sm font-mono font-bold ' + (applied ? 'text-emerald-400' : 'text-muted')}>{applied ? 'Yes' : 'No'}</div>
-                                    </div>
-                                    <div className="bg-obsidian rounded px-3 py-2 text-center">
-                                      <div className="text-[9px] text-muted uppercase tracking-wider">Sample</div>
-                                      <div className="text-sm font-mono font-bold text-white/80">{sampleSize}</div>
-                                    </div>
-                                    <div className="bg-obsidian rounded px-3 py-2 text-center">
-                                      <div className="text-[9px] text-muted uppercase tracking-wider">Accuracy</div>
-                                      <div className="text-sm font-mono font-bold text-white/80">{accBefore.toFixed(1)}% &rarr; {accAfter.toFixed(1)}%</div>
-                                    </div>
-                                  </div>
-                                  {signalStats && (
-                                    <div>
-                                      <div className="text-[9px] text-muted uppercase tracking-wider mb-1">Signal Discrimination</div>
-                                      <div className="grid grid-cols-3 gap-1">
-                                        {Object.entries(signalStats).map(([key, s]) => (
-                                          <div key={key} className="bg-obsidian rounded px-2 py-1.5 text-center">
-                                            <div className="text-[9px] text-muted">{key}</div>
-                                            <div className={'text-[11px] font-mono ' + (s.separation > 0.1 ? 'text-emerald-400' : s.separation < -0.05 ? 'text-red-400' : 'text-white/60')}>
-                                              {s.separation > 0 ? '+' : ''}{s.separation.toFixed(3)}
-                                            </div>
-                                          </div>
-                                        ))}
-                                      </div>
-                                    </div>
-                                  )}
-                                  {oldW && newW && (
-                                    <div>
-                                      <div className="text-[9px] text-muted uppercase tracking-wider mb-1">Weight Changes</div>
-                                      <div className="grid grid-cols-3 gap-1">
-                                        {Object.keys(newW).map(key => {
-                                          const delta = (newW[key] - (oldW[key] ?? 0));
-                                          return (
-                                            <div key={key} className="bg-obsidian rounded px-2 py-1.5 text-center">
-                                              <div className="text-[9px] text-muted">{key}</div>
-                                              <div className="text-[11px] font-mono text-white/80">{newW[key].toFixed(3)}</div>
-                                              {delta !== 0 && <div className={'text-[9px] font-mono ' + (delta > 0 ? 'text-emerald-400' : 'text-red-400')}>{delta > 0 ? '+' : ''}{delta.toFixed(3)}</div>}
-                                            </div>
-                                          );
-                                        })}
-                                      </div>
-                                    </div>
-                                  )}
-                                  {!applied && reasonText && (
-                                    <div className="bg-amber-900/20 border border-amber-800/30 rounded px-3 py-2 text-amber-300 text-[11px]">
-                                      {reasonText}
-                                    </div>
-                                  )}
-                                </div>
-                              );
-                            })()}
-
-                            {/* Sync-specific stats */}
-                            {isSyncEvent(entry.sync_type) && (
-                              <div className="grid grid-cols-3 gap-2">
-                                {([
-                                  ['Expansions', entry.expansions_synced],
-                                  ['Cards', entry.cards_upserted],
-                                  ['Variants', entry.variants_upserted],
-                                ] as const).map(([label, val]) => (
-                                  <div key={label} className="bg-obsidian rounded px-3 py-2 text-center">
-                                    <div className="text-[9px] text-muted uppercase tracking-wider">{label}</div>
-                                    <div className="text-sm font-mono font-bold text-white/80">{(val ?? 0).toLocaleString()}</div>
-                                  </div>
-                                ))}
-                              </div>
-                            )}
-
-                            {entry.error_message && (
-                              <div className="bg-red-900/20 border border-red-800/30 rounded px-3 py-2 text-red-300 font-mono text-[11px] break-all">
-                                {entry.error_message}
-                              </div>
-                            )}
-                            {entry.metadata && Object.keys(entry.metadata).length > 0 && !isScanEvent(entry.sync_type) && !isCleanupEvent(entry.sync_type) && !isCalibrationEvent(entry.sync_type) && (
-                              <div className="bg-black/20 rounded px-3 py-2 font-mono text-[11px] text-muted break-all whitespace-pre-wrap">
-                                {JSON.stringify(entry.metadata, null, 2)}
-                              </div>
-                            )}
-                          </div>
+                {entries.map(entry => {
+                  const level = logLevel(entry);
+                  const isExpanded = expandedId === entry.id;
+                  return (
+                    <Fragment key={entry.id}>
+                      <tr
+                        onClick={() => setExpandedId(isExpanded ? null : entry.id)}
+                        className={
+                          'border-b border-border/30 cursor-pointer transition-colors hover:bg-white/[0.03]'
+                          + (isExpanded ? ' bg-white/[0.02]' : '')
+                        }
+                      >
+                        <td className="px-4 py-2">
+                          <span className={`font-bold ${level.color}`}>[{level.tag}]</span>
                         </td>
+                        <td className="px-4 py-2 text-white/80">{syncTypeLabel(entry.sync_type)}</td>
+                        <td className="px-4 py-2">
+                          <span className={
+                            entry.status === 'completed' ? 'text-dexGreen' :
+                            entry.status === 'failed' ? 'text-dexRed' :
+                            entry.status === 'running' ? 'text-dexYellow' :
+                            'text-muted'
+                          }>
+                            {entry.status === 'running' && <I.Loader s={10} c="inline mr-1" />}
+                            {entry.status}
+                          </span>
+                        </td>
+                        <td className="px-4 py-2 text-muted/80">
+                          <span className="text-muted/50">{terminalDate(entry.started_at)}</span>{' '}
+                          {terminalTs(entry.started_at)}
+                        </td>
+                        <td className="px-4 py-2 text-right text-muted/80">{formatDuration(entry.duration_seconds)}</td>
+                        <td className="px-4 py-2 text-white/60">{summaryText(entry)}</td>
                       </tr>
-                    )}
-                  </>
-                ))}
+
+                      {/* Expanded detail row */}
+                      {isExpanded && (
+                        <tr className="border-b border-border/30 bg-panel/30">
+                          <td colSpan={6} className="px-4 py-3">
+                            <div className="space-y-3 text-xs font-mono">
+                              {/* Timestamps */}
+                              <div className="grid grid-cols-2 gap-4">
+                                <div>
+                                  <span className="text-muted/60">started_at:</span>{' '}
+                                  <span className="text-dexBlue">{formatTimestamp(entry.started_at)}</span>
+                                </div>
+                                <div>
+                                  <span className="text-muted/60">completed_at:</span>{' '}
+                                  <span className="text-dexBlue">{formatTimestamp(entry.completed_at)}</span>
+                                </div>
+                              </div>
+
+                              {/* Scan-specific stats */}
+                              {isScanEvent(entry.sync_type) && entry.metadata && (
+                                <div className="grid grid-cols-4 gap-2">
+                                  {([
+                                    ['Listings', 'listings_processed'],
+                                    ['Deals', 'deals_created'],
+                                    ['Enrichments', 'enrichment_calls'],
+                                    ['Errors', 'errors'],
+                                    ['Dupes', 'skipped_duplicate'],
+                                    ['Junk', 'skipped_junk'],
+                                    ['No Match', 'skipped_no_match'],
+                                    ['Gated', 'skipped_gate'],
+                                  ] as const).map(([label, key]) => {
+                                    const val = (entry.metadata as Record<string, number>)?.[key] ?? 0;
+                                    return (
+                                      <div key={key} className="bg-black/30 border border-border/40 rounded-lg px-3 py-2 text-center">
+                                        <div className="text-[9px] text-muted/50 uppercase tracking-wider">{label}</div>
+                                        <div className={'text-sm font-bold ' + (key === 'errors' && val > 0 ? 'text-dexRed' : key === 'deals_created' && val > 0 ? 'text-dexGreen' : 'text-white/80')}>{val}</div>
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              )}
+
+                              {/* Cleanup-specific stats */}
+                              {isCleanupEvent(entry.sync_type) && entry.metadata && (
+                                <div className="grid grid-cols-2 gap-2">
+                                  {([
+                                    ['Expired', 'expired'],
+                                    ['Pruned', 'pruned'],
+                                  ] as const).map(([label, key]) => {
+                                    const val = (entry.metadata as Record<string, number>)?.[key] ?? 0;
+                                    return (
+                                      <div key={key} className="bg-black/30 border border-border/40 rounded-lg px-3 py-2 text-center">
+                                        <div className="text-[9px] text-muted/50 uppercase tracking-wider">{label}</div>
+                                        <div className="text-sm font-bold text-white/80">{val}</div>
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              )}
+
+                              {/* Calibration-specific stats */}
+                              {isCalibrationEvent(entry.sync_type) && entry.metadata && (() => {
+                                const meta = entry.metadata as Record<string, unknown>;
+                                const applied = !!meta.applied;
+                                const sampleSize = Number(meta.sample_size ?? 0);
+                                const accBefore = Number(meta.accuracy_before ?? 0);
+                                const accAfter = Number(meta.accuracy_after ?? 0);
+                                const reasonText = String(meta.reason ?? '');
+                                const signalStats = meta.signal_stats as Record<string, { correctMean: number; incorrectMean: number; separation: number }> | undefined;
+                                const oldW = meta.old_weights as Record<string, number> | undefined;
+                                const newW = meta.new_weights as Record<string, number> | undefined;
+                                return (
+                                  <div className="space-y-2">
+                                    <div className="grid grid-cols-3 gap-2">
+                                      <div className="bg-black/30 border border-border/40 rounded-lg px-3 py-2 text-center">
+                                        <div className="text-[9px] text-muted/50 uppercase tracking-wider">Applied</div>
+                                        <div className={'text-sm font-bold ' + (applied ? 'text-dexGreen' : 'text-muted')}>{applied ? 'Yes' : 'No'}</div>
+                                      </div>
+                                      <div className="bg-black/30 border border-border/40 rounded-lg px-3 py-2 text-center">
+                                        <div className="text-[9px] text-muted/50 uppercase tracking-wider">Sample</div>
+                                        <div className="text-sm font-bold text-white/80">{sampleSize}</div>
+                                      </div>
+                                      <div className="bg-black/30 border border-border/40 rounded-lg px-3 py-2 text-center">
+                                        <div className="text-[9px] text-muted/50 uppercase tracking-wider">Accuracy</div>
+                                        <div className="text-sm font-bold text-white/80">{accBefore.toFixed(1)}% &rarr; {accAfter.toFixed(1)}%</div>
+                                      </div>
+                                    </div>
+                                    {signalStats && (
+                                      <div>
+                                        <div className="text-[9px] text-muted/50 uppercase tracking-wider mb-1">Signal Discrimination</div>
+                                        <div className="grid grid-cols-3 gap-1">
+                                          {Object.entries(signalStats).map(([key, s]) => (
+                                            <div key={key} className="bg-black/30 border border-border/40 rounded-lg px-2 py-1.5 text-center">
+                                              <div className="text-[9px] text-muted/60">{key}</div>
+                                              <div className={'text-[11px] ' + (s.separation > 0.1 ? 'text-dexGreen' : s.separation < -0.05 ? 'text-dexRed' : 'text-white/60')}>
+                                                {s.separation > 0 ? '+' : ''}{s.separation.toFixed(3)}
+                                              </div>
+                                            </div>
+                                          ))}
+                                        </div>
+                                      </div>
+                                    )}
+                                    {oldW && newW && (
+                                      <div>
+                                        <div className="text-[9px] text-muted/50 uppercase tracking-wider mb-1">Weight Changes</div>
+                                        <div className="grid grid-cols-3 gap-1">
+                                          {Object.keys(newW).map(key => {
+                                            const delta = (newW[key] - (oldW[key] ?? 0));
+                                            return (
+                                              <div key={key} className="bg-black/30 border border-border/40 rounded-lg px-2 py-1.5 text-center">
+                                                <div className="text-[9px] text-muted/60">{key}</div>
+                                                <div className="text-[11px] text-white/80">{newW[key].toFixed(3)}</div>
+                                                {delta !== 0 && <div className={'text-[9px] ' + (delta > 0 ? 'text-dexGreen' : 'text-dexRed')}>{delta > 0 ? '+' : ''}{delta.toFixed(3)}</div>}
+                                              </div>
+                                            );
+                                          })}
+                                        </div>
+                                      </div>
+                                    )}
+                                    {!applied && reasonText && (
+                                      <div className="bg-dexYellow/10 border border-dexYellow/20 rounded-lg px-3 py-2 text-dexYellow text-[11px]">
+                                        <span className="text-dexYellow/60">[WARN]</span> {reasonText}
+                                      </div>
+                                    )}
+                                  </div>
+                                );
+                              })()}
+
+                              {/* Sync-specific stats */}
+                              {isSyncEvent(entry.sync_type) && (
+                                <div className="grid grid-cols-3 gap-2">
+                                  {([
+                                    ['Expansions', entry.expansions_synced],
+                                    ['Cards', entry.cards_upserted],
+                                    ['Variants', entry.variants_upserted],
+                                  ] as const).map(([label, val]) => (
+                                    <div key={label} className="bg-black/30 border border-border/40 rounded-lg px-3 py-2 text-center">
+                                      <div className="text-[9px] text-muted/50 uppercase tracking-wider">{label}</div>
+                                      <div className="text-sm font-bold text-white/80">{(val ?? 0).toLocaleString()}</div>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+
+                              {/* Error message */}
+                              {entry.error_message && (
+                                <div className="bg-dexRed/10 border border-dexRed/20 rounded-lg px-3 py-2 text-dexRed text-[11px] break-all">
+                                  <span className="text-dexRed/60">[ERR]</span> {entry.error_message}
+                                </div>
+                              )}
+
+                              {/* Raw metadata for non-specialized types */}
+                              {entry.metadata && Object.keys(entry.metadata).length > 0 && !isScanEvent(entry.sync_type) && !isCleanupEvent(entry.sync_type) && !isCalibrationEvent(entry.sync_type) && (
+                                <div className="bg-black/30 border border-border/40 rounded-lg px-3 py-2 text-[11px] text-muted/70 break-all whitespace-pre-wrap">
+                                  {JSON.stringify(entry.metadata, null, 2)}
+                                </div>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                    </Fragment>
+                  );
+                })}
               </tbody>
             </table>
+
+            {/* Blinking cursor at the bottom of the terminal */}
+            <div className="px-4 py-2 border-t border-border/30">
+              <span className="font-mono text-xs text-muted/40">$</span>
+              <span className="ml-1 animate-pulse text-dexGreen font-mono">_</span>
+            </div>
           </div>
         )}
 
         {/* Pagination */}
         {totalPages > 1 && (
-          <div className="flex items-center justify-between text-xs text-muted">
-            <span>Page {page} of {totalPages}</span>
+          <div className="flex items-center justify-between text-xs font-mono text-muted">
+            <span className="text-muted/60">page {page}/{totalPages}</span>
             <div className="flex gap-2">
               <button
                 onClick={() => setPage(p => Math.max(1, p - 1))}
                 disabled={page === 1}
-                className="px-3 py-1 rounded bg-surface border border-border disabled:opacity-30 hover:border-white/20 transition-colors"
+                className="px-3 py-1 rounded-md bg-black/40 border border-border text-muted disabled:opacity-30 hover:text-dexGreen hover:border-dexGreen/30 transition-colors"
               >
-                Prev
+                prev
               </button>
               <button
                 onClick={() => setPage(p => Math.min(totalPages, p + 1))}
                 disabled={page === totalPages}
-                className="px-3 py-1 rounded bg-surface border border-border disabled:opacity-30 hover:border-white/20 transition-colors"
+                className="px-3 py-1 rounded-md bg-black/40 border border-border text-muted disabled:opacity-30 hover:text-dexGreen hover:border-dexGreen/30 transition-colors"
               >
-                Next
+                next
               </button>
             </div>
           </div>

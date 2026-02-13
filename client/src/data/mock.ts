@@ -38,7 +38,7 @@ export function fmtListedTime(d: Date | string): string {
 
 export function trendInfo(v: number | null): { t: string; c: string } {
   if (v == null) return { t: '\u2014', c: 'text-muted' };
-  if (v > .5) return { t: '\u25b2 +' + v.toFixed(1) + '%', c: 'text-profit' };
-  if (v < -.5) return { t: '\u25bc ' + v.toFixed(1) + '%', c: 'text-risk' };
+  if (v > .5) return { t: '\u25b2 +' + v.toFixed(1) + '%', c: 'text-dexGreen' };
+  if (v < -.5) return { t: '\u25bc ' + v.toFixed(1) + '%', c: 'text-dexRed' };
   return { t: '\u2014 ' + v.toFixed(1) + '%', c: 'text-muted' };
 }
