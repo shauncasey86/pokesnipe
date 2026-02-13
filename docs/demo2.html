@@ -1,0 +1,1369 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>PokéSnipe v1.3.2 | Silph Co. Terminal</title>
+    
+    <!-- Fonts: Space Grotesk (Display) & JetBrains Mono (Data) -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Space+Grotesk:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['Space Grotesk', 'sans-serif'],
+                        mono: ['JetBrains Mono', 'monospace'],
+                    },
+                    colors: {
+                        obsidian: '#050505',
+                        charcoal: '#0F0F12',
+                        panel: '#16161D',
+                        border: '#2A2A35',
+                        
+                        // Pokemon-inspired semantic tokens
+                        dexRed: '#FF3E3E',
+                        dexBlue: '#3B82F6',
+                        dexGreen: '#10B981',
+                        dexYellow: '#FACC15',
+                        
+                        // Tiers
+                        grail: '#F59E0B',
+                        hit: '#10B981', 
+                        flip: '#6366F1',
+                    },
+                    backgroundImage: {
+                        'hex-pattern': "url('data:image/svg+xml,%3Csvg width=\"24\" height=\"40\" viewBox=\"0 0 24 40\" xmlns=\"http://www.w3.org/2000/svg\"%3E%3Cpath d=\"M0 40c5.523 0 10-4.477 10-10V30c0-5.523-4.477-10-10-10S0 15.523 0 10V0h24v10c0 5.523 4.477 10 10 10s10 4.477 10 10v10c0 5.523-4.477 10-10 10S0 35.523 0 30v10z\" fill=\"%232A2A35\" fill-opacity=\"0.05\" fill-rule=\"evenodd\"/%3E%3C/svg%3E')",
+                    },
+                    animation: {
+                        'scan': 'scan 2s linear infinite',
+                        'reveal': 'reveal 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards',
+                        'pulse-slow': 'pulse 3s cubic-bezier(0.4, 0, 0.6, 1) infinite',
+                        'in': 'fadeIn 0.2s ease-out',
+                        'spin-slow': 'spin 3s linear infinite',
+                        'blink': 'blink 1.5s infinite',
+                    },
+                    keyframes: {
+                        scan: {
+                            '0%': { backgroundPosition: '0% 0%' },
+                            '100%': { backgroundPosition: '0% 100%' },
+                        },
+                        reveal: {
+                            '0%': { opacity: '0', transform: 'translateY(10px)' },
+                            '100%': { opacity: '1', transform: 'translateY(0)' },
+                        },
+                        fadeIn: {
+                            '0%': { opacity: '0', transform: 'scale(0.95)' },
+                            '100%': { opacity: '1', transform: 'scale(1)' },
+                        },
+                        blink: {
+                            '0%, 100%': { opacity: '1' },
+                            '50%': { opacity: '0.4' },
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+
+    <!-- React Dependencies -->
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+    <style>
+        /* Base Aesthetic */
+        body { 
+            background-color: #050505; 
+            color: #E2E8F0; 
+            overflow: hidden; /* App feel */
+        }
+        
+        /* Chamfered Corners utility (Clip Path) */
+        .chamfer-br { clip-path: polygon(100% 0, 100% calc(100% - 10px), calc(100% - 10px) 100%, 0 100%, 0 0); }
+        .chamfer-all { clip-path: polygon(10px 0, 100% 0, 100% calc(100% - 10px), calc(100% - 10px) 100%, 0 100%, 0 10px); }
+        .chamfer-r { clip-path: polygon(0 0, 100% 0, 100% calc(100% - 12px), calc(100% - 12px) 100%, 0 100%); }
+
+        /* Holographic Effect */
+        .holo-card::after {
+            content: "";
+            position: absolute;
+            inset: 0;
+            background: linear-gradient(135deg, rgba(255,255,255,0) 30%, rgba(255,255,255,0.1) 50%, rgba(255,255,255,0) 70%);
+            background-size: 200% 200%;
+            opacity: 0;
+            transition: opacity 0.3s;
+            pointer-events: none;
+            mix-blend-mode: overlay;
+        }
+        .holo-card:hover::after { opacity: 1; animation: shine 2s infinite; }
+        
+        @keyframes shine { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+
+        /* 3D Flip Utility */
+        .perspective-1000 { perspective: 1000px; }
+        .preserve-3d { transform-style: preserve-3d; }
+        .backface-hidden { backface-visibility: hidden; }
+        .rotate-y-180 { transform: rotateY(180deg); }
+
+        /* Scrollbar */
+        ::-webkit-scrollbar { width: 4px; height: 4px; }
+        ::-webkit-scrollbar-thumb { background: #333; border-radius: 2px; }
+        ::-webkit-scrollbar-thumb:hover { background: #FF3E3E; }
+    </style>
+</head>
+<body>
+    <div id="root" class="h-screen w-full flex flex-col items-center justify-center text-center">
+        <!-- Initial Loader -->
+        <div class="relative w-16 h-16 animate-spin">
+            <div class="absolute inset-0 border-4 border-t-dexRed border-r-transparent border-b-border border-l-transparent rounded-full"></div>
+        </div>
+        <div class="mt-4 font-mono text-xs text-border uppercase tracking-[0.2em] animate-pulse">Initializing System</div>
+    </div>
+
+<script type="text/babel">
+const { useState, useEffect, useMemo } = React;
+
+// --- ICONS (Robust) ---
+const Icon = ({ path, size = 16, className = "" }) => (
+    <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
+        {path}
+    </svg>
+);
+
+const Icons = {
+    Grid: <><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect></>,
+    Search: <><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></>,
+    Zap: <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>,
+    Activity: <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline>,
+    Box: <><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path><polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline><line x1="12" y1="22.08" x2="12" y2="12"></line></>,
+    Sliders: <><line x1="4" y1="21" x2="4" y2="14"></line><line x1="4" y1="10" x2="4" y2="3"></line><line x1="12" y1="21" x2="12" y2="12"></line><line x1="12" y1="8" x2="12" y2="3"></line><line x1="20" y1="21" x2="20" y2="16"></line><line x1="20" y1="12" x2="20" y2="3"></line><line x1="1" y1="14" x2="7" y2="14"></line><line x1="9" y1="8" x2="15" y2="8"></line><line x1="17" y1="16" x2="23" y2="16"></line></>,
+    ArrowUpRight: <><line x1="7" y1="17" x2="17" y2="7"></line><polyline points="7 7 17 7 17 17"></polyline></>,
+    Droplet: <path d="M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z"></path>,
+    X: <><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></>,
+    Microscope: <><path d="M6 18h8"/><path d="M3 22h18"/><path d="M14 22a7 7 0 1 0 0-14h-1"/><path d="M9 14h2"/><path d="M9 12a2 2 0 0 1-2-2V6h6v4a2 2 0 0 1-2 2Z"/><path d="M12 6V3a1 1 0 0 0-1-1H9a1 1 0 0 0-1 1v3"/></>,
+    TrendingUp: <><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></>,
+    Rotate: <path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"/>,
+    Maximize: <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7" />,
+    Cpu: <><rect x="4" y="4" width="16" height="16" rx="2" ry="2"></rect><rect x="9" y="9" width="6" height="6"></rect><line x1="9" y1="1" x2="9" y2="4"></line><line x1="15" y1="1" x2="15" y2="4"></line><line x1="9" y1="20" x2="9" y2="23"></line><line x1="15" y1="20" x2="15" y2="23"></line><line x1="20" y1="9" x2="23" y2="9"></line><line x1="20" y1="14" x2="23" y2="14"></line><line x1="1" y1="9" x2="4" y2="9"></line><line x1="1" y1="14" x2="4" y2="14"></line></>,
+    Terminal: <><polyline points="4 17 10 11 4 5"></polyline><line x1="12" y1="19" x2="20" y2="19"></line></>,
+    Book: <><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path></>,
+    Power: <><path d="M18.36 6.64a9 9 0 1 1-12.73 0"></path><line x1="12" y1="2" x2="12" y2="12"></line></>,
+    Send: <><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></>,
+    ArrowLeft: <><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></>,
+    Check: <polyline points="20 6 9 17 4 12"></polyline>
+};
+
+// --- DATA GENERATORS ---
+
+// Expanded Mock Matrix Generator to handle variant prices
+const generateVariantPrices = (basePrice) => {
+    return {
+        raw: {
+            NM: basePrice,
+            LP: Math.floor(basePrice * 0.85),
+            MP: Math.floor(basePrice * 0.70),
+            HP: Math.floor(basePrice * 0.50),
+            DM: Math.floor(basePrice * 0.30)
+        },
+        graded: {
+            // [10, 9, 8, ..., 1]
+            PSA: { 10: basePrice * 3.5, 9: basePrice * 1.5, 8: basePrice * 1.1 },
+            BGS: { 10: basePrice * 4.5, 9.5: basePrice * 1.8, 9: basePrice * 1.4 },
+            CGC: { 10: basePrice * 3.2, 9.5: basePrice * 1.6, 9: basePrice * 1.2 }
+        }
+    };
+};
+
+const getMockCardsForSet = (setCode) => {
+    const types = ['Fire', 'Water', 'Grass', 'Lightning', 'Psychic', 'Fighting', 'Darkness', 'Metal', 'Fairy', 'Dragon', 'Colorless'];
+    
+    return Array.from({length: 12}, (_, i) => {
+        const type = types[i % types.length];
+        const basePrice = Math.floor(Math.random() * 200) + 10;
+        
+        return {
+            id: `${setCode}-card-${i+1}`,
+            name: `Mock Pokémon ${i+1}`,
+            supertype: "Pokémon",
+            subtypes: ["Stage 1"],
+            hp: "120",
+            types: [type],
+            evolves_from: `Basic Mon ${i}`,
+            rules: [],
+            abilities: i % 3 === 0 ? [{ type: 'Ability', name: 'Inner Focus', text: 'Prevent all effects of attacks, including damage, done to this Pokémon.' }] : [],
+            attacks: [
+                { name: "Elemental Punch", cost: [type, "Colorless"], damage: "40", text: "Flip a coin. If heads, this attack does 20 more damage." },
+                { name: "Hyper Beam", cost: [type, type, "Colorless"], damage: "120", text: "Discard an Energy from this Pokémon." }
+            ],
+            weaknesses: [{ type: "Water", value: "x2" }],
+            resistances: [{ type: "Fighting", value: "-30" }],
+            retreat_cost: ["Colorless", "Colorless"],
+            set: { code: setCode },
+            num: `${i+1}`,
+            printed_total: 200,
+            rarity: i % 4 === 0 ? 'Secret Rare' : 'Rare Holo',
+            artist: "Ken Sugimori",
+            regulation_mark: "E",
+            flavor_text: "It spits fire that is hot enough to melt boulders. Known to cause forest fires unintentionally.",
+            national_pokedex_numbers: [6],
+            legalities: { standard: "Legal", expanded: "Legal" },
+            image: `https://images.pokemontcg.io/${setCode.toLowerCase()}/${i+1}_hires.png`,
+            marketPrice: basePrice,
+            variants: [
+                { name: "Normal", prices: generateVariantPrices(basePrice) },
+                { name: "Reverse Holofoil", prices: generateVariantPrices(Math.floor(basePrice * 1.2)) },
+                { name: "Master Ball Holo", prices: generateVariantPrices(Math.floor(basePrice * 5)) }
+            ]
+        };
+    });
+};
+
+const DEALS=[
+  {
+      id:'d1',ebayItemId:'384729105',name:'Umbreon VMAX (Alternate Art)',set:{name:'Evolving Skies',code:'EVS'},num:'215/203',variant:'holofoil',cond:'NM',isGr:true,grader:'PSA',grade:'10',scrImg:'https://images.pokemontcg.io/swsh7/215_hires.png',ebImg:'https://i.ebayimg.com/images/g/U~4AAOSwVENm2Xqx/s-l1600.jpg',rarity:'Secret Rare',eP:142.00,ship:4.99,bp:6.34,tCost:153.33,mGBP:209.09,fx:0.789,pGBP:55.76,pPct:36.4,tier:'HIT',conf:0.92,confT:'high',liq:0.81,liqG:'high',trends:{'7d':2.4},seller:'poke_vault_99',fb:12847,comps:{NM:{lo:189,mk:209},LP:{lo:142,mk:166}},url:'https://www.ebay.co.uk/itm/384729105',at:new Date(Date.now()-2*60000),status:'active',
+      aiReason: "High liquidity item. 15% below market average. Consistent upward trend (2.4% / 7d). Safe acquire.",
+      recentSales: [
+          {date: '2h ago', price: 212, platform: 'eBay'},
+          {date: '1d ago', price: 208, platform: 'eBay'},
+          {date: '3d ago', price: 215, platform: 'eBay'}
+      ],
+      pricingMatrix: generateVariantPrices(209)
+  },
+  {
+      id:'d2',ebayItemId:'293847165',name:'Charizard V',set:{name:"Champion's Path",code:'CPA'},num:'079/073',variant:'normal',cond:'NM',isGr:false,scrImg:'https://images.pokemontcg.io/swsh35/79_hires.png',ebImg:'https://i.ebayimg.com/images/g/iMQAAOSwITdm4Rfk/s-l1600.jpg',rarity:'Ultra Rare',eP:18.50,ship:2.99,bp:1.50,tCost:22.99,mGBP:33.14,fx:0.789,pGBP:10.15,pPct:44.1,tier:'GRAIL',conf:0.88,confT:'high',liq:0.83,liqG:'high',trends:{'7d':1.2},seller:'tcg_king_uk',fb:3421,comps:{NM:{lo:30,mk:33},LP:{lo:22,mk:27}},url:'https://www.ebay.co.uk/itm/293847165',at:new Date(Date.now()-5*60000),status:'active',
+      aiReason: "Significant arbitrage opportunity. Item is raw but visually clean. Grading candidate.",
+      recentSales: [
+          {date: '4h ago', price: 35, platform: 'eBay'},
+          {date: '1d ago', price: 32, platform: 'eBay'}
+      ],
+      gradingPot: {
+          psa9: { val: 45, cost: 15 },
+          psa10: { val: 120, cost: 15 }
+      },
+      pricingMatrix: generateVariantPrices(33)
+  },
+  {
+      id:'d3',ebayItemId:'401928374',name:'Lugia V (Alternate Art)',set:{name:'Silver Tempest',code:'SIT'},num:'186/195',variant:'holofoil',cond:'LP',isGr:false,scrImg:'https://images.pokemontcg.io/swsh12/186_hires.png',ebImg:'https://i.ebayimg.com/images/g/mSIAAOSwA~Fm5Yrd/s-l1600.jpg',rarity:'Ultra Rare',eP:22.00,ship:3.50,bp:1.58,tCost:27.08,mGBP:35.11,fx:0.789,pGBP:8.03,pPct:29.7,tier:'HIT',conf:0.78,confT:'medium',liq:0.62,liqG:'medium',trends:{'7d':1.5},seller:'card_baron_uk',fb:856,comps:{NM:{lo:32,mk:38},LP:{lo:25,mk:35}},url:'https://www.ebay.co.uk/itm/401928374',at:new Date(Date.now()-12*60000),status:'active',
+      aiReason: "Listed as LP but images suggest NM. Potential condition arbitrage.",
+      recentSales: [
+          {date: '1h ago', price: 36, platform: 'eBay'},
+          {date: '6h ago', price: 34, platform: 'eBay'}
+      ],
+      pricingMatrix: generateVariantPrices(35)
+  },
+  {id:'d4',ebayItemId:'510293847',name:'Giratina V (Alternate Art)',set:{name:'Lost Origin',code:'LOR'},num:'186/196',variant:'holofoil',cond:'NM',isGr:true,grader:'CGC',grade:'9.5',scrImg:'https://images.pokemontcg.io/swsh11/186_hires.png',ebImg:'https://i.ebayimg.com/images/g/fakAAOSwxxxxfake1/s-l1600.jpg',rarity:'Ultra Rare',eP:68.00,ship:0,bp:3.32,tCost:71.32,mGBP:90.74,fx:0.789,pGBP:19.42,pPct:27.2,tier:'HIT',conf:0.91,confT:'high',liq:0.74,liqG:'medium',trends:{'7d':2.1},seller:'japan_imports_uk',fb:5612,comps:{NM:{lo:83,mk:91},LP:{lo:63,mk:75}},url:'https://www.ebay.co.uk/itm/510293847',at:new Date(Date.now()-18*60000),status:'expired', recentSales: [], aiReason: "System Hold", pricingMatrix: generateVariantPrices(90)},
+  {id:'d5',ebayItemId:'620384756',name:'Rayquaza VMAX (Alt Art)',set:{name:'Evolving Skies',code:'EVS'},num:'218/203',variant:'holofoil',cond:'MP',isGr:false,scrImg:'https://images.pokemontcg.io/swsh7/218_hires.png',ebImg:'https://i.ebayimg.com/images/g/fakAAOSwxxxxfake2/s-l1600.jpg',rarity:'Secret Rare',eP:45.00,ship:5.99,bp:2.48,tCost:53.47,mGBP:64.70,fx:0.789,pGBP:11.23,pPct:21.0,tier:'FLIP',conf:0.71,confT:'medium',liq:0.55,liqG:'medium',trends:{'7d':-0.8},seller:'elite_collectors_gb',fb:421,comps:{NM:{lo:87,mk:103},LP:{lo:67,mk:83}},url:'https://www.ebay.co.uk/itm/620384756',at:new Date(Date.now()-65*60000),status:'sold', recentSales: [], aiReason: "System Hold", pricingMatrix: generateVariantPrices(64)},
+];
+
+const SETS = [
+    { name: '151', code: 'MEW', date: 'Sept 2023', total: 207, icon: 'https://images.pokemontcg.io/sv3pt5/symbol.png', logo: 'https://images.pokemontcg.io/sv3pt5/logo.png', series: 'Scarlet & Violet' },
+    { name: 'Obsidian Flames', code: 'OBF', date: 'Aug 2023', total: 230, icon: 'https://images.pokemontcg.io/sv3/symbol.png', logo: 'https://images.pokemontcg.io/sv3/logo.png', series: 'Scarlet & Violet' },
+    { name: 'Paldea Evolved', code: 'PAL', date: 'June 2023', total: 279, icon: 'https://images.pokemontcg.io/sv2/symbol.png', logo: 'https://images.pokemontcg.io/sv2/logo.png', series: 'Scarlet & Violet' },
+    { name: 'Scarlet & Violet', code: 'SVI', date: 'Mar 2023', total: 258, icon: 'https://images.pokemontcg.io/sv1/symbol.png', logo: 'https://images.pokemontcg.io/sv1/logo.png', series: 'Scarlet & Violet' },
+    { name: 'Crown Zenith', code: 'CRZ', date: 'Jan 2023', total: 160, icon: 'https://images.pokemontcg.io/swsh12pt5/symbol.png', logo: 'https://images.pokemontcg.io/swsh12pt5/logo.png', series: 'Sword & Shield' },
+    { name: 'Silver Tempest', code: 'SIT', date: 'Nov 2022', total: 246, icon: 'https://images.pokemontcg.io/swsh12/symbol.png', logo: 'https://images.pokemontcg.io/swsh12/logo.png', series: 'Sword & Shield' },
+    { name: 'Lost Origin', code: 'LOR', date: 'Sept 2022', total: 247, icon: 'https://images.pokemontcg.io/swsh11/symbol.png', logo: 'https://images.pokemontcg.io/swsh11/logo.png', series: 'Sword & Shield' },
+    { name: 'Astral Radiance', code: 'ASR', date: 'May 2022', total: 246, icon: 'https://images.pokemontcg.io/swsh10/symbol.png', logo: 'https://images.pokemontcg.io/swsh10/logo.png', series: 'Sword & Shield' },
+    { name: 'Brilliant Stars', code: 'BRS', date: 'Feb 2022', total: 216, icon: 'https://images.pokemontcg.io/swsh9/symbol.png', logo: 'https://images.pokemontcg.io/swsh9/logo.png', series: 'Sword & Shield' },
+    { name: 'Fusion Strike', code: 'FST', date: 'Nov 2021', total: 284, icon: 'https://images.pokemontcg.io/swsh8/symbol.png', logo: 'https://images.pokemontcg.io/swsh8/logo.png', series: 'Sword & Shield' },
+    { name: 'Evolving Skies', code: 'EVS', date: 'Aug 2021', total: 237, icon: 'https://images.pokemontcg.io/swsh7/symbol.png', logo: 'https://images.pokemontcg.io/swsh7/logo.png', series: 'Sword & Shield' }
+];
+
+const BACKGROUND_JOBS = [
+  { name: 'ebay-scan', status: 'running', last: 'now' },
+  { name: 'deal-cleanup', status: 'idle', last: '2m ago' },
+  { name: 'exchange-rate', status: 'idle', last: '1h ago' },
+  { name: 'hot-refresh', status: 'running', last: 'now' },
+  { name: 'expansion-check', status: 'idle', last: '1d ago' },
+  { name: 'full-sync', status: 'idle', last: '4h ago' },
+  { name: 'velocity-prefetch', status: 'idle', last: '10m ago' },
+  { name: 'accuracy-check', status: 'idle', last: '12h ago' },
+  { name: 'weight-calibration', status: 'idle', last: '1w ago' },
+  { name: 'card-index-check', status: 'idle', last: '30m ago' }
+];
+
+// --- MICRO COMPONENTS ---
+
+const NavButton = ({ icon, label, active, onClick }) => (
+    <button 
+        onClick={onClick}
+        className={`relative p-3 rounded-xl transition-all duration-300 group overflow-hidden w-full flex justify-center
+            ${active ? 'bg-panel text-dexRed ring-1 ring-dexRed/20' : 'text-gray-500 hover:text-gray-300 hover:bg-panel'}
+        `}
+    >
+        {active && <div className="absolute left-0 top-0 bottom-0 w-1 bg-dexRed"></div>}
+        <Icon path={icon} size={22} className="relative z-10" />
+        <span className="sr-only">{label}</span>
+    </button>
+);
+
+const TypeBadge = ({ type }) => {
+    const colors = {
+        GRAIL: 'text-amber-500 bg-amber-500/10 border-amber-500/20',
+        HIT: 'text-emerald-500 bg-emerald-500/10 border-emerald-500/20',
+        FLIP: 'text-indigo-400 bg-indigo-500/10 border-indigo-500/20',
+        SLEEP: 'text-gray-400 bg-gray-700/20 border-gray-600/20'
+    };
+    return (
+        <span className={`px-2 py-0.5 rounded text-[9px] font-mono font-bold tracking-wider border uppercase ${colors[type] || colors.SLEEP}`}>
+            {type}
+        </span>
+    );
+};
+
+// Pokemon Type Pill
+const TypePill = ({ type }) => {
+    const typeColors = {
+        Fire: 'bg-red-500 text-white',
+        Water: 'bg-blue-500 text-white',
+        Grass: 'bg-green-500 text-white',
+        Lightning: 'bg-yellow-400 text-black',
+        Psychic: 'bg-purple-500 text-white',
+        Fighting: 'bg-orange-600 text-white',
+        Darkness: 'bg-gray-800 text-white',
+        Metal: 'bg-gray-400 text-black',
+        Fairy: 'bg-pink-400 text-white',
+        Dragon: 'bg-indigo-600 text-white',
+        Colorless: 'bg-gray-200 text-black'
+    };
+    return (
+        <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wide ${typeColors[type] || 'bg-gray-700'}`}>
+            {type}
+        </span>
+    );
+};
+
+const Sparkline = ({ val }) => {
+    const isPos = val >= 0;
+    return (
+        <div className="flex items-center gap-1">
+             <svg width="40" height="12" viewBox="0 0 40 12" className="opacity-80">
+                <path 
+                    d={isPos ? "M0 12 L10 8 L20 10 L40 0" : "M0 0 L10 4 L20 2 L40 12"} 
+                    fill="none" 
+                    stroke={isPos ? "#10B981" : "#EF4444"} 
+                    strokeWidth="1.5" 
+                />
+            </svg>
+            <span className={`text-[9px] font-mono ${isPos ? 'text-dexGreen' : 'text-dexRed'}`}>
+                {val > 0 ? '+' : ''}{val}%
+            </span>
+        </div>
+    );
+};
+
+// --- MODALS & COMPLEX MODULES ---
+
+const PricingModal = ({ deal, onClose }) => {
+    const { pricingMatrix } = deal;
+    const graders = ['PSA', 'BGS', 'CGC'];
+    
+    return (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-sm animate-in" onClick={onClose}>
+            <div className="bg-panel border border-border rounded-xl w-full max-w-4xl m-4 p-8 shadow-2xl relative max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+                <button onClick={onClose} className="absolute top-4 right-4 text-gray-500 hover:text-white transition-colors">
+                    <Icon path={Icons.X} size={24} />
+                </button>
+                
+                <h3 className="text-2xl font-bold text-white mb-2 font-sans tracking-tight">Pricing Matrix</h3>
+                <p className="text-sm text-gray-400 font-mono mb-8 border-b border-border/50 pb-4">
+                    Target: <span className="text-dexBlue">{deal.name}</span> <span className="mx-2 text-gray-700">|</span> Set: {deal.set.code}
+                </p>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                    {/* Raw Cards */}
+                    <div>
+                        <h4 className="text-xs uppercase font-bold text-dexBlue tracking-wider mb-4 flex items-center gap-2">
+                            <Icon path={Icons.Box} size={14} /> Raw Condition
+                        </h4>
+                        <div className="bg-charcoal/50 rounded-lg border border-border overflow-hidden">
+                            <table className="w-full text-sm font-mono text-gray-300">
+                                <thead className="bg-black/30">
+                                    <tr className="text-gray-500 text-[10px] uppercase">
+                                        <th className="text-left py-3 px-4">Condition</th>
+                                        <th className="text-right py-3 px-4">Market Price</th>
+                                    </tr>
+                                </thead>
+                                <tbody className="divide-y divide-border/30">
+                                    {Object.entries(pricingMatrix.raw).map(([cond, price]) => (
+                                        <tr key={cond} className="hover:bg-white/5 transition-colors">
+                                            <td className="py-2.5 px-4 font-bold text-white">{cond}</td>
+                                            <td className="text-right px-4 text-dexGreen">£{price}</td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    {/* Graded Cards */}
+                    <div>
+                        <h4 className="text-xs uppercase font-bold text-grail tracking-wider mb-4 flex items-center gap-2">
+                            <Icon path={Icons.Zap} size={14} /> Graded Population
+                        </h4>
+                        <div className="bg-charcoal/50 rounded-lg border border-border overflow-auto max-h-[400px]">
+                            <table className="w-full text-xs font-mono text-gray-300">
+                                <thead className="bg-black/30 sticky top-0">
+                                    <tr className="text-gray-500 text-[10px] uppercase">
+                                        <th className="text-center py-3 px-2">Grade</th>
+                                        <th className="text-right py-3 px-4">PSA</th>
+                                        <th className="text-right py-3 px-4">BGS</th>
+                                        <th className="text-right py-3 px-4">CGC</th>
+                                    </tr>
+                                </thead>
+                                <tbody className="divide-y divide-border/30">
+                                    {[10, 9.5, 9, 8].map((grade) => (
+                                        <tr key={grade} className="hover:bg-white/5 transition-colors">
+                                            <td className="py-2 px-2 text-center font-bold text-white bg-black/20">{grade}</td>
+                                            <td className="text-right px-4 text-white">£{pricingMatrix.graded.PSA[grade] || '-'}</td>
+                                            <td className="text-right px-4 text-white">£{pricingMatrix.graded.BGS[grade] || '-'}</td>
+                                            <td className="text-right px-4 text-white">£{pricingMatrix.graded.CGC[grade] || '-'}</td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    );
+};
+
+const MarketCard = ({ deal }) => {
+    const [showModal, setShowModal] = useState(false);
+    const { pricingMatrix } = deal; // pricingMatrix is now variant specific in the full card object
+    // Fallback if comps aren't pre-calculated
+    const market = pricingMatrix.raw.NM;
+    const low = pricingMatrix.raw.HP;
+    const price = deal.tCost || market;
+
+    const RangeVisual = () => {
+        const min = Math.min(low, price) * 0.9;
+        const max = Math.max(market, price) * 1.1;
+        const range = max - min;
+        const getPos = (val) => ((val - min) / range) * 100;
+
+        return (
+            <div className="flex flex-col gap-6 h-full justify-center">
+                <div className="w-full h-8 relative mt-2 select-none">
+                    <div className="absolute top-3 left-0 right-0 h-1.5 bg-border rounded-full overflow-hidden">
+                        <div className="absolute top-0 bottom-0 bg-gray-700" style={{ left: `${getPos(low)}%`, width: `${getPos(market) - getPos(low)}%` }}></div>
+                    </div>
+                    <div className="absolute top-0 flex flex-col items-center" style={{ left: `${getPos(low)}%`, transform: 'translateX(-50%)' }}>
+                        <span className="w-0.5 h-3 bg-gray-500 mb-1"></span>
+                        <span className="text-[8px] text-gray-500 font-mono">LO</span>
+                    </div>
+                    <div className="absolute top-0 flex flex-col items-center" style={{ left: `${getPos(market)}%`, transform: 'translateX(-50%)' }}>
+                        <span className="w-0.5 h-3 bg-gray-500 mb-1"></span>
+                        <span className="text-[8px] text-gray-500 font-mono">MKT</span>
+                    </div>
+                    <div className="absolute top-[0.4rem] flex flex-col items-center z-10" style={{ left: `${getPos(price)}%`, transform: 'translateX(-50%)' }}>
+                        <div className="w-2.5 h-2.5 rounded-full bg-dexGreen border border-black shadow-[0_0_10px_rgba(16,185,129,0.5)]"></div>
+                    </div>
+                </div>
+                <div className="flex justify-between items-baseline border-t border-border pt-2">
+                    <div className="flex items-center gap-2">
+                         <div className="w-2 h-2 rounded-full bg-dexGreen"></div>
+                         <span className="text-[9px] text-gray-400 font-mono uppercase">Ref Price</span>
+                    </div>
+                    <div className="text-right">
+                        <span className="text-[10px] text-gray-500 font-mono uppercase mr-2">Market NM</span>
+                        <span className="text-xl font-mono font-bold text-white tabular-nums">£{market}</span>
+                    </div>
+                </div>
+            </div>
+        );
+    };
+
+    return (
+        <>
+            <div 
+                className="col-span-1 bg-panel border border-border p-5 rounded-xl cursor-pointer hover:border-gray-600 transition-colors relative overflow-hidden group"
+                onClick={() => setShowModal(true)}
+            >
+                <h3 className="text-gray-500 font-mono text-xs uppercase tracking-widest mb-4 absolute top-5 left-5">Market Range</h3>
+                <div className="absolute top-3 right-3 text-gray-600 opacity-50 group-hover:opacity-100"><Icon path={Icons.Maximize} size={12} /></div>
+                <div className="mt-6 h-32"><RangeVisual /></div>
+            </div>
+            {showModal && <PricingModal deal={deal} onClose={() => setShowModal(false)} />}
+        </>
+    );
+};
+
+const FlipCardImage = ({ deal, className="w-full" }) => {
+    const [flipped, setFlipped] = useState(false);
+    useEffect(() => { setFlipped(false); }, [deal.id]);
+    return (
+        <div 
+            className={`relative ${className} aspect-[2.5/3.5] bg-black rounded-lg shadow-2xl cursor-pointer perspective-1000 group shrink-0`}
+            onClick={() => setFlipped(!flipped)}
+        >
+            <div className={`relative w-full h-full transition-transform duration-700 preserve-3d ${flipped ? 'rotate-y-180' : ''}`}>
+                <div className="absolute inset-0 backface-hidden border border-gray-800 rounded-lg overflow-hidden bg-gray-900">
+                    <img src={deal.image || deal.scrImg} className="w-full h-full object-cover opacity-90 group-hover:scale-105 transition-transform duration-500" alt="Listing" />
+                    {/* Removed TypeBadge here per user request for generic catalogue, but keep for Deal view? 
+                        User said "catalogue doesn't need hit/grail badges". 
+                        Since FlipCardImage is used in both Deal View and Catalogue View, 
+                        we should maybe check a prop or context. 
+                        However, usually badges are fine on the detail view, just not the grid. 
+                        I will leave it here as this component is used in Detail view mostly.
+                        The grid uses a custom render below.
+                     */}
+                    <div className="absolute top-2 right-2 z-10"><TypeBadge type={deal.rarity && deal.rarity.includes('Secret') ? 'GRAIL' : 'HIT'} /></div>
+                </div>
+                <div className="absolute inset-0 backface-hidden rotate-y-180 border border-dexBlue/30 rounded-lg overflow-hidden bg-gray-900 flex items-center justify-center">
+                    <div className="text-center p-4">
+                        <img src={deal.image || deal.scrImg} className="w-full h-full object-cover absolute inset-0 opacity-20 blur-sm" alt="Blur" />
+                        <div className="relative z-10">
+                            <div className="text-dexBlue font-bold text-lg mb-2">Back View</div>
+                            <div className="text-xs text-gray-400">Card Back / Condition Check</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    );
+};
+
+const SilphScope = ({ reason }) => (
+    <div className="col-span-3 bg-panel border border-border/50 rounded-xl flex overflow-hidden group">
+        <div className="w-10 bg-dexBlue/10 flex items-start justify-center pt-4 border-r border-dexBlue/10 shrink-0"><Icon path={Icons.Microscope} size={18} className="text-dexBlue" /></div>
+        <div className="flex-1 p-4">
+            <h4 className="text-[10px] uppercase font-bold text-dexBlue tracking-wider mb-2 flex items-center gap-2">Silph Scope v2.4 Output<span className="w-1.5 h-1.5 rounded-full bg-dexBlue animate-pulse-slow"></span></h4>
+            <div className="font-mono text-xs text-gray-300 leading-relaxed bg-black/20 p-3 rounded border border-white/5 shadow-inner"><span className="text-dexBlue mr-2">root@silph:~$</span>{reason}<span className="inline-block w-2 h-4 bg-dexBlue/50 ml-1 align-middle animate-pulse"></span></div>
+        </div>
+    </div>
+);
+
+const GradingMatrix = ({ potential, cost }) => {
+    return (
+        <div className="bg-panel border border-dexGreen/30 rounded-xl p-4 shadow-[0_0_15px_rgba(16,185,129,0.05)] relative overflow-hidden">
+             <div className="absolute top-0 right-0 p-2 opacity-10"><Icon path={Icons.TrendingUp} size={48} /></div>
+             <h4 className="text-[10px] uppercase font-bold text-dexGreen tracking-wider mb-3 flex items-center gap-2"><Icon path={Icons.Zap} size={12} />Grading Arbitrage</h4>
+             <div className="grid grid-cols-2 gap-4">
+                 {[9, 10].map(grade => {
+                     const data = grade === 9 ? potential.psa9 : potential.psa10;
+                     const profit = data.val - cost - data.cost;
+                     const roi = ((profit / (cost + data.cost)) * 100).toFixed(0);
+                     return (
+                         <div key={grade} className="bg-charcoal/80 rounded border border-border p-2 backdrop-blur-sm">
+                             <div className="flex justify-between items-end mb-1"><span className="text-xs font-bold text-white">PSA {grade}</span><span className="text-[10px] text-gray-500">Est. £{data.val}</span></div>
+                             <div className={`text-lg font-mono font-bold tabular-nums ${profit > 0 ? 'text-dexGreen' : 'text-dexRed'}`}>{profit > 0 ? '+' : ''}£{profit.toFixed(0)}</div>
+                             <div className="text-[9px] font-mono text-gray-400 text-right">{roi}% ROI</div>
+                         </div>
+                     )
+                 })}
+             </div>
+        </div>
+    );
+};
+
+const RecentSales = ({ sales }) => (
+    <div className="bg-panel border border-border/50 rounded-xl p-4 h-full">
+         <div className="flex justify-between items-center mb-3"><h4 className="text-[10px] uppercase font-bold text-gray-500 tracking-wider">Recent Comps</h4><Icon path={Icons.Activity} size={12} className="text-gray-600" /></div>
+         <div className="space-y-2">
+             {sales && sales.length > 0 ? sales.map((sale, i) => (
+                 <div key={i} className="flex justify-between items-center text-xs font-mono"><span className="text-gray-500">{sale.date}</span><div className="flex items-center gap-2"><span className="text-gray-400">{sale.platform}</span><span className="text-white font-bold">£{sale.price}</span></div></div>
+             )) : (
+                 <div className="text-[10px] text-gray-600 text-center py-2">No recent data</div>
+             )}
+         </div>
+    </div>
+);
+
+// --- INLINE PRICING COMPONENT ---
+const InlinePricing = ({ pricingMatrix }) => {
+    return (
+        <div className="mt-6 space-y-6 animate-in">
+            {/* Raw Cards */}
+            <div>
+                <h4 className="text-xs uppercase font-bold text-dexBlue tracking-wider mb-3 flex items-center gap-2">
+                    <Icon path={Icons.Box} size={14} /> Raw Condition
+                </h4>
+                <div className="bg-charcoal/50 rounded-lg border border-border overflow-hidden">
+                    <table className="w-full text-sm font-mono text-gray-300">
+                        <thead className="bg-black/30">
+                            <tr className="text-gray-500 text-[10px] uppercase">
+                                <th className="text-left py-2 px-4">Condition</th>
+                                <th className="text-right py-2 px-4">Market Price</th>
+                            </tr>
+                        </thead>
+                        <tbody className="divide-y divide-border/30">
+                            {Object.entries(pricingMatrix.raw).map(([cond, price]) => (
+                                <tr key={cond} className="hover:bg-white/5 transition-colors">
+                                    <td className="py-2 px-4 font-bold text-white">{cond}</td>
+                                    <td className="text-right px-4 text-dexGreen">£{price}</td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            {/* Graded Cards */}
+            <div>
+                <h4 className="text-xs uppercase font-bold text-grail tracking-wider mb-3 flex items-center gap-2">
+                    <Icon path={Icons.Zap} size={14} /> Graded Population
+                </h4>
+                <div className="bg-charcoal/50 rounded-lg border border-border overflow-hidden">
+                    <table className="w-full text-xs font-mono text-gray-300">
+                        <thead className="bg-black/30">
+                            <tr className="text-gray-500 text-[10px] uppercase">
+                                <th className="text-center py-2 px-2">Grade</th>
+                                <th className="text-right py-2 px-3">PSA</th>
+                                <th className="text-right py-2 px-3">BGS</th>
+                                <th className="text-right py-2 px-3">CGC</th>
+                            </tr>
+                        </thead>
+                        <tbody className="divide-y divide-border/30">
+                            {[10, 9.5, 9, 8].map((grade) => (
+                                <tr key={grade} className="hover:bg-white/5 transition-colors">
+                                    <td className="py-2 px-2 text-center font-bold text-white bg-black/20">{grade}</td>
+                                    <td className="text-right px-3 text-white">£{pricingMatrix.graded.PSA[grade] || '-'}</td>
+                                    <td className="text-right px-3 text-white">£{pricingMatrix.graded.BGS[grade] || '-'}</td>
+                                    <td className="text-right px-3 text-white">£{pricingMatrix.graded.CGC[grade] || '-'}</td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    );
+};
+
+// --- PAGES ---
+
+const SystemPage = () => (
+    <div className="p-8 h-full overflow-y-auto animate-in">
+        <h2 className="text-2xl font-bold text-white mb-6 font-sans">System Status</h2>
+        
+        {/* Scanner Details */}
+        <div className="grid grid-cols-4 gap-4 mb-6">
+            <div className="bg-panel border border-border p-4 rounded-xl flex flex-col justify-between h-28">
+                <div className="text-xs font-bold text-gray-500 uppercase tracking-widest">Scanner Status</div>
+                <div className="text-2xl font-mono font-bold text-dexGreen flex items-center gap-2"><div className="w-2 h-2 bg-dexGreen rounded-full animate-blink"></div>Active</div>
+                <div className="text-[10px] text-gray-400 font-mono">Uptime: 4d 12h 30m</div>
+            </div>
+            <div className="bg-panel border border-border p-4 rounded-xl flex flex-col justify-between h-28">
+                <div className="text-xs font-bold text-gray-500 uppercase tracking-widest">Items Scanned</div>
+                <div className="text-2xl font-mono font-bold text-white">1,240,592</div>
+                <div className="text-[10px] text-gray-400 font-mono">Rate: 45 items/sec</div>
+            </div>
+             <div className="bg-panel border border-border p-4 rounded-xl flex flex-col justify-between h-28">
+                <div className="text-xs font-bold text-gray-500 uppercase tracking-widest">Deals Found</div>
+                <div className="text-2xl font-mono font-bold text-dexBlue">842</div>
+                <div className="text-[10px] text-gray-400 font-mono">Hit Rate: 0.06%</div>
+            </div>
+            <div className="bg-panel border border-border p-4 rounded-xl flex flex-col justify-between h-28">
+                <div className="text-xs font-bold text-gray-500 uppercase tracking-widest">Avg Profit</div>
+                <div className="text-2xl font-mono font-bold text-dexYellow">£14.50</div>
+                <div className="text-[10px] text-gray-400 font-mono">Total Pot: £12.2k</div>
+            </div>
+        </div>
+
+        {/* API & Budgets */}
+        <h3 className="text-lg font-bold text-white mb-4 font-sans">API & Budgets</h3>
+        <div className="grid grid-cols-3 gap-6 mb-6">
+            <div className="bg-panel border border-border rounded-xl p-5">
+                <div className="flex justify-between items-start mb-4">
+                    <h4 className="text-sm font-bold text-gray-300">eBay API Quota</h4>
+                    <span className="text-[10px] px-2 py-0.5 rounded bg-dexBlue/10 text-dexBlue font-mono border border-dexBlue/20">HEALTHY</span>
+                </div>
+                <div className="text-2xl font-bold text-white mb-1 font-mono">18,402 <span className="text-sm text-gray-500 font-normal">/ 100k</span></div>
+                <div className="w-full h-1.5 bg-charcoal rounded-full overflow-hidden mt-2"><div className="h-full bg-dexBlue" style={{width: '18%'}}></div></div>
+            </div>
+            <div className="bg-panel border border-border rounded-xl p-5">
+                 <div className="flex justify-between items-start mb-4">
+                    <h4 className="text-sm font-bold text-gray-300">Scrydex Latency</h4>
+                    <span className="text-[10px] px-2 py-0.5 rounded bg-dexGreen/10 text-dexGreen font-mono border border-dexGreen/20">OPTIMAL</span>
+                </div>
+                <div className="text-2xl font-bold text-white mb-1 font-mono">12ms <span className="text-sm text-gray-500 font-normal">avg</span></div>
+                <div className="flex gap-1 mt-2">
+                    {[1,1,1,1,1,1,1,1,1,1].map((_,i) => <div key={i} className="flex-1 h-1.5 rounded-sm bg-dexGreen/30"></div>)}
+                </div>
+            </div>
+            <div className="bg-panel border border-border rounded-xl p-5">
+                 <div className="flex justify-between items-start mb-4">
+                    <h4 className="text-sm font-bold text-gray-300">Exchange Rate</h4>
+                     <span className="text-[10px] px-2 py-0.5 rounded bg-gray-700 text-gray-300 font-mono border border-gray-600">LIVE</span>
+                </div>
+                <div className="text-2xl font-bold text-white mb-1 font-mono">0.789 <span className="text-sm text-gray-500 font-normal">GBP/USD</span></div>
+                <div className="text-[10px] text-gray-400 font-mono mt-2">Last update: 2 mins ago</div>
+            </div>
+        </div>
+
+        {/* Catalogue Stats */}
+        <h3 className="text-lg font-bold text-white mb-4 font-sans">Catalogue Integrity</h3>
+        <div className="grid grid-cols-4 gap-4 mb-6">
+             <div className="bg-charcoal border border-border p-3 rounded flex justify-between items-center">
+                 <span className="text-xs text-gray-500 font-mono">Expansions</span>
+                 <span className="text-sm font-bold text-white">145</span>
+             </div>
+             <div className="bg-charcoal border border-border p-3 rounded flex justify-between items-center">
+                 <span className="text-xs text-gray-500 font-mono">Total Cards</span>
+                 <span className="text-sm font-bold text-white">12,400</span>
+             </div>
+             <div className="bg-charcoal border border-border p-3 rounded flex justify-between items-center">
+                 <span className="text-xs text-gray-500 font-mono">Last Sync</span>
+                 <span className="text-sm font-bold text-dexGreen">10:00 AM</span>
+             </div>
+             <div className="bg-charcoal border border-border p-3 rounded flex justify-between items-center">
+                 <span className="text-xs text-gray-500 font-mono">Dedup Mem</span>
+                 <span className="text-sm font-bold text-dexYellow">450MB</span>
+             </div>
+        </div>
+
+        {/* Background Jobs */}
+        <h3 className="text-lg font-bold text-white mb-4 font-sans">Background Workers</h3>
+        <div className="bg-panel border border-border rounded-xl overflow-hidden">
+            <table className="w-full text-left text-sm font-mono">
+                <thead className="bg-charcoal text-gray-500 text-[10px] uppercase">
+                    <tr>
+                        <th className="px-6 py-3 font-medium">Job Name</th>
+                        <th className="px-6 py-3 font-medium">Status</th>
+                        <th className="px-6 py-3 font-medium text-right">Last Run</th>
+                    </tr>
+                </thead>
+                <tbody className="divide-y divide-border/50 text-gray-300">
+                    {BACKGROUND_JOBS.map((job, i) => (
+                        <tr key={i} className="hover:bg-white/5 transition-colors">
+                            <td className="px-6 py-3">{job.name}</td>
+                            <td className="px-6 py-3">
+                                {job.status === 'running' ? (
+                                    <span className="text-dexGreen flex items-center gap-2"><span className="w-1.5 h-1.5 rounded-full bg-dexGreen animate-pulse"></span>Running</span>
+                                ) : (
+                                    <span className="text-gray-500">Idle</span>
+                                )}
+                            </td>
+                            <td className="px-6 py-3 text-right text-gray-500">{job.last}</td>
+                        </tr>
+                    ))}
+                </tbody>
+            </table>
+        </div>
+    </div>
+);
+
+const CataloguePage = ({ catalogueState, setCatalogueState }) => {
+    // Destructure state passed from App
+    const { mode, set, card, variantIdx } = catalogueState;
+
+    // Helpers to update partial state
+    const updateState = (updates) => setCatalogueState(prev => ({ ...prev, ...updates }));
+
+    // Mock cards based on selected set
+    const setCards = useMemo(() => {
+        return set ? getMockCardsForSet(set.code) : [];
+    }, [set]);
+
+    const handleSetClick = (newSet) => {
+        updateState({ set: newSet, mode: 'expansion' });
+    };
+
+    const handleCardClick = (newCard) => {
+        updateState({ card: newCard, variantIdx: 0, mode: 'card' });
+    };
+
+    const goBack = () => {
+        if (mode === 'card') updateState({ mode: 'expansion' });
+        else if (mode === 'expansion') updateState({ mode: 'list', set: null });
+    };
+
+    return (
+        <div className="h-full flex flex-col">
+            {/* Breadcrumb Header */}
+            {mode !== 'list' && (
+                <div className="h-14 border-b border-border flex items-center px-6 bg-charcoal/50 shrink-0">
+                    <button onClick={goBack} className="text-gray-400 hover:text-white flex items-center gap-2 text-xs font-mono uppercase tracking-wider transition-colors">
+                        <Icon path={Icons.ArrowLeft} size={14} /> Back
+                    </button>
+                    <div className="h-4 w-px bg-border mx-4"></div>
+                    <div className="flex items-center gap-2 text-sm">
+                        <span className="text-gray-500">Catalogue</span>
+                        <span className="text-gray-600">/</span>
+                        <span className={mode === 'expansion' ? 'text-white font-bold' : 'text-gray-500'}>{set?.name}</span>
+                        {mode === 'card' && (
+                            <>
+                                <span className="text-gray-600">/</span>
+                                <span className="text-white font-bold">{card?.name}</span>
+                            </>
+                        )}
+                    </div>
+                </div>
+            )}
+
+            <div className="flex-1 overflow-y-auto p-8 animate-in">
+                {mode === 'list' && (
+                    <>
+                        <h2 className="text-2xl font-bold text-white mb-6 font-sans">Expansion Catalogue</h2>
+                        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
+                            {SETS.map((s) => (
+                                <div key={s.code} onClick={() => handleSetClick(s)} className="bg-panel border border-border rounded-xl p-6 group hover:border-dexBlue transition-all cursor-pointer relative overflow-hidden flex flex-col items-center text-center">
+                                    <div className="w-20 h-20 mb-4 relative z-10 flex items-center justify-center">
+                                        <img src={s.logo || s.icon} alt={s.code} className="w-full h-full object-contain drop-shadow-[0_0_10px_rgba(0,0,0,0.5)] group-hover:scale-105 transition-transform duration-300" />
+                                    </div>
+                                    <div className="relative z-10">
+                                        <h3 className="text-white font-bold text-lg mb-1 leading-tight group-hover:text-dexBlue transition-colors">{s.name}</h3>
+                                        <div className="text-[10px] text-gray-500 font-mono uppercase tracking-wider mb-2">{s.series}</div>
+                                        <div className="inline-flex items-center gap-2 bg-charcoal border border-border px-2 py-1 rounded text-[10px] font-mono text-gray-400">
+                                            <img src={s.icon} className="w-3 h-3 grayscale" />
+                                            <span>{s.code}</span>
+                                            <span className="w-px h-3 bg-border"></span>
+                                            <span>{s.total} Cards</span>
+                                        </div>
+                                    </div>
+                                    <div className="absolute inset-0 bg-gradient-to-t from-dexBlue/10 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
+                                </div>
+                            ))}
+                        </div>
+                    </>
+                )}
+
+                {mode === 'expansion' && (
+                    <>
+                         <div className="flex justify-between items-end mb-6 pb-6 border-b border-border/50">
+                            <div className="flex items-center gap-6">
+                                <div className="w-32 h-20 flex items-center justify-center bg-charcoal/50 rounded-lg p-2 border border-border">
+                                    <img src={set.logo} alt="Logo" className="max-w-full max-h-full object-contain" />
+                                </div>
+                                <div>
+                                    <h2 className="text-3xl font-bold text-white font-sans">{set.name}</h2>
+                                    <div className="flex items-center gap-3 mt-2">
+                                        <span className="px-2 py-0.5 bg-panel border border-border rounded text-xs font-mono text-gray-400">{set.series}</span>
+                                        <span className="text-gray-500 text-sm">&bull;</span>
+                                        <span className="text-gray-400 text-sm font-mono">Released {set.date}</span>
+                                    </div>
+                                </div>
+                            </div>
+                            <div className="text-right">
+                                <div className="text-2xl font-bold text-white font-mono">{set.total}</div>
+                                <div className="text-[10px] text-gray-500 uppercase tracking-wider">Total Cards</div>
+                            </div>
+                        </div>
+                        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4">
+                            {setCards.map((c) => (
+                                <div key={c.id} onClick={() => handleCardClick(c)} className="bg-panel border border-border rounded-lg p-3 hover:border-gray-500 cursor-pointer group transition-all">
+                                    <div className="aspect-[2.5/3.5] bg-black rounded overflow-hidden mb-3 relative">
+                                        <img src={c.image} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" />
+                                        {/* Removed TypeBadge here as requested */}
+                                    </div>
+                                    <div className="text-xs font-bold text-gray-200 truncate">{c.name}</div>
+                                    <div className="flex justify-between items-center mt-1">
+                                        <span className="text-[10px] text-gray-500 font-mono">#{c.num}</span>
+                                        <div className="flex gap-1">
+                                            {c.types.map(t => <div key={t} className={`w-2 h-2 rounded-full ${t === 'Fire' ? 'bg-red-500' : 'bg-gray-500'}`}></div>)}
+                                        </div>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    </>
+                )}
+
+                {mode === 'card' && card && (
+                     <div className="max-w-6xl mx-auto">
+                        <div className="grid grid-cols-12 gap-8">
+                             {/* Left: Image & Quick Stats */}
+                             <div className="col-span-12 md:col-span-3">
+                                 <FlipCardImage deal={{...card, tCost: card.variants[variantIdx].prices.raw.NM}} />
+                                 <div className="mt-4 bg-panel border border-border rounded-xl p-4 space-y-3">
+                                     <div>
+                                        <div className="text-[10px] text-gray-500 uppercase font-bold mb-1">Artist</div>
+                                        <div className="text-sm text-white font-mono">{card.artist}</div>
+                                     </div>
+                                     <div>
+                                        <div className="text-[10px] text-gray-500 uppercase font-bold mb-1">Rarity</div>
+                                        <div className="text-sm text-white font-mono">{card.rarity}</div>
+                                     </div>
+                                     <div>
+                                        <div className="text-[10px] text-gray-500 uppercase font-bold mb-1">Regulation</div>
+                                        <div className="inline-block px-2 py-0.5 bg-charcoal border border-border text-white font-mono text-xs rounded">{card.regulation_mark}</div>
+                                     </div>
+                                 </div>
+                             </div>
+
+                             {/* Middle: Gameplay Data */}
+                             <div className="col-span-12 md:col-span-5 space-y-6">
+                                 <div>
+                                     <div className="flex justify-between items-start">
+                                        <div>
+                                            <h2 className="text-4xl font-bold text-white mb-2 font-sans">{card.name}</h2>
+                                            <div className="flex items-center gap-2 mb-4">
+                                                <span className="text-gray-400 font-mono text-sm">{card.supertype} &bull; {card.subtypes.join(', ')}</span>
+                                                {card.evolves_from && <span className="text-dexBlue font-mono text-sm">Evolves from {card.evolves_from}</span>}
+                                            </div>
+                                        </div>
+                                        <div className="text-right">
+                                            <div className="text-3xl font-bold text-dexRed font-mono">{card.hp} <span className="text-sm text-gray-500">HP</span></div>
+                                            <div className="flex justify-end gap-1 mt-1">
+                                                {card.types.map(t => <TypePill key={t} type={t} />)}
+                                            </div>
+                                        </div>
+                                     </div>
+                                 </div>
+
+                                 {/* Abilities */}
+                                 {card.abilities && card.abilities.length > 0 && (
+                                     <div className="space-y-3">
+                                         {card.abilities.map((abi, i) => (
+                                             <div key={i} className="bg-panel/50 border border-border/50 p-3 rounded-lg">
+                                                 <div className="flex items-center gap-2 mb-1">
+                                                     <span className="px-1.5 py-0.5 bg-dexRed text-white text-[10px] font-bold uppercase rounded">Ability</span>
+                                                     <span className="font-bold text-white text-sm">{abi.name}</span>
+                                                 </div>
+                                                 <p className="text-xs text-gray-300 leading-relaxed">{abi.text}</p>
+                                             </div>
+                                         ))}
+                                     </div>
+                                 )}
+
+                                 {/* Attacks */}
+                                 <div className="space-y-3">
+                                     {card.attacks.map((atk, i) => (
+                                         <div key={i} className="border-b border-border/50 pb-3 last:border-0">
+                                             <div className="flex justify-between items-center mb-1">
+                                                 <div className="flex items-center gap-2">
+                                                     <div className="flex gap-0.5">
+                                                         {atk.cost.map((c, idx) => (
+                                                             <div key={idx} className={`w-4 h-4 rounded-full flex items-center justify-center text-[8px] font-bold ${c === 'Colorless' ? 'bg-gray-200 text-black' : 'bg-dexRed text-white'}`}>
+                                                                 {c.charAt(0)}
+                                                             </div>
+                                                         ))}
+                                                     </div>
+                                                     <span className="font-bold text-white text-lg">{atk.name}</span>
+                                                 </div>
+                                                 <span className="font-mono text-xl text-white">{atk.damage}</span>
+                                             </div>
+                                             <p className="text-xs text-gray-400 leading-relaxed">{atk.text}</p>
+                                         </div>
+                                     ))}
+                                 </div>
+
+                                 {/* Weakness / Resistance / Retreat */}
+                                 <div className="grid grid-cols-3 gap-4 py-4 border-t border-border/50">
+                                     <div>
+                                         <div className="text-[10px] text-gray-500 uppercase font-bold mb-1">Weakness</div>
+                                         {card.weaknesses ? card.weaknesses.map((w, i) => (
+                                             <div key={i} className="text-white text-sm font-mono flex items-center gap-1">
+                                                 <TypePill type={w.type} /> {w.value}
+                                             </div>
+                                         )) : <span className="text-gray-600 text-xs">-</span>}
+                                     </div>
+                                     <div>
+                                         <div className="text-[10px] text-gray-500 uppercase font-bold mb-1">Resistance</div>
+                                         {card.resistances ? card.resistances.map((r, i) => (
+                                             <div key={i} className="text-white text-sm font-mono flex items-center gap-1">
+                                                 <TypePill type={r.type} /> {r.value}
+                                             </div>
+                                         )) : <span className="text-gray-600 text-xs">-</span>}
+                                     </div>
+                                     <div>
+                                         <div className="text-[10px] text-gray-500 uppercase font-bold mb-1">Retreat</div>
+                                         <div className="flex gap-1">
+                                             {card.retreat_cost.map((_, i) => (
+                                                 <div key={i} className="w-4 h-4 rounded-full bg-gray-200 text-black flex items-center justify-center text-[9px] font-bold">C</div>
+                                             ))}
+                                         </div>
+                                     </div>
+                                 </div>
+                                 
+                                 {/* Flavor Text */}
+                                 <div className="bg-charcoal p-3 rounded-lg border border-border/50 italic text-gray-400 text-xs border-l-2 border-l-dexBlue">
+                                     "{card.flavor_text}"
+                                 </div>
+                             </div>
+
+                             {/* Right: Market Data & Variants */}
+                             <div className="col-span-12 md:col-span-4 flex flex-col gap-6">
+                                 <div className="bg-panel border border-border rounded-xl p-6">
+                                     <h3 className="text-sm font-bold text-white mb-4 uppercase tracking-wider flex items-center gap-2">
+                                         <Icon path={Icons.Box} size={14} /> Variant Pricing
+                                     </h3>
+                                     
+                                     {/* Variant Selector */}
+                                     <div className="flex flex-wrap gap-2 mb-6">
+                                         {card.variants.map((v, i) => (
+                                             <button 
+                                                 key={i}
+                                                 onClick={() => updateState({ variantIdx: i })}
+                                                 className={`px-3 py-1.5 rounded text-xs font-mono transition-all border ${
+                                                     variantIdx === i 
+                                                     ? 'bg-dexBlue/20 border-dexBlue text-dexBlue font-bold' 
+                                                     : 'bg-charcoal border-border text-gray-400 hover:border-gray-500'
+                                                 }`}
+                                             >
+                                                 {v.name}
+                                             </button>
+                                         ))}
+                                     </div>
+
+                                     {/* Inline Pricing Matrix (Replaced Modal Button) */}
+                                     <InlinePricing pricingMatrix={card.variants[variantIdx].prices} />
+                                 </div>
+                             </div>
+                        </div>
+                     </div>
+                )}
+            </div>
+        </div>
+    );
+};
+
+const SettingsPage = () => {
+    const [telegramStatus, setTelegramStatus] = useState('idle'); // idle, sending, success
+
+    const handleTestMessage = () => {
+        setTelegramStatus('sending');
+        setTimeout(() => setTelegramStatus('success'), 1500);
+        setTimeout(() => setTelegramStatus('idle'), 4000);
+    };
+
+    return (
+        <div className="p-8 h-full overflow-y-auto animate-in">
+            <h2 className="text-2xl font-bold text-white mb-6 font-sans">Configuration</h2>
+            <div className="grid grid-cols-2 gap-8 max-w-4xl">
+                {/* Scanner Config */}
+                <div className="bg-panel border border-border p-6 rounded-xl h-fit">
+                    <h3 className="text-sm font-bold text-white mb-4 uppercase tracking-wider border-b border-border/50 pb-2 flex items-center gap-2">
+                        <Icon path={Icons.Sliders} size={14} /> Scanner Logic
+                    </h3>
+                    <div className="space-y-6">
+                        <div>
+                            <div className="flex justify-between items-center mb-2">
+                                <span className="text-gray-400 font-mono text-sm">Min Profit Margin</span>
+                                <span className="text-dexGreen font-bold font-mono">15%</span>
+                            </div>
+                            <input type="range" className="w-full accent-dexGreen h-1.5 bg-charcoal rounded-lg appearance-none cursor-pointer" />
+                        </div>
+                         <div>
+                            <div className="flex justify-between items-center mb-2">
+                                <span className="text-gray-400 font-mono text-sm">Min Confidence Score</span>
+                                <span className="text-dexBlue font-bold font-mono">80%</span>
+                            </div>
+                            <input type="range" className="w-full accent-dexBlue h-1.5 bg-charcoal rounded-lg appearance-none cursor-pointer" />
+                        </div>
+                        <div className="pt-2 border-t border-border/30">
+                            <label className="flex items-center justify-between cursor-pointer group">
+                                <span className="text-sm text-gray-300 group-hover:text-white transition-colors">Exclude Zero-Feedback Sellers</span>
+                                <div className="w-10 h-5 bg-dexGreen rounded-full relative"><div className="absolute right-0.5 top-0.5 w-4 h-4 bg-white rounded-full shadow"></div></div>
+                            </label>
+                        </div>
+                    </div>
+                </div>
+
+                {/* Telegram Config */}
+                <div className="bg-panel border border-border p-6 rounded-xl h-fit">
+                    <h3 className="text-sm font-bold text-white mb-4 uppercase tracking-wider border-b border-border/50 pb-2 flex items-center gap-2">
+                        <Icon path={Icons.Send} size={14} /> Telegram Integration
+                    </h3>
+                    <div className="space-y-4">
+                        <div>
+                            <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Bot Token</label>
+                            <input type="password" value="123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11" readOnly className="w-full bg-charcoal border border-border rounded p-2 text-xs font-mono text-gray-300 focus:border-dexBlue outline-none" />
+                        </div>
+                        <div>
+                            <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Chat ID</label>
+                            <input type="text" value="-100123456789" readOnly className="w-full bg-charcoal border border-border rounded p-2 text-xs font-mono text-gray-300 focus:border-dexBlue outline-none" />
+                        </div>
+                        <div className="pt-2">
+                            <button 
+                                onClick={handleTestMessage}
+                                disabled={telegramStatus !== 'idle'}
+                                className={`w-full py-2 rounded text-xs font-bold uppercase tracking-wider transition-all flex items-center justify-center gap-2
+                                    ${telegramStatus === 'success' ? 'bg-dexGreen text-black' : 'bg-dexBlue text-white hover:bg-blue-600'}
+                                `}
+                            >
+                                {telegramStatus === 'idle' && <>Send Test Message <Icon path={Icons.Send} size={12} /></>}
+                                {telegramStatus === 'sending' && <span className="animate-pulse">Sending...</span>}
+                                {telegramStatus === 'success' && <>Message Sent <Icon path={Icons.Check} size={14} /></>}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    );
+};
+
+const AuditPage = () => {
+    const logs = [
+        { time: '10:42:01', type: 'INFO', msg: 'Scanner cycle initiated [EVS, CPA, SIT]' },
+        { time: '10:42:05', type: 'HIT', msg: 'Found Deal: Umbreon VMAX (d1) - 36% ROI' },
+        { time: '10:42:12', type: 'WARN', msg: 'Latency spike detected on Proxy-7 (240ms)' },
+        { time: '10:43:00', type: 'INFO', msg: 'Price Sync complete. 450 items updated.' },
+        { time: '10:44:22', type: 'HIT', msg: 'Found Deal: Charizard V (d2) - 44% ROI' },
+        { time: '10:45:00', type: 'INFO', msg: 'API Token refreshed successfully.' },
+        { time: '10:48:30', type: 'ERR', msg: 'Connection timeout: eBay node (Retrying...)' },
+    ];
+    return (
+        <div className="p-8 h-full overflow-y-auto animate-in flex flex-col">
+            <h2 className="text-2xl font-bold text-white mb-6 font-sans">Audit Log</h2>
+            <div className="bg-black/40 border border-border rounded-xl p-4 font-mono text-xs flex-1 overflow-auto">
+                {logs.map((log, i) => (
+                    <div key={i} className="mb-2 flex gap-4 hover:bg-white/5 p-1 rounded">
+                        <span className="text-gray-500 shrink-0">{log.time}</span>
+                        <span className={`font-bold w-10 shrink-0 ${
+                            log.type === 'HIT' ? 'text-dexGreen' : 
+                            log.type === 'WARN' ? 'text-dexYellow' : 
+                            log.type === 'ERR' ? 'text-dexRed' : 'text-dexBlue'
+                        }`}>{log.type}</span>
+                        <span className="text-gray-300">{log.msg}</span>
+                    </div>
+                ))}
+                <div className="mt-2 animate-pulse text-dexGreen">_</div>
+            </div>
+        </div>
+    );
+};
+
+const LookupPage = () => (
+    <div className="p-8 h-full overflow-y-auto animate-in flex flex-col items-center justify-center">
+        <div className="w-full max-w-2xl text-center">
+            <h2 className="text-3xl font-bold text-white mb-2 font-sans">Manual Override</h2>
+            <p className="text-gray-500 mb-8 font-mono text-sm">Direct database access & single-item sniper</p>
+            
+            <div className="relative mb-6">
+                <input 
+                    type="text" 
+                    placeholder="Paste eBay URL or Enter Card Name..." 
+                    className="w-full bg-panel border border-border rounded-xl px-6 py-4 text-lg text-white outline-none focus:border-dexRed focus:ring-1 focus:ring-dexRed/50 transition-all shadow-2xl"
+                />
+                <button className="absolute right-2 top-2 bottom-2 bg-dexRed text-black font-bold px-6 rounded-lg hover:bg-white transition-colors">
+                    SCAN
+                </button>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4 text-left">
+                <div className="bg-panel border border-border p-4 rounded-xl cursor-pointer hover:border-gray-500">
+                    <div className="text-xs text-gray-500 uppercase font-bold mb-1">Set Lookup</div>
+                    <div className="text-white font-mono">Browse by Expansion</div>
+                </div>
+                <div className="bg-panel border border-border p-4 rounded-xl cursor-pointer hover:border-gray-500">
+                    <div className="text-xs text-gray-500 uppercase font-bold mb-1">Seller Search</div>
+                    <div className="text-white font-mono">Audit User History</div>
+                </div>
+            </div>
+        </div>
+    </div>
+);
+
+// --- APP ---
+
+const App = () => {
+    const [view, setView] = useState('dashboard');
+    const [selectedId, setSelectedId] = useState(DEALS[0].id);
+    const [search, setSearch] = useState('');
+    const [filterTier, setFilterTier] = useState('ALL');
+    const [isScanning, setIsScanning] = useState(true);
+
+    // Lifted Catalogue State to App
+    const [catalogueState, setCatalogueState] = useState({
+        mode: 'list', // 'list', 'expansion', 'card'
+        set: null,
+        card: null,
+        variantIdx: 0
+    });
+
+    const selectedDeal = useMemo(() => DEALS.find(d => d.id === selectedId), [selectedId]);
+    const filteredDeals = useMemo(() => DEALS.filter(d => 
+        (filterTier === 'ALL' || d.tier === filterTier) && 
+        d.name.toLowerCase().includes(search.toLowerCase())
+    ), [search, filterTier]);
+
+    const handleViewInCatalogue = (deal) => {
+        // Find corresponding set from constant SETS
+        const linkedSet = SETS.find(s => s.code === deal.set.code) || SETS[0];
+        
+        // Construct a mock catalogue card object based on the deal info
+        // In a real app, this would be fetched by ID from the backend
+        const mockCatalogueCard = {
+            id: deal.id + '-cat',
+            name: deal.name,
+            supertype: "Pokémon",
+            subtypes: ["Stage 1"], // Mock
+            hp: "320", // Mock
+            types: ["Darkness"], // Mock
+            evolves_from: "Eevee",
+            rules: [],
+            abilities: [{ type: 'Ability', name: 'Dark Signal', text: 'When you play this Pokémon from your hand to evolve 1 of your Pokémon during your turn, you may switch 1 of your opponent\'s Benched Pokémon with their Active Pokémon.' }],
+            attacks: [{ name: "Max Dark", cost: ["Darkness", "Colorless", "Colorless"], damage: "160", text: "This attack does 30 more damage for each Energy attached to all of your opponent's Pokémon." }],
+            weaknesses: [{ type: "Grass", value: "x2" }],
+            resistances: [],
+            retreat_cost: ["Colorless", "Colorless"],
+            set: deal.set,
+            num: deal.num.split('/')[0],
+            printed_total: deal.num.split('/')[1],
+            rarity: deal.rarity,
+            artist: "KEIICHIRO ITO",
+            regulation_mark: "E",
+            flavor_text: "It waves its tail to dim the glow of its ring-like markings, melting into the darkness to lie in wait for its prey.",
+            national_pokedex_numbers: [197],
+            image: deal.scrImg,
+            variants: [
+                { name: "Normal", prices: deal.pricingMatrix },
+                { name: "Reverse Holofoil", prices: generateVariantPrices(deal.mGBP * 0.8) } // Mock
+            ]
+        };
+
+        // Update state to switch view
+        setCatalogueState({
+            mode: 'card',
+            set: linkedSet,
+            card: mockCatalogueCard,
+            variantIdx: 0
+        });
+        setView('catalogue');
+    };
+
+    return (
+        <div className="flex w-full h-full bg-obsidian bg-hex-pattern font-sans text-gray-200">
+            
+            {/* SIDEBAR */}
+            <aside className="w-16 flex flex-col items-center py-6 border-r border-border bg-charcoal z-20 shrink-0">
+                <div className="w-10 h-10 rounded-lg bg-dexRed text-black font-bold flex items-center justify-center text-xl mb-8 shadow-[0_0_15px_rgba(255,62,62,0.4)]">P</div>
+                <div className="space-y-4 w-full px-2">
+                    <NavButton icon={Icons.Grid} label="Dashboard" active={view === 'dashboard'} onClick={() => setView('dashboard')} />
+                    <NavButton icon={Icons.Book} label="Catalogue" active={view === 'catalogue'} onClick={() => setView('catalogue')} />
+                    <NavButton icon={Icons.Box} label="Manual" active={view === 'lookup'} onClick={() => setView('lookup')} />
+                    <NavButton icon={Icons.Terminal} label="Audit" active={view === 'audit'} onClick={() => setView('audit')} />
+                    <NavButton icon={Icons.Cpu} label="System" active={view === 'system'} onClick={() => setView('system')} />
+                    <NavButton icon={Icons.Sliders} label="Settings" active={view === 'settings'} onClick={() => setView('settings')} />
+                </div>
+                <div className="mt-auto">
+                    <div className="w-2 h-2 rounded-full bg-dexGreen animate-pulse"></div>
+                </div>
+            </aside>
+
+            {/* CONTENT AREA */}
+            <div className="flex-1 flex overflow-hidden">
+                
+                {view === 'dashboard' ? (
+                    <>
+                        {/* LIST COLUMN */}
+                        <section className="w-[420px] flex flex-col border-r border-border bg-obsidian/95 backdrop-blur-sm z-10 shrink-0">
+                            <header className="h-20 px-6 border-b border-border flex justify-between items-center">
+                                <h1 className="text-xl font-bold tracking-tight text-white font-sans">
+                                    PokéSnipe <span className="text-dexRed">v1.3.2</span>
+                                </h1>
+                                
+                                <button 
+                                    onClick={() => setIsScanning(!isScanning)}
+                                    className={`flex items-center gap-2 px-3 py-1.5 rounded-full border text-[10px] font-mono uppercase tracking-wider transition-all
+                                        ${isScanning 
+                                            ? 'bg-dexGreen/10 border-dexGreen/30 text-dexGreen hover:bg-dexGreen/20' 
+                                            : 'bg-gray-800 border-gray-700 text-gray-400 hover:bg-gray-700'}
+                                    `}
+                                >
+                                    <div className={`w-1.5 h-1.5 rounded-full ${isScanning ? 'bg-dexGreen animate-blink' : 'bg-gray-500'}`}></div>
+                                    {isScanning ? 'Scanner Active' : 'Scanner Paused'}
+                                    <Icon path={Icons.Power} size={10} className="ml-1" />
+                                </button>
+                            </header>
+
+                            <div className="p-4 space-y-3 border-b border-border bg-panel/30">
+                                <div className="relative">
+                                    <input type="text" className="w-full bg-charcoal border border-border text-xs font-mono p-2.5 pl-9 rounded outline-none focus:border-dexRed/50 focus:ring-1 focus:ring-dexRed/20 transition-all text-white placeholder-gray-600" placeholder="SEARCH DATABASE..." value={search} onChange={e => setSearch(e.target.value)} />
+                                    <div className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-600"><Icon path={Icons.Search} size={14} /></div>
+                                </div>
+                                <div className="flex gap-2 overflow-x-auto pb-1 no-scrollbar">
+                                    {['ALL', 'GRAIL', 'HIT', 'FLIP'].map(tier => (
+                                        <button key={tier} onClick={() => setFilterTier(tier)} className={`px-3 py-1 text-[10px] font-mono font-bold border rounded transition-colors ${filterTier === tier ? 'bg-gray-200 text-black border-white' : 'bg-transparent text-gray-500 border-border hover:border-gray-600'}`}>{tier}</button>
+                                    ))}
+                                </div>
+                            </div>
+
+                            <div className="flex-1 overflow-y-auto">
+                                {filteredDeals.map((deal, i) => (
+                                    <div key={deal.id} onClick={() => setSelectedId(deal.id)} className={`group relative p-4 border-b border-border cursor-pointer hover:bg-panel transition-all ${selectedId === deal.id ? 'bg-panel/80' : ''} animate-reveal`} style={{ animationDelay: `${i * 50}ms` }}>
+                                        {selectedId === deal.id && <div className="absolute left-0 top-0 bottom-0 w-0.5 bg-dexRed shadow-[0_0_10px_#ff3e3e]"></div>}
+                                        <div className="flex justify-between items-start mb-1">
+                                            <div className="flex items-center gap-2"><span className={`font-mono font-bold text-xs ${selectedId === deal.id ? 'text-white' : 'text-gray-300'}`}>{deal.name}</span></div>
+                                            <TypeBadge type={deal.tier} />
+                                        </div>
+                                        <div className="flex justify-between items-end">
+                                            <div className="space-y-1"><div className="text-[10px] text-gray-500 font-mono">{deal.set.name}</div><Sparkline val={deal.trends['7d']} /></div>
+                                            <div className="text-right"><div className="text-lg font-mono font-bold text-white tracking-tight tabular-nums group-hover:text-dexGreen transition-colors">£{deal.pGBP.toFixed(0)}</div><div className="text-[9px] font-mono text-gray-500">ROI {deal.pPct}%</div></div>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        </section>
+
+                        {/* DETAIL VIEW */}
+                        <main className="flex-1 bg-charcoal/50 relative overflow-hidden flex flex-col">
+                            <div className="absolute top-0 right-0 w-[500px] h-[500px] bg-dexRed/5 rounded-full blur-[120px] pointer-events-none"></div>
+                            {selectedDeal ? (
+                                <div className="h-full flex flex-col overflow-y-auto">
+                                    <div className="p-8 pb-4 flex gap-8 items-start border-b border-border/50">
+                                        <FlipCardImage deal={selectedDeal} className="w-64" />
+                                        <div className="flex-1 pt-2">
+                                            <div className="mb-2"></div>
+                                            <h2 className="text-4xl font-bold text-white mb-2 font-sans tracking-tight">{selectedDeal.name}</h2>
+                                            <p className="text-xl text-gray-400 font-light mb-6">{selectedDeal.set.name} <span className="text-gray-600">|</span> {selectedDeal.rarity}</p>
+                                            <div className="grid grid-cols-4 gap-3">
+                                                <a href={selectedDeal.url} target="_blank" className="col-span-2 bg-white text-black rounded font-bold font-mono text-sm hover:bg-gray-200 hover:scale-[1.02] transition-all flex items-center justify-center gap-2 chamfer-r shadow-[0_0_15px_rgba(255,255,255,0.1)]">SNAG DEAL <Icon path={Icons.ArrowUpRight} size={14} /></a>
+                                                <button 
+                                                    onClick={() => handleViewInCatalogue(selectedDeal)}
+                                                    className="col-span-2 bg-charcoal border border-border text-gray-300 rounded font-bold font-mono text-sm hover:bg-panel hover:text-white transition-all flex items-center justify-center gap-2 chamfer-r"
+                                                >
+                                                    VIEW IN CATALOGUE <Icon path={Icons.Book} size={14} />
+                                                </button>
+                                                <div className="col-span-1 px-2 py-3 border border-border rounded text-sm font-mono text-gray-400 flex flex-col items-center justify-center chamfer-r bg-panel/50"><span className="text-[9px] uppercase tracking-wider text-gray-600 mb-0.5">Confidence</span><span className={`font-bold ${selectedDeal.conf > 0.8 ? 'text-dexGreen' : 'text-dexYellow'}`}>{(selectedDeal.conf * 100).toFixed(1)}%</span></div>
+                                                <div className="col-span-1 px-2 py-3 border border-border rounded text-sm font-mono text-gray-400 flex flex-col items-center justify-center chamfer-r bg-panel/50"><span className="text-[9px] uppercase tracking-wider text-gray-600 mb-0.5">Liquidity</span><span className={`font-bold ${selectedDeal.liq > 0.7 ? 'text-dexBlue' : 'text-gray-400'}`}>{(selectedDeal.liq * 100).toFixed(0)}/100</span></div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div className="p-8 grid grid-cols-3 gap-6">
+                                        {selectedDeal.aiReason && <SilphScope reason={selectedDeal.aiReason} />}
+                                        <div className="col-span-1 bg-panel border border-border p-5 rounded-xl chamfer-br relative overflow-hidden group"><div className="absolute top-0 right-0 p-3 opacity-10 group-hover:opacity-20 transition-opacity"><Icon path={Icons.Zap} size={64} /></div><h3 className="text-gray-500 font-mono text-xs uppercase tracking-widest mb-1">Net Profit</h3><div className="text-4xl font-mono font-bold text-dexGreen tabular-nums mb-2">£{selectedDeal.pGBP.toFixed(2)}</div><div className="flex gap-4 text-xs font-mono text-gray-400"><span>Cost: £{selectedDeal.tCost.toFixed(0)}</span><span>Val: £{selectedDeal.mGBP.toFixed(0)}</span></div></div>
+                                        <div className="col-span-1"><RecentSales sales={selectedDeal.recentSales} /></div>
+                                        {selectedDeal.gradingPot ? <div className="col-span-1"><GradingMatrix potential={selectedDeal.gradingPot} cost={selectedDeal.tCost} /></div> : <MarketCard deal={selectedDeal} />}
+                                        <div className="col-span-3 bg-panel border border-border p-4 rounded-xl flex items-center justify-between">
+                                            <div className="flex items-center gap-3">
+                                                <div className="w-8 h-8 rounded bg-gray-800 flex items-center justify-center font-bold text-gray-500 text-xs shrink-0">{selectedDeal.seller.substring(0,2).toUpperCase()}</div>
+                                                <div>
+                                                    <div className="text-sm font-bold text-white leading-none mb-1">{selectedDeal.seller}</div>
+                                                    <div className="text-[10px] text-gray-500 font-mono">
+                                                        <span className="text-gray-400 mr-2">ID: {selectedDeal.ebayItemId}</span>
+                                                        {selectedDeal.fb.toLocaleString()} FEEDBACK &bull; 99.8% POSITIVE
+                                                    </div>
+                                                </div>
+                                            </div>
+                                            <div className="text-right"><div className="text-[10px] text-gray-500 font-mono uppercase">Status</div><div className="text-sm font-bold text-dexGreen flex items-center gap-2 justify-end"><span className="relative flex h-2 w-2"><span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-dexGreen opacity-75"></span><span className="relative inline-flex rounded-full h-2 w-2 bg-dexGreen"></span></span>ACTIVE LISTING</div></div>
+                                        </div>
+                                    </div>
+                                </div>
+                            ) : (
+                                <div className="flex-1 flex flex-col items-center justify-center text-gray-600"><Icon path={Icons.Grid} size={48} className="mb-4 opacity-20" /><p className="font-mono text-sm">SELECT DATA NODE</p></div>
+                            )}
+                        </main>
+                    </>
+                ) : (
+                    <main className="flex-1 bg-obsidian relative overflow-hidden flex flex-col">
+                        {view === 'system' && <SystemPage />}
+                        {view === 'audit' && <AuditPage />}
+                        {view === 'catalogue' && <CataloguePage catalogueState={catalogueState} setCatalogueState={setCatalogueState} />}
+                        {view === 'lookup' && <LookupPage />}
+                        {view === 'settings' && <SettingsPage />}
+                    </main>
+                )}
+            </div>
+        </div>
+    );
+};
+
+const root = ReactDOM.createRoot(document.getElementById('root'));
+root.render(<App />);
+
+</script>
+</body>
+</html>
