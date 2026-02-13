@@ -56,9 +56,18 @@ const NON_CARD_PATTERNS = [
 // Language words indicating non-English cards (our pricing data is English-only)
 const LANGUAGE_WORD_PATTERNS = [
   /\bjapanese\b/,
+  /\bjpn\b/,
   /\bkorean\b/,
+  /\bkor\b/,
   /\bchinese\b/,
+  /\bchn\b/,
   /\bthai\b/,
+  /\bfrench\b/,
+  /\bgerman\b/,
+  /\bitalian\b/,
+  /\bspanish\b/,
+  /\bportuguese\b/,
+  /\bindonesian\b/,
 ];
 
 export function detectJunk(cleanedTitle: string): { isJunk: boolean; reason?: string } {

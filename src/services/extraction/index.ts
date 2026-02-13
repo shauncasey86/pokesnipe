@@ -7,6 +7,14 @@ import { extractStructuredData } from './structured-extractor.js';
 import { mergeSignals } from './signal-merger.js';
 import type { NormalizedListing } from './signal-merger.js';
 
+/**
+ * Check whether the eBay-reported language value indicates English.
+ * Handles values like "English", "English (EN)", etc.
+ */
+function isEnglish(language: string): boolean {
+  return language.toLowerCase().startsWith('english');
+}
+
 export interface ExtractionResult {
   rejected: boolean;
   reason?: string;
@@ -46,6 +54,11 @@ export function extractSignals(listing: {
     condition,
     { itemId: listing.itemId, title: listing.title, cleanedTitle: cleaned.cleaned },
   );
+
+  // 7. Reject non-English cards using structured language data from eBay
+  if (normalized.language !== null && !isEnglish(normalized.language)) {
+    return { rejected: true, reason: 'non_english' };
+  }
 
   return { rejected: false, listing: normalized };
 }
