@@ -33,103 +33,68 @@ export default function LookupView() {
   const hasResult = result && !result.signals.rejected && result.match && result.profit;
 
   return (
-    <div className="flex-1 overflow-y-auto bg-obsidian">
-      <div className={`flex flex-col items-center justify-center px-6 ${hasResult ? 'pt-16 pb-10' : 'min-h-full'}`}>
+    <div className={`p-8 h-full overflow-y-auto animate-in flex flex-col items-center ${hasResult ? 'pt-16' : 'justify-center'}`}>
+      <div className="w-full max-w-2xl text-center">
 
         {/* Header */}
-        <div className="text-center mb-8">
-          <h1 className="text-3xl font-bold text-white mb-2">Manual Override</h1>
-          <p className="text-gray-500 font-mono text-sm">Direct database access &amp; single-item sniper</p>
-        </div>
+        <h2 className="text-3xl font-bold text-white mb-2 font-sans">Manual Override</h2>
+        <p className="text-gray-500 mb-8 font-mono text-sm">Direct database access &amp; single-item sniper</p>
 
         {/* Search Input */}
-        <div className="w-full max-w-2xl mb-8">
-          <div className="relative">
-            <input
-              type="text"
-              value={url}
-              onChange={e => setUrl(e.target.value)}
-              onKeyDown={e => e.key === 'Enter' && doLookup()}
-              placeholder="Paste eBay URL or Enter Card Name..."
-              className="w-full bg-charcoal border border-border rounded-xl px-5 py-4 pr-28 text-sm text-white font-mono placeholder:text-gray-600 focus:outline-none focus:ring-2 focus:ring-dexRed focus:border-transparent transition-all"
-            />
-            <button
-              onClick={doLookup}
-              disabled={loading || !url.trim()}
-              className="absolute right-2 top-1/2 -translate-y-1/2 bg-dexRed hover:bg-dexRed/90 disabled:opacity-40 disabled:cursor-not-allowed text-black font-bold px-5 py-2 rounded-lg flex items-center gap-2 transition-all text-sm"
-            >
-              {loading ? <I.Loader s={16} c="w-4 h-4" /> : <I.Search s={16} c="w-4 h-4" />}
-              {loading ? 'SCANNING...' : 'SCAN'}
-            </button>
-          </div>
+        <div className="relative mb-6">
+          <input
+            type="text"
+            value={url}
+            onChange={e => setUrl(e.target.value)}
+            onKeyDown={e => e.key === 'Enter' && doLookup()}
+            placeholder="Paste eBay URL or Enter Card Name..."
+            className="w-full bg-panel border border-border rounded-xl px-6 py-4 text-lg text-white outline-none focus:border-dexRed focus:ring-1 focus:ring-dexRed/50 transition-all shadow-2xl"
+          />
+          <button
+            onClick={doLookup}
+            disabled={loading || !url.trim()}
+            className="absolute right-2 top-2 bottom-2 bg-dexRed text-black font-bold px-6 rounded-lg hover:bg-white transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            {loading ? 'SCANNING...' : 'SCAN'}
+          </button>
         </div>
 
-        {/* Placeholder Cards (when no result) */}
+        {/* Action Cards (when no result) */}
         {!result && !error && (
-          <div className="w-full max-w-2xl grid grid-cols-2 gap-4 mb-8">
-            {/* Set Lookup Card */}
-            <div className="bg-panel border border-border rounded-xl p-5 hover:border-dexRed/30 transition-colors">
-              <div className="flex items-center gap-3 mb-3">
-                <div className="w-9 h-9 rounded-lg bg-dexRed/10 flex items-center justify-center">
-                  <I.Box s={18} c="text-dexRed" />
-                </div>
-                <h3 className="text-sm font-bold text-white">Set Lookup</h3>
-              </div>
-              <p className="text-xs text-gray-500 font-mono leading-relaxed">
-                Cross-reference full expansion sets against live market data. Bulk price checking for sealed &amp; singles.
-              </p>
-              <div className="mt-4 flex items-center gap-1.5 text-dexRed text-[10px] font-mono font-bold uppercase tracking-wider">
-                <I.Database s={12} c="text-dexRed" />
-                <span>Coming Soon</span>
-              </div>
+          <div className="grid grid-cols-2 gap-4 text-left">
+            <div className="bg-panel border border-border p-4 rounded-xl cursor-pointer hover:border-gray-500 transition-colors">
+              <div className="text-xs text-gray-500 uppercase font-bold mb-1">Set Lookup</div>
+              <div className="text-white font-mono">Browse by Expansion</div>
             </div>
-
-            {/* Seller Search Card */}
-            <div className="bg-panel border border-border rounded-xl p-5 hover:border-dexBlue/30 transition-colors">
-              <div className="flex items-center gap-3 mb-3">
-                <div className="w-9 h-9 rounded-lg bg-dexBlue/10 flex items-center justify-center">
-                  <I.User s={18} c="text-dexBlue" />
-                </div>
-                <h3 className="text-sm font-bold text-white">Seller Search</h3>
-              </div>
-              <p className="text-xs text-gray-500 font-mono leading-relaxed">
-                Deep-dive into seller inventory. Find underpriced listings from high-volume Pokemon card sellers.
-              </p>
-              <div className="mt-4 flex items-center gap-1.5 text-dexBlue text-[10px] font-mono font-bold uppercase tracking-wider">
-                <I.Search s={12} c="text-dexBlue" />
-                <span>Coming Soon</span>
-              </div>
+            <div className="bg-panel border border-border p-4 rounded-xl cursor-pointer hover:border-gray-500 transition-colors">
+              <div className="text-xs text-gray-500 uppercase font-bold mb-1">Seller Search</div>
+              <div className="text-white font-mono">Audit User History</div>
             </div>
           </div>
         )}
 
         {/* Error State */}
         {error && (
-          <div className="w-full max-w-2xl mb-6">
-            <div className="bg-risk/5 border border-risk/20 rounded-xl p-4 flex items-start gap-3">
-              <I.AlertTriangle s={16} c="text-risk shrink-0 mt-0.5" />
-              <p className="text-sm text-risk">{error}</p>
-            </div>
+          <div className="bg-dexRed/5 border border-dexRed/20 rounded-xl p-4 flex items-start gap-3 text-left mb-6">
+            <I.AlertTriangle s={16} c="text-dexRed shrink-0 mt-0.5" />
+            <p className="text-sm text-dexRed">{error}</p>
           </div>
         )}
 
         {/* Rejected Listing */}
         {result && result.signals.rejected && (
-          <div className="w-full max-w-2xl mb-6">
-            <div className="bg-panel border border-dexYellow/20 rounded-xl p-4 flex items-start gap-3">
-              <I.AlertTriangle s={16} c="text-dexYellow shrink-0 mt-0.5" />
-              <div>
-                <p className="text-sm text-dexYellow font-semibold">Listing Rejected</p>
-                <p className="text-xs text-gray-500 font-mono mt-1">{result.signals.rejectReason || 'Did not pass signal extraction filters'}</p>
-              </div>
+          <div className="bg-panel border border-dexYellow/20 rounded-xl p-4 flex items-start gap-3 text-left mb-6">
+            <I.AlertTriangle s={16} c="text-dexYellow shrink-0 mt-0.5" />
+            <div>
+              <p className="text-sm text-dexYellow font-semibold">Listing Rejected</p>
+              <p className="text-xs text-gray-500 font-mono mt-1">{result.signals.rejectReason || 'Did not pass signal extraction filters'}</p>
             </div>
           </div>
         )}
 
         {/* Result */}
         {hasResult && result.match && result.profit && (
-          <div className="w-full max-w-2xl space-y-4">
-            {/* Match Card */}
+          <div className="space-y-4 text-left">
             <div className="bg-panel border border-border rounded-xl p-5">
               <div className="flex items-center gap-3 mb-4">
                 <Ring v={Math.round((confValue ?? 0) * 100)} tier={confTier} sz={44} />
@@ -140,7 +105,6 @@ export default function LookupView() {
                 <div className="ml-auto"><Tier t={result.profit.tier} /></div>
               </div>
 
-              {/* Listing Preview */}
               {result.listing.image && (
                 <div className="flex gap-4 mb-4">
                   <img src={result.listing.image} alt="" className="w-20 h-28 object-cover rounded-lg border border-border" />
@@ -160,7 +124,6 @@ export default function LookupView() {
                 </div>
               )}
 
-              {/* Pricing Grid */}
               <div className="grid grid-cols-3 gap-3 mb-4">
                 <div className="bg-charcoal rounded-lg p-3 text-center border border-border/50">
                   <div className="text-[9px] text-gray-500 uppercase font-mono mb-1">Total Cost</div>
@@ -181,7 +144,6 @@ export default function LookupView() {
                 </div>
               </div>
 
-              {/* Cost Breakdown */}
               <div className="space-y-1.5 font-mono text-[11px] bg-charcoal rounded-lg p-3 border border-border/50">
                 <div className="flex justify-between">
                   <span className="text-gray-500">eBay Price</span>
@@ -193,7 +155,6 @@ export default function LookupView() {
                 </div>
               </div>
 
-              {/* Confidence Signals */}
               {typeof result.match.confidence === 'object' && (
                 <div className="mt-4 pt-4 border-t border-border/50">
                   <h3 className="text-[10px] font-bold text-gray-500 uppercase tracking-wider font-mono mb-3">Confidence Signals</h3>
@@ -216,7 +177,6 @@ export default function LookupView() {
                 </div>
               )}
 
-              {/* Liquidity */}
               {result.liquidity && (
                 <div className="flex items-center gap-2 mt-3 text-[10px] text-gray-500 font-mono">
                   <span>Liquidity:</span>
@@ -231,15 +191,13 @@ export default function LookupView() {
 
         {/* No Match Found */}
         {result && !result.signals.rejected && !result.match && (
-          <div className="w-full max-w-2xl">
-            <div className="bg-panel border border-border rounded-xl p-8 text-center">
-              <I.Search s={32} c="text-gray-600 mx-auto mb-3" />
-              <h3 className="text-base font-bold text-white mb-1">No Match Found</h3>
-              <p className="text-xs text-gray-500 font-mono">The listing could not be matched to any card in the catalog.</p>
-              {result.listing.title && (
-                <p className="text-[11px] font-mono text-gray-600 mt-3 truncate">{result.listing.title}</p>
-              )}
-            </div>
+          <div className="bg-panel border border-border rounded-xl p-8 text-center">
+            <I.Search s={32} c="text-gray-600 mx-auto mb-3" />
+            <h3 className="text-base font-bold text-white mb-1">No Match Found</h3>
+            <p className="text-xs text-gray-500 font-mono">The listing could not be matched to any card in the catalog.</p>
+            {result.listing.title && (
+              <p className="text-[11px] font-mono text-gray-600 mt-3 truncate">{result.listing.title}</p>
+            )}
           </div>
         )}
 
