@@ -1,891 +1,621 @@
-import { useState, useEffect, useMemo, useRef, useCallback, Component } from 'react';
-import type { ReactNode, ErrorInfo } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { I } from './icons';
 import {
-  CONF_WEIGHTS, LIQ_WEIGHTS_V, LIQ_WEIGHTS_NV,
-  timeAgo, fmtListedTime, trendInfo,
-} from './data/mock';
-import { Ring, Tier, SideItem, Stat, EmptyFeed, SignalGrid } from './components/shared';
+  getDeals, getDealDetail, toggleScanner, checkAuth, login, logout,
+} from './api/deals';
+import type { Deal, DealDetail, DealsResponse } from './types/deals';
 import SystemView from './components/SystemView';
 import AuditView from './components/AuditView';
 import LookupView from './components/LookupView';
 import SettingsView from './components/SettingsView';
-import { getDeals, getDealDetail, reviewDeal, getStatus, toggleScanner, checkAuth, login, logout, deleteAllDeals, searchCards } from './api/deals';
-import type { CardSearchResult } from './api/deals';
-import type { Deal, DealDetail as DealDetailType, SystemStatus } from './types/deals';
+import CatalogueView from './components/CatalogueView';
 
-type ViewName = 'opportunities' | 'system' | 'audit' | 'lookup' | 'settings';
-type TierFilter = Record<string, boolean>;
+// ── Micro Components ─────────────────────────────────────────────
+
+const NavButton = ({ icon: Ic, label, active, onClick }: {
+  icon: (props: { s?: number; c?: string }) => React.JSX.Element;
+  label: string;
+  active: boolean;
+  onClick: () => void;
+}) => (
+  <button
+    onClick={onClick}
+    title={label}
+    className={`relative p-3 rounded-xl transition-all duration-300 group overflow-hidden w-full flex justify-center
+      ${active ? 'bg-panel text-dexRed ring-1 ring-dexRed/20' : 'text-gray-500 hover:text-gray-300 hover:bg-panel'}
+    `}
+  >
+    {active && <div className="absolute left-0 top-0 bottom-0 w-1 bg-dexRed" />}
+    <Ic s={22} c="relative z-10" />
+    <span className="sr-only">{label}</span>
+  </button>
+);
+
+const TypeBadge = ({ type }: { type: string }) => {
+  const colors: Record<string, string> = {
+    GRAIL: 'text-amber-500 bg-amber-500/10 border-amber-500/20',
+    HIT: 'text-emerald-500 bg-emerald-500/10 border-emerald-500/20',
+    FLIP: 'text-indigo-400 bg-indigo-500/10 border-indigo-500/20',
+    SLEEP: 'text-gray-400 bg-gray-700/20 border-gray-600/20',
+  };
+  return (
+    <span className={`px-2 py-0.5 rounded text-[9px] font-mono font-bold tracking-wider border uppercase ${colors[type] || colors.SLEEP}`}>
+      {type}
+    </span>
+  );
+};
+
+const Sparkline = ({ val }: { val: number | null }) => {
+  if (val == null) return null;
+  const isPos = val >= 0;
+  return (
+    <div className="flex items-center gap-1">
+      <svg width="40" height="12" viewBox="0 0 40 12" className="opacity-80">
+        <path
+          d={isPos ? 'M0 12 L10 8 L20 10 L40 0' : 'M0 0 L10 4 L20 2 L40 12'}
+          fill="none"
+          stroke={isPos ? '#10B981' : '#EF4444'}
+          strokeWidth="1.5"
+        />
+      </svg>
+      <span className={`text-[9px] font-mono ${isPos ? 'text-dexGreen' : 'text-dexRed'}`}>
+        {val > 0 ? '+' : ''}{val.toFixed(1)}%
+      </span>
+    </div>
+  );
+};
+
+// FlipCardImage
+const FlipCardImage = ({ imageUrl, className = 'w-64' }: { imageUrl: string | null; className?: string }) => {
+  const [flipped, setFlipped] = useState(false);
+  return (
+    <div className={`${className} perspective-1000 cursor-pointer shrink-0`} onClick={() => setFlipped(!flipped)}>
+      <div className={`relative preserve-3d transition-transform duration-700 ${flipped ? 'rotate-y-180' : ''}`} style={{ aspectRatio: '2.5/3.5' }}>
+        <div className="absolute inset-0 backface-hidden rounded-xl overflow-hidden shadow-2xl image-glow holo-card">
+          {imageUrl ? (
+            <img src={imageUrl} alt="Card" className="w-full h-full object-cover" />
+          ) : (
+            <div className="w-full h-full bg-charcoal flex items-center justify-center">
+              <I.Box s={48} c="text-gray-700" />
+            </div>
+          )}
+        </div>
+        <div className="absolute inset-0 backface-hidden rotate-y-180 rounded-xl overflow-hidden bg-gradient-to-br from-dexRed via-red-800 to-red-950 flex items-center justify-center">
+          <div className="text-center">
+            <div className="w-16 h-16 rounded-full bg-white/10 flex items-center justify-center mx-auto mb-3 backdrop-blur">
+              <div className="w-8 h-8 rounded-full bg-white/20" />
+            </div>
+            <div className="text-white/60 font-mono text-[10px] uppercase tracking-widest">PokéSnipe</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// SilphScope AI reasoning
+const SilphScope = ({ reason }: { reason: string | null }) => {
+  if (!reason) return null;
+  return (
+    <div className="col-span-1 bg-panel border border-dexBlue/20 p-5 rounded-xl relative overflow-hidden">
+      <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-dexBlue/50 to-transparent" />
+      <h3 className="text-gray-400 font-mono text-xs uppercase tracking-widest mb-3 flex items-center gap-2">
+        <I.Microscope s={14} c="text-dexBlue" /> Silph Scope
+      </h3>
+      <p className="text-sm text-gray-300 leading-relaxed font-light italic">&quot;{reason}&quot;</p>
+    </div>
+  );
+};
+
+// Recent Comps
+const RecentComps = ({ comps }: { comps: Record<string, { lowGBP: number; marketGBP: number }> | null }) => {
+  if (!comps || Object.keys(comps).length === 0) return null;
+  return (
+    <div className="col-span-1 bg-panel border border-border p-5 rounded-xl">
+      <h3 className="text-gray-500 font-mono text-xs uppercase tracking-widest mb-3 flex items-center gap-2">
+        <I.TrendingUp s={14} c="text-dexGreen" /> Recent Comps
+      </h3>
+      <div className="space-y-2">
+        {Object.entries(comps).map(([cond, prices]) => (
+          <div key={cond} className="flex justify-between items-center text-sm font-mono">
+            <span className="text-gray-400 text-xs">{cond}</span>
+            <div className="flex gap-4">
+              <span className="text-gray-500 text-xs">Low: <span className="text-white">&pound;{prices.lowGBP.toFixed(0)}</span></span>
+              <span className="text-gray-500 text-xs">Mkt: <span className="text-dexGreen">&pound;{prices.marketGBP.toFixed(0)}</span></span>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+};
+
+// Market range card
+const MarketRange = ({ costGBP, marketGBP }: { costGBP: number; marketGBP: number }) => {
+  const low = marketGBP * 0.6;
+  const mn = Math.min(low, costGBP) * 0.9;
+  const mx = Math.max(marketGBP, costGBP) * 1.1;
+  const range = mx - mn;
+  const getPos = (val: number) => Math.max(0, Math.min(100, ((val - mn) / range) * 100));
+
+  return (
+    <div className="col-span-1 bg-panel border border-border p-5 rounded-xl relative overflow-hidden">
+      <h3 className="text-gray-500 font-mono text-xs uppercase tracking-widest mb-4">Market Range</h3>
+      <div className="flex flex-col gap-6 justify-center">
+        <div className="w-full h-8 relative mt-2 select-none">
+          <div className="absolute top-3 left-0 right-0 h-1.5 bg-border rounded-full overflow-hidden">
+            <div className="absolute top-0 bottom-0 bg-gray-700" style={{ left: `${getPos(low)}%`, width: `${getPos(marketGBP) - getPos(low)}%` }} />
+          </div>
+          <div className="absolute top-0 flex flex-col items-center" style={{ left: `${getPos(low)}%`, transform: 'translateX(-50%)' }}>
+            <span className="w-0.5 h-3 bg-gray-500 mb-1" /><span className="text-[8px] text-gray-500 font-mono">LO</span>
+          </div>
+          <div className="absolute top-0 flex flex-col items-center" style={{ left: `${getPos(marketGBP)}%`, transform: 'translateX(-50%)' }}>
+            <span className="w-0.5 h-3 bg-gray-500 mb-1" /><span className="text-[8px] text-gray-500 font-mono">MKT</span>
+          </div>
+          <div className="absolute top-[0.4rem] flex flex-col items-center z-10" style={{ left: `${getPos(costGBP)}%`, transform: 'translateX(-50%)' }}>
+            <div className="w-2.5 h-2.5 rounded-full bg-dexGreen border border-black shadow-[0_0_10px_rgba(16,185,129,0.5)]" />
+          </div>
+        </div>
+        <div className="flex justify-between items-baseline border-t border-border pt-2">
+          <div className="flex items-center gap-2">
+            <div className="w-2 h-2 rounded-full bg-dexGreen" />
+            <span className="text-[9px] text-gray-400 font-mono uppercase">Your Cost</span>
+          </div>
+          <div className="text-right">
+            <span className="text-[10px] text-gray-500 font-mono uppercase mr-2">Market</span>
+            <span className="text-xl font-mono font-bold text-white tabular-nums">&pound;{marketGBP.toFixed(0)}</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// ── Login Screen ─────────────────────────────────────────────────
+
+function LoginScreen({ onLogin }: { onLogin: () => void }) {
+  const [password, setPassword] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoading(true);
+    setError('');
+    try {
+      await login(password);
+      onLogin();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Login failed');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="h-screen w-full flex items-center justify-center bg-obsidian bg-hex-pattern">
+      <form onSubmit={handleSubmit} className="w-80 space-y-4">
+        <div className="text-center mb-6">
+          <div className="w-12 h-12 rounded-lg bg-dexRed text-black font-bold flex items-center justify-center text-2xl mx-auto mb-3 shadow-[0_0_20px_rgba(255,62,62,0.4)]">P</div>
+          <h1 className="text-xl font-bold text-white font-sans">Pok&eacute;Snipe <span className="text-dexRed">Pro</span></h1>
+          <p className="text-xs text-gray-500 font-mono mt-1">Silph Co. Terminal Access</p>
+        </div>
+        <input
+          type="password"
+          value={password}
+          onChange={e => setPassword(e.target.value)}
+          placeholder="ACCESS CODE"
+          autoFocus
+          className="w-full bg-charcoal border border-border rounded-lg px-4 py-3 text-center text-sm font-mono text-white tracking-[0.3em] focus:border-dexRed outline-none placeholder:text-gray-600"
+        />
+        {error && <p className="text-dexRed text-xs font-mono text-center">{error}</p>}
+        <button
+          type="submit"
+          disabled={loading || !password}
+          className="w-full bg-dexRed text-black font-bold py-3 rounded-lg text-sm hover:bg-white transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+        >
+          {loading ? 'AUTHENTICATING...' : 'AUTHENTICATE'}
+        </button>
+      </form>
+    </div>
+  );
+}
+
+// ── Main App ─────────────────────────────────────────────────────
+
+type View = 'dashboard' | 'catalogue' | 'lookup' | 'audit' | 'system' | 'settings';
 
 export default function App() {
-  const [authed, setAuthed] = useState<boolean | null>(null); // null = checking
-  const [loginError, setLoginError] = useState<string | null>(null);
-  const [loginLoading, setLoginLoading] = useState(false);
-  const [deals, setDeals] = useState<Deal[]>([]);
-  const [dealsLoading, setDealsLoading] = useState(true);
-  const [dealsError, setDealsError] = useState<string | null>(null);
-  const [status, setStatus] = useState<SystemStatus | null>(null);
-  const [selId, setSelId] = useState<string | null>(null);
-  const [time, setTime] = useState(new Date().toLocaleTimeString());
-  const [activeView, setActiveView] = useState<ViewName>('opportunities');
-  const [tierFilter, setTierFilter] = useState<TierFilter>({ GRAIL: true, HIT: true, FLIP: true, SLEEP: false });
-  const [searchQ, setSearchQ] = useState('');
-  const listRef = useRef<HTMLDivElement>(null);
+  // Auth state
+  const [authed, setAuthed] = useState<boolean | null>(null);
 
-  // Check auth on mount
   useEffect(() => {
     checkAuth().then(ok => setAuthed(ok));
-  }, []);
-
-  // Listen for 401s and redirect to login
-  useEffect(() => {
     const handler = () => setAuthed(false);
     window.addEventListener('auth:unauthorized', handler);
     return () => window.removeEventListener('auth:unauthorized', handler);
   }, []);
 
-  const handleLogin = async (password: string) => {
-    setLoginLoading(true);
-    setLoginError(null);
-    try {
-      await login(password);
-      setAuthed(true);
-    } catch (err) {
-      setLoginError(err instanceof Error ? err.message : 'Login failed');
-    } finally {
-      setLoginLoading(false);
-    }
-  };
-
+  const handleLogin = () => setAuthed(true);
   const handleLogout = async () => {
     await logout();
     setAuthed(false);
-    setDeals([]);
-    setStatus(null);
   };
 
+  // View state
+  const [view, setView] = useState<View>('dashboard');
+
+  // Dashboard state
+  const [deals, setDeals] = useState<Deal[]>([]);
+  const [dealsLoading, setDealsLoading] = useState(true);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedDetail, setSelectedDetail] = useState<DealDetail | null>(null);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [search, setSearch] = useState('');
+  const [filterTier, setFilterTier] = useState('ALL');
+  const [isScanning, setIsScanning] = useState(true);
   const [scannerToggling, setScannerToggling] = useState(false);
-  const handleToggleScanner = async () => {
-    if (!status || scannerToggling) return;
-    const action = status.scanner.status === 'paused' ? 'start' : 'stop';
-    setScannerToggling(true);
+
+  // SSE ref
+  const sseRef = useRef<EventSource | null>(null);
+
+  // Load deals
+  const loadDeals = useCallback(async () => {
     try {
-      await toggleScanner(action);
-      const s = await getStatus();
-      setStatus(s);
-    } catch { /* ignore */ }
-    setScannerToggling(false);
-  };
-
-  const [deleteConfirm, setDeleteConfirm] = useState(false);
-  const [deleteLoading, setDeleteLoading] = useState(false);
-  const handleDeleteAll = async () => {
-    if (!deleteConfirm) { setDeleteConfirm(true); return; }
-    setDeleteLoading(true);
-    try {
-      await deleteAllDeals();
-      setDeals([]);
-      setSelId(null);
-      setDeleteConfirm(false);
-    } catch { /* ignore */ }
-    setDeleteLoading(false);
-  };
-
-  // Fetch deals
-  useEffect(() => {
-    if (!authed) return;
-    let cancelled = false;
-    async function load() {
-      try {
-        setDealsLoading(true);
-        const res = await getDeals({ limit: 100, status: 'active' });
-        if (!cancelled) {
-          setDeals(res.data);
-          if (res.data.length > 0) setSelId(prev => prev ?? res.data[0].deal_id);
-          setDealsError(null);
-        }
-      } catch (err) {
-        if (!cancelled) setDealsError(err instanceof Error ? err.message : 'Failed to load deals');
-      } finally {
-        if (!cancelled) setDealsLoading(false);
-      }
+      const params: Parameters<typeof getDeals>[0] = { limit: 50, sort: 'created_at', order: 'desc' };
+      if (filterTier !== 'ALL') params.tier = filterTier;
+      const res: DealsResponse = await getDeals(params);
+      setDeals(res.data);
+    } catch {
+      // silent fail
+    } finally {
+      setDealsLoading(false);
     }
-    load();
-    const interval = setInterval(load, 60_000);
-    return () => { cancelled = true; clearInterval(interval); };
-  }, [authed]);
+  }, [filterTier]);
 
-  // Fetch system status
   useEffect(() => {
-    if (!authed) return;
-    let cancelled = false;
-    async function load() {
-      try {
-        const s = await getStatus();
-        if (!cancelled) setStatus(s);
-      } catch {
-        // non-critical, silently retry
-      }
+    if (authed) {
+      setDealsLoading(true);
+      loadDeals();
     }
-    load();
-    const interval = setInterval(load, 30_000);
-    return () => { cancelled = true; clearInterval(interval); };
-  }, [authed]);
+  }, [authed, loadDeals]);
 
-  // SSE for real-time deal updates
+  // SSE for real-time updates
   useEffect(() => {
     if (!authed) return;
-    const es = new EventSource('/api/deals/stream', { withCredentials: true });
-    es.addEventListener('deal', (e) => {
+    const es = new EventSource('/api/deals/stream');
+    sseRef.current = es;
+    es.addEventListener('deal', (ev) => {
       try {
-        const newDeal = JSON.parse(e.data) as Deal;
+        const deal: Deal = JSON.parse(ev.data);
         setDeals(prev => {
-          const exists = prev.some(d => d.deal_id === newDeal.deal_id);
-          if (exists) return prev.map(d => d.deal_id === newDeal.deal_id ? newDeal : d);
-          return [newDeal, ...prev];
+          const idx = prev.findIndex(d => d.deal_id === deal.deal_id);
+          if (idx >= 0) {
+            const updated = [...prev];
+            updated[idx] = deal;
+            return updated;
+          }
+          return [deal, ...prev];
         });
-      } catch { /* ignore parse errors */ }
+      } catch {
+        // ignore
+      }
     });
-    es.onerror = () => { /* EventSource auto-reconnects */ };
+    es.onerror = () => {
+      es.close();
+      setTimeout(() => {
+        if (sseRef.current === es) {
+          sseRef.current = new EventSource('/api/deals/stream');
+        }
+      }, 5000);
+    };
     return () => es.close();
   }, [authed]);
 
-  // Clock
+  // Load deal detail
   useEffect(() => {
-    const t = setInterval(() => setTime(new Date().toLocaleTimeString()), 1000);
-    return () => clearInterval(t);
-  }, []);
+    if (!selectedId) { setSelectedDetail(null); return; }
+    let cancelled = false;
+    setDetailLoading(true);
+    getDealDetail(selectedId).then(d => {
+      if (!cancelled) { setSelectedDetail(d); setDetailLoading(false); }
+    }).catch(() => {
+      if (!cancelled) setDetailLoading(false);
+    });
+    return () => { cancelled = true; };
+  }, [selectedId]);
 
-  const filtered = useMemo(() => {
-    let r = deals.filter(d => tierFilter[d.tier]);
-    if (searchQ.trim()) {
-      const q = searchQ.toLowerCase();
-      r = r.filter(d =>
-        (d.cardName || d.ebay_title || '').toLowerCase().includes(q) ||
-        (d.expansion_name || '').toLowerCase().includes(q) ||
-        (d.card_number || '').includes(q)
-      );
+  // Scanner toggle
+  const handleScannerToggle = async () => {
+    setScannerToggling(true);
+    try {
+      const action = isScanning ? 'stop' : 'start';
+      await toggleScanner(action);
+      setIsScanning(!isScanning);
+    } catch {
+      // ignore
     }
-    return r;
-  }, [deals, tierFilter, searchQ]);
+    setScannerToggling(false);
+  };
 
-  const selectedDeal = useMemo(() => deals.find(d => d.deal_id === selId) ?? null, [deals, selId]);
+  // Filtered deals (client-side search)
+  const filteredDeals = useMemo(() => {
+    if (!search.trim()) return deals;
+    const q = search.toLowerCase();
+    return deals.filter(d =>
+      (d.cardName ?? d.ebay_title).toLowerCase().includes(q) ||
+      (d.expansion_name ?? '').toLowerCase().includes(q)
+    );
+  }, [deals, search]);
 
-  const grails = deals.filter(d => d.tier === 'GRAIL').length;
-  const hits = deals.filter(d => d.tier === 'HIT').length;
-
-  const handleListKey = useCallback((e: React.KeyboardEvent) => {
-    if (!['ArrowDown', 'ArrowUp', 'Enter'].includes(e.key)) return;
-    e.preventDefault();
-    const idx = filtered.findIndex(d => d.deal_id === selId);
-    if (e.key === 'ArrowDown' && idx < filtered.length - 1) {
-      setSelId(filtered[idx + 1].deal_id);
-      listRef.current?.children[idx + 1]?.scrollIntoView({ block: 'nearest' });
-    }
-    if (e.key === 'ArrowUp' && idx > 0) {
-      setSelId(filtered[idx - 1].deal_id);
-      listRef.current?.children[idx - 1]?.scrollIntoView({ block: 'nearest' });
-    }
-    if (e.key === 'Enter' && selectedDeal) window.open(selectedDeal.ebay_url, '_blank');
-  }, [filtered, selId, selectedDeal]);
-
-  const isStale = useCallback((d: Deal) => d.status === 'expired' || d.status === 'sold' || (Date.now() - new Date(d.created_at).getTime() > 60 * 60000), []);
-
-  // Header stats from status API
-  const dealsToday = status?.scanner.dealsToday ?? deals.length;
-  const accuracy = status?.accuracy.rolling7d != null ? (status.accuracy.rolling7d * 100).toFixed(1) + '%' : '\u2014';
-
-  // Auth checking / login screen
+  // Auth loading / login
   if (authed === null) {
     return (
-      <div className="h-screen w-screen flex items-center justify-center bg-obsidian">
-        <div className="text-center">
-          <I.Loader s={32} c="text-brand mx-auto mb-3" />
-          <p className="text-sm text-muted">Checking authentication&hellip;</p>
-        </div>
+      <div className="h-screen w-full flex items-center justify-center bg-obsidian">
+        <I.Loader s={32} c="text-dexRed" />
       </div>
     );
   }
+  if (!authed) return <LoginScreen onLogin={handleLogin} />;
 
-  if (!authed) {
-    return <LoginScreen onLogin={handleLogin} error={loginError} loading={loginLoading} />;
-  }
-
-  return (
-    <div className="h-screen w-screen flex flex-col font-sans text-sm selection:bg-brand/30">
-      {/* ═══════════ HEADER ═══════════ */}
-      <header className="h-16 glass-panel flex items-center justify-between px-6 z-20 shrink-0">
-        <div className="flex items-center gap-8">
-          <div className="flex items-center gap-2">
-            <div className="w-8 h-8 rounded-lg bg-linear-to-br from-brand to-purple-600 flex items-center justify-center shadow-[0_0_15px_rgba(99,102,241,0.4)]">
-              <I.Crosshair c="text-white w-5 h-5" />
-            </div>
-            <span className="font-bold text-lg tracking-tight text-white">
-              Pok&eacute;Snipe <span className="text-brand font-mono text-xs ml-1 bg-brand/10 px-1.5 py-0.5 rounded">PRO</span>
-            </span>
-          </div>
-          <div className="hidden lg:flex items-center h-8 ml-8">
-            <Stat label="Today" value={dealsToday} />
-            <Stat label="Grails" value={status?.scanner.grailsToday ?? grails} />
-            <Stat label="Hits" value={hits} />
-            <Stat label="Accuracy" value={accuracy} />
-          </div>
-        </div>
-        <div className="flex items-center gap-4">
-          <button
-            onClick={handleToggleScanner}
-            disabled={scannerToggling || !status}
-            title={status?.scanner.status === 'paused' ? 'Click to resume scanner' : 'Click to pause scanner'}
-            className={'flex items-center gap-2 px-3 py-1.5 rounded-full border cursor-pointer transition-all hover:opacity-80 disabled:opacity-50 ' + (status?.scanner.isRunning !== false && status?.scanner.status !== 'paused' ? 'bg-profit/10 text-profit border-profit/20' : 'bg-warn/10 text-warn border-warn/20')}
-          >
-            <div className={'w-2 h-2 rounded-full ' + (status?.scanner.isRunning !== false && status?.scanner.status !== 'paused' ? 'bg-profit pulse-dot' : 'bg-warn')} />
-            <span className="text-xs font-bold tracking-wide">{scannerToggling ? 'TOGGLING\u2026' : status?.scanner.status === 'paused' ? 'PAUSED' : 'SCANNING'}</span>
-          </button>
-          <div className="text-xs font-mono text-muted">{time}</div>
-          <div className="w-px h-6 bg-border mx-2" />
-          <button className="w-8 h-8 rounded-full bg-surface border border-border flex items-center justify-center hover:bg-surfaceHover transition-colors" title="Notifications">
-            <I.Bell c="text-muted w-4 h-4" />
-          </button>
-          <button onClick={handleLogout} className="w-8 h-8 rounded-full bg-surface border border-border flex items-center justify-center hover:bg-risk/20 hover:border-risk/30 transition-colors" title="Logout">
-            <I.X c="text-muted w-4 h-4" />
-          </button>
-        </div>
-      </header>
-
-      <div className="flex flex-1 overflow-hidden">
-        {/* ═══════════ SIDEBAR ═══════════ */}
-        <aside className="w-64 glass-panel border-r border-border flex flex-col justify-between py-6 z-10 shrink-0">
-          <div className="px-3 space-y-1">
-            <SideItem icon={I.Radar} label="Opportunities" active={activeView === 'opportunities'} badge={filtered.length} onClick={() => setActiveView('opportunities')} />
-            <SideItem icon={I.Server} label="System" active={activeView === 'system'} onClick={() => setActiveView('system')} />
-            <SideItem icon={I.ScrollText} label="Audit Log" active={activeView === 'audit'} onClick={() => setActiveView('audit')} />
-            <SideItem icon={I.FileSearch} label="Manual Lookup" active={activeView === 'lookup'} onClick={() => setActiveView('lookup')} />
-            <SideItem icon={I.Settings} label="Settings" active={activeView === 'settings'} onClick={() => setActiveView('settings')} />
-          </div>
-          <div className="px-6 mb-4">
-            <div className="bg-surface rounded-xl p-4 border border-border relative overflow-hidden">
-              <div className="absolute top-0 right-0 w-16 h-16 bg-brand opacity-10 rounded-bl-full" />
-              <p className="text-[9px] text-muted mb-2 font-bold uppercase tracking-wider">eBay API Budget</p>
-              <div className="flex justify-between items-end mb-2">
-                <span className="text-xl font-mono font-bold text-white">{status ? status.ebay.callsToday.toLocaleString() : '\u2014'}</span>
-                <span className="text-[10px] font-mono text-muted">/ {status ? status.ebay.dailyLimit.toLocaleString() : '\u2014'}</span>
-              </div>
-              <div className="w-full bg-obsidian rounded-full h-1.5 mb-2 overflow-hidden">
-                <div className={'h-1.5 rounded-full ' + (status && status.ebay.status === 'low' ? 'bg-warn' : 'bg-profit')} style={{ width: status ? `${(status.ebay.callsToday / status.ebay.dailyLimit * 100).toFixed(0)}%` : '0%' }} />
-              </div>
-              <p className="text-[10px] text-muted">{status ? `${status.ebay.remaining.toLocaleString()} remaining` : 'Loading\u2026'}</p>
-            </div>
-          </div>
-        </aside>
-
-        {/* ═══════════ VIEWS ═══════════ */}
-        {activeView === 'system' && <SystemView />}
-        {activeView === 'audit' && <AuditView />}
-        {activeView === 'lookup' && <LookupView />}
-        {activeView === 'settings' && <SettingsView />}
-
-        {activeView === 'opportunities' && (
-          <main className="flex-1 flex overflow-hidden">
-            {/* LEFT: Deal List */}
-            <div className="w-full lg:w-[55%] xl:w-[60%] flex flex-col bg-obsidian border-r border-border relative z-0">
-              <div className="p-4 border-b border-border bg-surface/50 backdrop-blur-sm flex items-center justify-between shrink-0">
-                <div className="flex items-center gap-1 bg-surface border border-border rounded-lg p-1">
-                  {(['GRAIL', 'HIT', 'FLIP', 'SLEEP'] as const).map(t => (
-                    <button key={t} onClick={() => setTierFilter(p => ({ ...p, [t]: !p[t] }))} className={'px-3 py-1.5 text-[10px] font-bold rounded tracking-wider transition-all ' + (tierFilter[t] ? 'bg-border text-white shadow-sm' : 'text-muted/40 hover:text-muted')}>{t}</button>
-                  ))}
-                </div>
-                <div className="flex items-center gap-3">
-                  <div className="relative">
-                    <I.Search c="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted" />
-                    <input type="text" value={searchQ} onChange={e => setSearchQ(e.target.value)} placeholder="Search cards, sets..." className="bg-surface border border-border rounded-lg pl-9 pr-4 py-1.5 text-xs font-mono text-white focus:outline-none focus:border-brand placeholder:text-muted/50 w-56" />
-                  </div>
-                  <button
-                    onClick={handleDeleteAll}
-                    onBlur={() => setDeleteConfirm(false)}
-                    disabled={deleteLoading || deals.length === 0}
-                    className={'px-3 py-1.5 text-[10px] font-bold rounded-lg border transition-all disabled:opacity-30 ' + (deleteConfirm ? 'bg-risk/20 border-risk/40 text-risk' : 'bg-surface border-border text-muted hover:text-risk hover:border-risk/30')}
-                  >
-                    {deleteLoading ? 'Deleting\u2026' : deleteConfirm ? 'Confirm Delete All' : 'Delete All'}
-                  </button>
-                </div>
-              </div>
-
-              {dealsLoading && deals.length === 0 ? (
-                <div className="flex-1 flex items-center justify-center">
-                  <div className="text-center">
-                    <I.Loader s={32} c="text-brand mx-auto mb-3" />
-                    <p className="text-sm text-muted">Loading deals&hellip;</p>
-                  </div>
-                </div>
-              ) : dealsError && deals.length === 0 ? (
-                <div className="flex-1 flex items-center justify-center">
-                  <div className="text-center max-w-xs">
-                    <I.AlertTriangle s={32} c="text-risk mx-auto mb-3" />
-                    <h3 className="text-base font-bold text-white mb-1">Failed to load</h3>
-                    <p className="text-xs text-muted">{dealsError}</p>
-                  </div>
-                </div>
-              ) : filtered.length === 0 ? (
-                <EmptyFeed hasFilter={!!searchQ || Object.values(tierFilter).some(v => !v)} />
-              ) : (
-                <div className="flex-1 overflow-y-auto p-2 space-y-1 relative" ref={listRef} onKeyDown={handleListKey} tabIndex={0} role="listbox" aria-label="Deal feed">
-                  {filtered.map(d => {
-                    const t7 = trendInfo(d.trend_7d);
-                    const stale = isStale(d);
-                    const reviewed = d.is_correct_match;
-                    return (
-                      <div
-                        key={d.deal_id}
-                        role="option"
-                        aria-selected={selId === d.deal_id}
-                        tabIndex={-1}
-                        onClick={() => setSelId(d.deal_id)}
-                        className={
-                          'deal-row group flex items-center gap-3 p-3 rounded-xl cursor-pointer transition-all border ' +
-                          (selId === d.deal_id ? 'bg-surface border-brand/50 shadow-[0_0_20px_rgba(99,102,241,0.05)]' : 'bg-surface/30 border-transparent hover:bg-surface hover:border-border') + ' ' +
-                          (d.tier === 'GRAIL' && !stale ? 'border-l-[3px] border-l-grail bg-linear-to-r from-grail/[.03] to-transparent' : '') + ' ' +
-                          (stale ? 'deal-stale' : '')
-                        }
-                      >
-                        {/* Thumbnail */}
-                        <div className="w-14 h-[78px] rounded-md bg-obsidian overflow-hidden shrink-0 border border-white/5 shadow-md relative">
-                          {d.ebay_image_url ? (
-                            <img src={d.ebay_image_url} alt={d.cardName || d.ebay_title} className="h-full w-full object-cover opacity-90 group-hover:opacity-100 transition-opacity" />
-                          ) : (
-                            <div className="h-full w-full flex items-center justify-center"><I.Search s={16} c="text-muted/30" /></div>
-                          )}
-                          {d.expansion_logo && <img src={d.expansion_logo} alt="" className="absolute top-0.5 right-0.5 w-3.5 h-3.5 opacity-60" onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }} />}
-                        </div>
-                        <Ring v={Math.round((d.confidence ?? 0) * 100)} tier={d.confidence_tier ?? 'low'} />
-                        <div className="flex-1 min-w-0 flex flex-col gap-0.5">
-                          <div className="flex items-center gap-2">
-                            <Tier t={d.tier} />
-                            <span className="font-bold text-white text-sm truncate">{d.cardName || d.ebay_title}</span>
-                            {reviewed != null && <span className={'text-[8px] font-bold px-1 rounded ' + (reviewed ? 'bg-profit/10 text-profit' : 'bg-risk/10 text-risk')}>{reviewed ? '\u2713' : '\u2717'}</span>}
-                          </div>
-                          <div className="flex items-center gap-1.5 text-[11px] text-muted truncate">
-                            <span>{d.expansion_name || 'Unknown set'}</span><span className="text-border">&middot;</span><span className="font-mono text-[10px]">{d.card_number || '?'}</span>
-                            {d.is_graded && <><span className="text-border">&middot;</span><span className="text-info font-semibold">{d.grading_company} {d.grade}</span></>}
-                            <span className="text-border">&middot;</span><span className="text-[10px] font-semibold text-white/70">{d.condition}</span>
-                          </div>
-                          <div className="flex items-center gap-2">
-                            <span className={'text-[9px] font-medium ' + t7.c}>{t7.t}</span>
-                            <span className="text-[9px] text-muted/40 ml-auto shrink-0" title={fmtListedTime(d.created_at)}>{timeAgo(d.created_at)}</span>
-                          </div>
-                        </div>
-                        {/* Pricing column */}
-                        <div className="flex flex-col items-end shrink-0 pl-3 min-w-[86px]">
-                          <span className={'text-lg font-bold font-mono leading-none ' + ((d.profit_gbp ?? 0) >= 0 ? 'text-profit' : 'text-risk')}>{(d.profit_gbp ?? 0) >= 0 ? '+' : ''}&pound;{(d.profit_gbp ?? 0).toFixed(2)}</span>
-                          <span className={'text-[10px] font-mono mt-0.5 ' + ((d.profit_gbp ?? 0) >= 0 ? 'text-profit/60' : 'text-risk/60')}>{(d.profit_percent ?? 0) >= 0 ? '+' : ''}{(d.profit_percent ?? 0).toFixed(0)}% ROI</span>
-                          <div className="text-[9px] font-mono text-muted/40 mt-1">&pound;{(d.total_cost_gbp ?? 0).toFixed(0)} &rarr; &pound;{(d.market_price_gbp ?? 0).toFixed(0)}</div>
-                        </div>
-                      </div>
-                    );
-                  })}
-                  <div className="sticky bottom-0 left-0 right-0 h-12 bg-linear-to-t from-obsidian to-transparent pointer-events-none" />
-                </div>
-              )}
-            </div>
-
-            {/* RIGHT: Deal Detail */}
-            {selectedDeal && <DetailErrorBoundary key={selectedDeal.deal_id} onReset={() => setSelId(null)}><DealDetailPanel dealSummary={selectedDeal} onReviewDeal={(dealId, isCorrect) => {
-                if (isCorrect) {
-                  setDeals(prev => prev.map(d => d.deal_id === dealId ? { ...d, is_correct_match: true } : d));
-                } else {
-                  setDeals(prev => prev.filter(d => d.deal_id !== dealId));
-                  setSelId(null);
-                }
-              }} /></DetailErrorBoundary>}
-          </main>
-        )}
-      </div>
-
-      {/* ═══════════ FOOTER ═══════════ */}
-      <footer className="h-10 border-t border-border bg-surface/80 flex items-center px-4 text-[10px] font-mono shrink-0 gap-6">
-        <div className="flex items-center gap-2">
-          <div className={'w-2 h-2 rounded-full ' + (status?.scanner.isRunning !== false ? 'bg-profit pulse-dot' : 'bg-warn')} />
-          <span className="font-semibold text-white/80">{status?.scanner.status === 'paused' ? 'Paused' : 'Scanning'}</span>
-          <span className="text-muted">{status?.scanner.lastRun ? timeAgo(status.scanner.lastRun) : ''}</span>
-        </div>
-        <div className="border-l border-border h-5" /><div className="flex items-center gap-1.5"><span className="text-muted">Deals</span><span className="text-white font-semibold">{filtered.length}/{deals.length}</span></div>
-        <div className="border-l border-border h-5" /><div className="flex items-center gap-1.5"><span className="text-muted">Accuracy</span><span className="text-white font-semibold">{accuracy}</span></div>
-        <div className="flex-1" />
-        <div className="flex items-center gap-4 text-muted">
-          <span>eBay <span className="text-white/70">{status ? `${status.ebay.callsToday.toLocaleString()}/${(status.ebay.dailyLimit / 1000).toFixed(0)}k` : '\u2014'}</span></span>
-          {status?.scrydex && <span>Scrydex <span className="text-white/70">{(status.scrydex.creditsConsumed / 1000).toFixed(1)}k cr</span></span>}
-          <span>FX <span className="text-white/70">{status?.exchangeRate.rate?.toFixed(3) ?? '\u2014'}</span></span>
-        </div>
-      </footer>
-    </div>
-  );
-}
-
-// ═══════════ ERROR BOUNDARY ═══════════
-class DetailErrorBoundary extends Component<{ children: ReactNode; onReset: () => void }, { error: string | null }> {
-  state = { error: null as string | null };
-  static getDerivedStateFromError(err: Error) { return { error: err.message }; }
-  componentDidCatch(_: Error, info: ErrorInfo) { console.error('DealDetail crash:', info); }
-  render() {
-    if (this.state.error) {
-      return (
-        <div className="hidden lg:flex w-[45%] xl:w-[40%] bg-surface flex-col items-center justify-center">
-          <I.AlertTriangle s={32} c="text-warn mx-auto mb-3" />
-          <h3 className="text-sm font-bold text-white mb-1">Failed to render deal</h3>
-          <p className="text-xs text-muted mb-3 max-w-xs text-center">{this.state.error}</p>
-          <button onClick={() => { this.setState({ error: null }); this.props.onReset(); }} className="text-xs text-brand hover:underline">Select another deal</button>
-        </div>
-      );
-    }
-    return this.props.children;
-  }
-}
-
-// ═══════════ DEAL DETAIL PANEL ═══════════
-function DealDetailPanel({ dealSummary, onReviewDeal }: { dealSummary: Deal; onReviewDeal: (dealId: string, isCorrect: boolean) => void }) {
-  const [detail, setDetail] = useState<DealDetailType | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [detailScr, setDetailScr] = useState(false);
-  const [costExpanded, setCostExpanded] = useState(false);
-  const [confFlipped, setConfFlipped] = useState(false);
-  const [liqFlipped, setLiqFlipped] = useState(false);
-  const [reviewLoading, setReviewLoading] = useState(false);
-  const [showReasonPicker, setShowReasonPicker] = useState(false);
-  const [pendingReason, setPendingReason] = useState<string | null>(null);
-  const [cardSearchQuery, setCardSearchQuery] = useState('');
-  const [cardSearchResults, setCardSearchResults] = useState<CardSearchResult[]>([]);
-  const [cardSearchLoading, setCardSearchLoading] = useState(false);
-  const [selectedCorrectCard, setSelectedCorrectCard] = useState<CardSearchResult | null>(null);
-  const cardSearchTimer = useRef<ReturnType<typeof setTimeout>>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    getDealDetail(dealSummary.deal_id).then(d => {
-      if (!cancelled) { setDetail(d); setLoading(false); }
-    }).catch(() => {
-      if (!cancelled) setLoading(false);
-    });
-    return () => { cancelled = true; };
-  }, [dealSummary.deal_id]);
-
-  const d = detail ?? dealSummary;
-
-  const handleReview = async (isCorrect: boolean, reason?: string, correctCardId?: string) => {
-    setReviewLoading(true);
-    try {
-      await reviewDeal(dealSummary.deal_id, isCorrect, reason, correctCardId);
-      if (detail) {
-        setDetail({ ...detail, is_correct_match: isCorrect, reviewed_at: new Date().toISOString(), incorrect_reason: reason || null });
-      }
-      onReviewDeal(dealSummary.deal_id, isCorrect);
-      setShowReasonPicker(false);
-      setPendingReason(null);
-      setSelectedCorrectCard(null);
-      setCardSearchQuery('');
-      setCardSearchResults([]);
-    } catch { /* ignore */ }
-    setReviewLoading(false);
-  };
-
-  const handleCardSearch = (query: string) => {
-    setCardSearchQuery(query);
-    if (cardSearchTimer.current) clearTimeout(cardSearchTimer.current);
-    if (query.trim().length < 2) { setCardSearchResults([]); return; }
-    setCardSearchLoading(true);
-    cardSearchTimer.current = setTimeout(async () => {
-      try {
-        const res = await searchCards(query.trim(), 8);
-        setCardSearchResults(res.data);
-      } catch { setCardSearchResults([]); }
-      setCardSearchLoading(false);
-    }, 300);
-  };
-
-  const cardImg = detail?.card_image_url ?? null;
-  const ebayImg = d.ebay_image_url;
-  const displayImg = detailScr && cardImg ? cardImg : ebayImg;
-  const canFlipImg = !!cardImg && !!ebayImg;
-  const [mountTime] = useState(Date.now);
-  const stale = d.status === 'expired' || d.status === 'sold' || (mountTime - new Date(d.created_at).getTime() > 60 * 60000);
-  const rv = d.is_correct_match;
-
-  // Signals from detail
-  const confSignals = detail?.match_signals?.confidence ?? null;
-  const liqSignals = detail?.match_signals?.liquidity ?? null;
-
-  // Condition comps — prefer deal's condition_comps (GBP-converted), fall back to variant_prices (USD)
-  const condComps = detail?.condition_comps;
-  const rawComps = detail?.variant_prices;
-  const compsGBP: Record<string, { market: number; low: number }> | null =
-    condComps ? Object.fromEntries(
-      Object.entries(condComps).map(([k, v]) => [k, { market: v.marketGBP, low: v.lowGBP }])
-    ) : rawComps ?? null;
-
-  // Trends from variant_trends
-  const variantTrends = detail?.variant_trends ?? null;
-  const trendWindows = ['7d', '30d', '90d'] as const;
+  const sd = selectedDetail;
 
   return (
-    <div className="hidden lg:flex w-[45%] xl:w-[40%] bg-surface flex-col shadow-[-20px_0_40px_rgba(0,0,0,.3)] z-10">
-      <div className="p-6 border-b border-border flex gap-6 items-start shrink-0 relative overflow-hidden">
-        <div className="absolute top-0 right-0 w-64 h-64 bg-brand rounded-full blur-[100px] opacity-10 pointer-events-none" />
-        <div
-          className="w-28 h-40 rounded-xl overflow-hidden shadow-2xl shrink-0 border border-white/10 bg-obsidian relative image-glow"
-          onClick={() => { if (canFlipImg) setDetailScr(p => !p); }}
-          style={{ cursor: canFlipImg ? 'pointer' : 'default' }}
-        >
-          {displayImg ? (
-            <img src={displayImg} alt={d.cardName || d.ebay_title} className="w-full h-full object-cover" />
-          ) : (
-            <div className="w-full h-full flex items-center justify-center"><I.Search s={24} c="text-muted/30" /></div>
-          )}
-          <div className="absolute inset-0 bg-linear-to-tr from-transparent via-white/10 to-transparent opacity-50 mix-blend-overlay" />
-          {canFlipImg && <div className={'absolute bottom-1 left-1 text-[8px] font-mono font-bold px-1.5 py-0.5 rounded ' + (detailScr ? 'bg-brand/90 text-white' : 'bg-white/80 text-obsidian')}>{detailScr ? 'Scrydex' : 'eBay'}</div>}
+    <div className="flex w-full h-screen bg-obsidian bg-hex-pattern font-sans text-gray-200">
+      {/* SIDEBAR */}
+      <aside className="w-16 flex flex-col items-center py-6 border-r border-border bg-charcoal z-20 shrink-0">
+        <div className="w-10 h-10 rounded-lg bg-dexRed text-black font-bold flex items-center justify-center text-xl mb-8 shadow-[0_0_15px_rgba(255,62,62,0.4)]">P</div>
+        <div className="space-y-4 w-full px-2">
+          <NavButton icon={I.Grid} label="Dashboard" active={view === 'dashboard'} onClick={() => setView('dashboard')} />
+          <NavButton icon={I.Book} label="Catalogue" active={view === 'catalogue'} onClick={() => setView('catalogue')} />
+          <NavButton icon={I.Box} label="Manual" active={view === 'lookup'} onClick={() => setView('lookup')} />
+          <NavButton icon={I.Terminal} label="Audit" active={view === 'audit'} onClick={() => setView('audit')} />
+          <NavButton icon={I.Cpu} label="System" active={view === 'system'} onClick={() => setView('system')} />
+          <NavButton icon={I.Sliders} label="Settings" active={view === 'settings'} onClick={() => setView('settings')} />
         </div>
-        <div className="flex-1 min-w-0 pt-2">
-          <div className="flex flex-wrap gap-2 mb-3">
-            <Tier t={d.tier} />
-            <span className="text-[10px] font-mono text-muted bg-surfaceHover px-2 py-0.5 rounded border border-border">{d.condition}{d.is_graded ? ' \u00b7 ' + d.grading_company + ' ' + d.grade : ''}</span>
-          </div>
-          <h2 className="text-2xl font-bold text-white leading-tight mb-1">{d.cardName || d.ebay_title}</h2>
-          <p className="text-sm text-muted font-mono mb-3">{d.card_number ?? '?'}{detail?.variant_name ? ' \u00b7 ' + detail.variant_name : ''}</p>
-          {detail?.expansion_name && (
-            <div className="flex items-center gap-2.5 mb-3 bg-obsidian rounded-lg px-3 py-2 border border-border/50">
-              {detail.expansion_logo && <img src={detail.expansion_logo} alt={detail.expansion_name} className="w-5 h-5 object-contain shrink-0 opacity-80" onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }} />}
-              <div className="flex-1 min-w-0">
-                <div className="text-[10px] font-bold text-white truncate">{detail.expansion_name}</div>
-                <div className="text-[9px] text-muted font-mono truncate">{detail.expansion_series}{detail.expansion_card_count ? ' \u00b7 ' + detail.expansion_card_count + ' cards' : ''}{detail.expansion_release_date ? ' \u00b7 ' + new Date(detail.expansion_release_date).toLocaleDateString('en-GB', { month: 'short', year: 'numeric' }) : ''}</div>
-              </div>
-            </div>
-          )}
-          <div className="flex items-center gap-4 text-sm">
-            {d.seller_name && <div className="flex items-center gap-1.5 text-muted"><I.User s={16} c="w-4 h-4" />{d.seller_name} {d.seller_feedback != null && <span className="text-white">({d.seller_feedback.toLocaleString()})</span>}</div>}
-            <div className="flex items-center gap-1.5 text-muted"><I.Clock s={16} c="w-4 h-4" /><span title={fmtListedTime(d.created_at)}>{timeAgo(d.created_at)}</span></div>
-          </div>
-        </div>
-      </div>
-
-      <div className="flex-1 overflow-y-auto p-6 space-y-5">
-        {loading && <div className="text-center py-4"><I.Loader s={20} c="text-brand mx-auto" /><p className="text-xs text-muted mt-2">Loading details&hellip;</p></div>}
-
-        {/* Profit hero */}
-        <div className="text-center py-3">
-          <span className={'text-4xl font-mono font-bold ' + ((d.profit_gbp ?? 0) >= 0 ? 'text-profit' : 'text-risk')}>{(d.profit_gbp ?? 0) >= 0 ? '+' : ''}&pound;{(d.profit_gbp ?? 0).toFixed(2)}</span>
-          <div className={'text-sm font-mono mt-1 ' + ((d.profit_gbp ?? 0) >= 0 ? 'text-profit/70' : 'text-risk/70')}>{(d.profit_percent ?? 0) >= 0 ? '+' : ''}{(d.profit_percent ?? 0).toFixed(1)}% return on &pound;{(d.total_cost_gbp ?? 0).toFixed(2)} cost</div>
-        </div>
-
-        {/* Collapsible pricing */}
-        <div className="bg-obsidian border border-border rounded-xl relative overflow-hidden">
-          <div className="absolute left-0 top-0 bottom-0 w-1 bg-brand" />
-          <button onClick={() => setCostExpanded(p => !p)} className="w-full flex items-center justify-between p-4 text-left hover:bg-white/[.02] transition-colors">
-            <div className="flex items-center gap-6 font-mono text-sm">
-              <div><span className="text-[9px] font-sans text-muted uppercase tracking-wider block mb-0.5">Cost</span><span className="text-white font-bold">&pound;{(d.total_cost_gbp ?? 0).toFixed(2)}</span></div>
-              <span className="text-muted/40">&rarr;</span>
-              <div><span className="text-[9px] font-sans text-muted uppercase tracking-wider block mb-0.5">Market</span><span className="text-white font-bold">&pound;{(d.market_price_gbp ?? 0).toFixed(2)}</span></div>
-              <span className="text-muted/40">=</span>
-              <div><span className="text-[9px] font-sans text-muted uppercase tracking-wider block mb-0.5">Profit</span><span className="text-profit font-bold">+&pound;{(d.profit_gbp ?? 0).toFixed(2)}</span></div>
-            </div>
-            <I.ChevronDown s={16} c={'text-muted transition-transform ' + (costExpanded ? 'rotate-180' : '')} />
+        <div className="mt-auto space-y-3 flex flex-col items-center">
+          <button onClick={handleLogout} title="Logout" className="text-gray-600 hover:text-dexRed transition-colors">
+            <I.Power s={16} />
           </button>
-          {costExpanded && (
-            <div className="px-5 pb-4 space-y-2 font-mono text-sm border-t border-border/50 pt-3">
-              <div className="flex justify-between text-white"><span className="text-muted font-sans text-xs">eBay Listing</span><span>&pound;{(d.ebay_price_gbp ?? 0).toFixed(2)}</span></div>
-              <div className="flex justify-between text-white"><span className="text-muted font-sans text-xs">Shipping</span><span>{(d.ebay_shipping_gbp ?? 0) > 0 ? '\u00a3' + (d.ebay_shipping_gbp ?? 0).toFixed(2) : 'Free'}</span></div>
-              <div className="flex justify-between text-white"><span className="text-muted font-sans text-xs">Buyer Protection</span><span>&pound;{(d.buyer_prot_fee ?? 0).toFixed(2)}</span></div>
-              <div className="w-full h-px bg-border/50" />
-              <div className="flex justify-between text-[10px] text-muted"><span className="font-sans">FX Rate</span><span>USD/GBP {(d.exchange_rate ?? 0).toFixed(4)}</span></div>
-            </div>
-          )}
+          <div className="w-2 h-2 rounded-full bg-dexGreen animate-pulse" />
         </div>
+      </aside>
 
-        {/* Confidence + Liquidity side by side */}
-        <div className="grid grid-cols-2 gap-3">
-          <div className="bg-obsidian border border-border rounded-xl p-4 cursor-pointer transition-all hover:border-border/80" onClick={() => setConfFlipped(p => !p)}>
-            {!confFlipped || !confSignals ? (
-              <>
-                <div className="flex items-center justify-between mb-3"><span className="text-[9px] font-bold text-muted uppercase tracking-wider">Confidence</span>{confSignals && <span className="text-[8px] text-muted/40">tap</span>}</div>
-                <div className="flex items-center gap-3">
-                  <Ring v={Math.round((d.confidence ?? 0) * 100)} tier={d.confidence_tier ?? 'low'} sz={44} />
-                  <div><div className="text-xl font-mono font-bold text-white">{Math.round((d.confidence ?? 0) * 100)}%</div><div className="text-[10px] text-muted capitalize">{d.confidence_tier ?? '\u2014'}</div></div>
-                </div>
-              </>
-            ) : (
-              <>
-                <div className="flex items-center justify-between mb-1"><span className="text-[9px] font-bold text-muted uppercase tracking-wider">Signals</span><span className="text-[8px] font-mono text-muted/50">geo. mean</span></div>
-                <SignalGrid signals={{
-                  name: confSignals.name ?? 0,
-                  denominator: confSignals.denom ?? 0,
-                  number: confSignals.number ?? 0,
-                  expansion: confSignals.expansion ?? 0,
-                  variant: confSignals.variant ?? 0,
-                  normalization: confSignals.extract ?? 0,
-                }} weights={CONF_WEIGHTS} />
-              </>
-            )}
-          </div>
-          <div className="bg-obsidian border border-border rounded-xl p-4 cursor-pointer transition-all hover:border-border/80" onClick={() => setLiqFlipped(p => !p)}>
-            {!liqFlipped || !liqSignals?.signals ? (
-              <>
-                <div className="flex items-center justify-between mb-3"><span className="text-[9px] font-bold text-muted uppercase tracking-wider">Liquidity</span>{liqSignals?.signals && <span className="text-[8px] text-muted/40">tap</span>}</div>
-                <div className="flex items-center gap-3">
-                  <Ring v={Math.round((d.liquidity_score ?? 0) * 100)} tier={d.liquidity_grade === 'high' ? 'high' : d.liquidity_grade === 'medium' ? 'medium' : 'low'} sz={44} />
-                  <div><div className="text-xl font-mono font-bold text-white">{Math.round((d.liquidity_score ?? 0) * 100)}%</div><div className="text-[10px] text-muted capitalize">{d.liquidity_grade ?? '\u2014'}</div></div>
-                </div>
-              </>
-            ) : (
-              <>
-                <div className="flex items-center justify-between mb-1"><span className="text-[9px] font-bold text-muted uppercase tracking-wider">Signals</span><span className="text-[8px] font-mono text-muted/50">arith. mean</span></div>
-                <SignalGrid signals={liqSignals.signals as Record<string, number>} weights={liqSignals.signals.velocity != null ? LIQ_WEIGHTS_V : LIQ_WEIGHTS_NV} />
-              </>
-            )}
-          </div>
-        </div>
-
-        {/* Condition Comps */}
-        {compsGBP && (
-          <div className="bg-obsidian border border-border rounded-xl p-5">
-            <h3 className="text-[10px] font-bold text-muted uppercase tracking-wider mb-3">Condition Comps (Scrydex)</h3>
-            <div className="grid grid-cols-4 gap-2">
-              {(['NM', 'LP', 'MP', 'HP'] as const).map(c => {
-                const cp = compsGBP[c];
-                const ac = d.condition === c;
-                return (
-                  <div key={c} className={'rounded-lg p-3 text-center border ' + (ac ? 'bg-brand/10 border-brand/30' : 'bg-surface border-border')}>
-                    <div className={'text-[10px] font-bold mb-1 ' + (ac ? 'text-brand' : 'text-muted')}>{c}</div>
-                    {cp ? (
-                      <><div className="text-sm font-mono font-bold text-white">&pound;{(cp.market ?? 0).toFixed(0)}</div><div className="text-[9px] font-mono text-muted">low &pound;{(cp.low ?? 0).toFixed(0)}</div></>
-                    ) : (
-                      <div className="text-[10px] text-muted/50">&mdash;</div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        )}
-
-        {/* Price Trend */}
-        <div className="bg-obsidian border border-border rounded-xl p-5">
-          <h3 className="text-[10px] font-bold text-muted uppercase tracking-wider mb-3">Price Trend</h3>
-          <div className="grid grid-cols-3 gap-2">
-            {trendWindows.map(w => {
-              const raw = w === '7d' ? d.trend_7d : w === '30d' ? d.trend_30d : (variantTrends && d.condition ? variantTrends[d.condition]?.['90d']?.percent_change : null) ?? null;
-              const ti = trendInfo(raw);
-              return (
-                <div key={w} className="bg-surface rounded-lg p-3 text-center">
-                  <div className="text-[10px] font-bold text-muted uppercase mb-1">{w}</div>
-                  <div className={'text-sm font-mono font-bold ' + ti.c}>{raw != null ? (raw > 0 ? '+' : '') + raw.toFixed(1) + '%' : '\u2014'}</div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-
-        {/* Match Review */}
-        <div className={'bg-obsidian border rounded-xl p-4 ' + (rv === true ? 'border-profit/30' : rv === false ? 'border-risk/30' : 'border-border')}>
-          <div className="flex items-center justify-between">
-            <div>
-              <div className="text-[10px] font-bold text-muted uppercase tracking-wider">Match Review</div>
-              {rv != null ? (
-                <div className={'text-[11px] mt-1 font-semibold ' + (rv ? 'text-profit' : 'text-risk')}>
-                  Marked as {rv ? 'correct' : 'incorrect'}{d.incorrect_reason ? ` — ${({ wrong_card: 'Wrong card', wrong_set: 'Wrong set', wrong_condition: 'Wrong condition', wrong_variant: 'Wrong variant', wrong_price: 'Wrong price', bad_image: 'Bad image', junk_listing: 'Junk listing' } as Record<string, string>)[d.incorrect_reason] || d.incorrect_reason}` : ''}
-                </div>
-              ) : showReasonPicker ? (
-                <div className="text-[11px] text-muted mt-1">What was wrong?</div>
-              ) : (
-                <div className="text-[11px] text-muted mt-1">Was this card match correct?</div>
-              )}
-            </div>
-            {!showReasonPicker && (
-              <div className="flex gap-2">
+      {/* CONTENT AREA */}
+      <div className="flex-1 flex overflow-hidden">
+        {view === 'dashboard' ? (
+          <>
+            {/* DEAL LIST COLUMN */}
+            <section className="w-[420px] flex flex-col border-r border-border bg-obsidian/95 backdrop-blur-sm z-10 shrink-0">
+              <header className="h-20 px-6 border-b border-border flex justify-between items-center">
+                <h1 className="text-xl font-bold tracking-tight text-white font-sans">
+                  Pok&eacute;Snipe <span className="text-dexRed">v1.3.2</span>
+                </h1>
                 <button
-                  onClick={() => handleReview(true)}
-                  disabled={reviewLoading}
-                  className={'p-2 rounded-lg border transition-all ' + (rv === true ? 'bg-profit/20 border-profit/40 text-profit' : 'border-border bg-surface hover:bg-profit/10 hover:border-profit/30 hover:text-profit text-muted')}
-                  title="Correct match"
+                  onClick={handleScannerToggle}
+                  disabled={scannerToggling}
+                  className={`flex items-center gap-2 px-3 py-1.5 rounded-full border text-[10px] font-mono uppercase tracking-wider transition-all
+                    ${isScanning
+                      ? 'bg-dexGreen/10 border-dexGreen/30 text-dexGreen hover:bg-dexGreen/20'
+                      : 'bg-gray-800 border-gray-700 text-gray-400 hover:bg-gray-700'}
+                  `}
                 >
-                  {rv === true ? <I.Check s={16} c="w-4 h-4" /> : <I.Up s={16} c="w-4 h-4" />}
+                  <div className={`w-1.5 h-1.5 rounded-full ${isScanning ? 'bg-dexGreen animate-blink' : 'bg-gray-500'}`} />
+                  {isScanning ? 'Scanner Active' : 'Scanner Paused'}
+                  <I.Power s={10} c="ml-1" />
                 </button>
-                <button
-                  onClick={() => { if (rv == null) setShowReasonPicker(true); else handleReview(false); }}
-                  disabled={reviewLoading}
-                  className={'p-2 rounded-lg border transition-all ' + (rv === false ? 'bg-risk/20 border-risk/40 text-risk' : 'border-border bg-surface hover:bg-risk/10 hover:border-risk/30 hover:text-risk text-muted')}
-                  title="Incorrect match"
-                >
-                  {rv === false ? <I.X s={16} c="w-4 h-4" /> : <I.Down s={16} c="w-4 h-4" />}
-                </button>
-              </div>
-            )}
-          </div>
-          {showReasonPicker && rv == null && !pendingReason && (
-            <div className="mt-3 space-y-2">
-              <div className="grid grid-cols-2 gap-1.5">
-                {([
-                  ['wrong_card', 'Wrong Card', 'Matched a completely different card'],
-                  ['wrong_set', 'Wrong Set', 'Right card, wrong expansion'],
-                  ['wrong_variant', 'Wrong Variant', 'Right card, wrong variant (holo/reverse/etc)'],
-                  ['wrong_condition', 'Wrong Condition', 'Condition was misidentified'],
-                  ['wrong_price', 'Wrong Price', 'Market price was inaccurate'],
-                  ['bad_image', 'Bad Image', 'Image doesn\'t match listing'],
-                ] as const).map(([value, label, desc]) => (
-                  <button
-                    key={value}
-                    onClick={() => {
-                      if (['wrong_card', 'wrong_set', 'wrong_variant'].includes(value)) {
-                        setPendingReason(value);
-                      } else {
-                        handleReview(false, value);
-                      }
-                    }}
-                    disabled={reviewLoading}
-                    className="text-left p-2.5 rounded-lg border border-border bg-surface hover:bg-risk/10 hover:border-risk/30 transition-all group"
-                  >
-                    <div className="text-[11px] font-semibold text-white/80 group-hover:text-risk">{label}</div>
-                    <div className="text-[9px] text-muted mt-0.5 leading-tight">{desc}</div>
-                  </button>
-                ))}
-              </div>
-              <button
-                onClick={() => setShowReasonPicker(false)}
-                className="w-full text-[10px] text-muted hover:text-white/60 py-1 transition-colors"
-              >
-                Cancel
-              </button>
-            </div>
-          )}
-          {pendingReason && rv == null && (
-            <div className="mt-3 space-y-2">
-              <div className="text-[10px] text-muted mb-1">Know the correct card? Search below, or skip to submit.</div>
-              <div className="relative">
-                <I.Search c="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted" />
-                <input
-                  type="text"
-                  value={cardSearchQuery}
-                  onChange={e => handleCardSearch(e.target.value)}
-                  placeholder="Search card name or number..."
-                  autoFocus
-                  className="w-full bg-obsidian border border-border rounded-lg pl-8 pr-3 py-2 text-xs font-mono text-white focus:outline-none focus:border-brand placeholder:text-muted/50"
-                />
-                {cardSearchLoading && <I.Loader s={14} c="absolute right-2.5 top-1/2 -translate-y-1/2 text-brand" />}
-              </div>
-              {selectedCorrectCard && (
-                <div className="flex items-center gap-2 p-2 rounded-lg border border-profit/30 bg-profit/5">
-                  <div className="flex-1 min-w-0">
-                    <div className="text-[11px] font-semibold text-profit truncate">{selectedCorrectCard.name}</div>
-                    <div className="text-[9px] text-muted font-mono">{selectedCorrectCard.number} &middot; {selectedCorrectCard.expansion_name}</div>
-                  </div>
-                  <button onClick={() => setSelectedCorrectCard(null)} className="text-muted hover:text-white shrink-0"><I.X s={14} c="w-3.5 h-3.5" /></button>
+              </header>
+
+              <div className="p-4 space-y-3 border-b border-border bg-panel/30">
+                <div className="relative">
+                  <input
+                    type="text"
+                    className="w-full bg-charcoal border border-border text-xs font-mono p-2.5 pl-9 rounded outline-none focus:border-dexRed/50 focus:ring-1 focus:ring-dexRed/20 transition-all text-white placeholder-gray-600"
+                    placeholder="SEARCH DATABASE..."
+                    value={search}
+                    onChange={e => setSearch(e.target.value)}
+                  />
+                  <div className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-600"><I.Search s={14} /></div>
                 </div>
-              )}
-              {!selectedCorrectCard && cardSearchResults.length > 0 && (
-                <div className="max-h-36 overflow-y-auto space-y-0.5 border border-border rounded-lg">
-                  {cardSearchResults.map(card => (
+                <div className="flex gap-2 overflow-x-auto pb-1 no-scrollbar">
+                  {['ALL', 'GRAIL', 'HIT', 'FLIP'].map(tier => (
                     <button
-                      key={card.scrydex_card_id}
-                      onClick={() => { setSelectedCorrectCard(card); setCardSearchResults([]); setCardSearchQuery(''); }}
-                      className="w-full text-left px-3 py-1.5 hover:bg-surface/80 transition-colors flex items-center gap-2"
+                      key={tier}
+                      onClick={() => setFilterTier(tier)}
+                      className={`px-3 py-1 text-[10px] font-mono font-bold border rounded transition-colors ${filterTier === tier ? 'bg-gray-200 text-black border-white' : 'bg-transparent text-gray-500 border-border hover:border-gray-600'}`}
                     >
-                      <div className="flex-1 min-w-0">
-                        <div className="text-[11px] text-white truncate">{card.name}</div>
-                        <div className="text-[9px] text-muted font-mono">{card.number} &middot; {card.expansion_name}</div>
-                      </div>
+                      {tier}
                     </button>
                   ))}
                 </div>
-              )}
-              <div className="flex gap-2">
-                <button
-                  onClick={() => handleReview(false, pendingReason, selectedCorrectCard?.scrydex_card_id)}
-                  disabled={reviewLoading}
-                  className="flex-1 py-2 text-[11px] font-semibold rounded-lg bg-risk/20 border border-risk/40 text-risk hover:bg-risk/30 transition-all disabled:opacity-50"
-                >
-                  {reviewLoading ? 'Submitting...' : selectedCorrectCard ? 'Submit with correction' : 'Submit without correction'}
-                </button>
-                <button
-                  onClick={() => { setPendingReason(null); setSelectedCorrectCard(null); setCardSearchQuery(''); setCardSearchResults([]); }}
-                  className="px-3 py-2 text-[10px] text-muted hover:text-white/60 border border-border rounded-lg transition-colors"
-                >
-                  Back
-                </button>
               </div>
-            </div>
-          )}
-        </div>
 
-        {/* Report Junk — separate from match review */}
-        {rv == null && !showReasonPicker && (
-          <button
-            onClick={() => handleReview(false, 'junk_listing')}
-            disabled={reviewLoading}
-            className="w-full flex items-center gap-2.5 p-3 rounded-xl border border-warn/20 bg-warn/5 hover:bg-warn/10 hover:border-warn/40 transition-all group disabled:opacity-50"
-          >
-            <I.ShieldOff s={14} c="text-warn shrink-0" />
-            <div className="text-left flex-1">
-              <div className="text-[11px] font-semibold text-warn/80 group-hover:text-warn">Report Junk</div>
-              <div className="text-[9px] text-muted leading-tight">Fake, fan art, proxy, or not a real card</div>
-            </div>
-          </button>
-        )}
-        {d.incorrect_reason === 'junk_listing' && (
-          <div className="flex items-center gap-2.5 p-3 rounded-xl border border-warn/30 bg-warn/5">
-            <I.ShieldOff s={14} c="text-warn shrink-0" />
-            <div className="text-[11px] font-semibold text-warn">Reported as junk listing</div>
-          </div>
+              <div className="flex-1 overflow-y-auto">
+                {dealsLoading && filteredDeals.length === 0 ? (
+                  <div className="flex items-center justify-center h-full">
+                    <div className="text-center">
+                      <I.Loader s={24} c="text-dexRed mx-auto mb-3" />
+                      <p className="text-xs text-gray-500 font-mono">Loading deals...</p>
+                    </div>
+                  </div>
+                ) : filteredDeals.length === 0 ? (
+                  <div className="flex items-center justify-center h-full">
+                    <div className="text-center max-w-xs px-4">
+                      <I.Radar s={40} c="text-dexRed/30 mx-auto mb-3 scan-anim" />
+                      <h3 className="text-base font-bold text-white mb-1">
+                        {search || filterTier !== 'ALL' ? 'No matches' : 'Scanning eBay\u2026'}
+                      </h3>
+                      <p className="text-xs text-gray-500">
+                        {search || filterTier !== 'ALL'
+                          ? 'Try broadening your search or enabling more tiers.'
+                          : 'New deals will appear here as they\'re found.'}
+                      </p>
+                    </div>
+                  </div>
+                ) : (
+                  filteredDeals.map((deal, i) => {
+                    const name = deal.cardName ?? deal.ebay_title;
+                    const setName = deal.expansion_name ?? '';
+                    const isSelected = selectedId === deal.deal_id;
+                    const isStale = deal.status === 'expired' || deal.status === 'sold';
+                    return (
+                      <div
+                        key={deal.deal_id}
+                        onClick={() => setSelectedId(deal.deal_id)}
+                        className={`group relative p-4 border-b border-border cursor-pointer hover:bg-panel transition-all animate-reveal ${isSelected ? 'bg-panel/80' : ''} ${isStale ? 'deal-stale' : ''}`}
+                        style={{ animationDelay: `${Math.min(i, 10) * 50}ms` }}
+                      >
+                        {isSelected && <div className="absolute left-0 top-0 bottom-0 w-0.5 bg-dexRed shadow-[0_0_10px_#ff3e3e]" />}
+                        <div className="flex justify-between items-start mb-1">
+                          <span className={`font-mono font-bold text-xs ${isSelected ? 'text-white' : 'text-gray-300'}`}>
+                            {name.length > 35 ? name.substring(0, 35) + '\u2026' : name}
+                          </span>
+                          <TypeBadge type={deal.tier} />
+                        </div>
+                        <div className="flex justify-between items-end">
+                          <div className="space-y-1">
+                            <div className="text-[10px] text-gray-500 font-mono">{setName}</div>
+                            <Sparkline val={deal.trend_7d} />
+                          </div>
+                          <div className="text-right">
+                            <div className="text-lg font-mono font-bold text-white tracking-tight tabular-nums group-hover:text-dexGreen transition-colors">
+                              &pound;{(deal.profit_gbp ?? 0).toFixed(0)}
+                            </div>
+                            <div className="text-[9px] font-mono text-gray-500">ROI {(deal.profit_percent ?? 0).toFixed(0)}%</div>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+            </section>
+
+            {/* DETAIL VIEW */}
+            <main className="flex-1 bg-charcoal/50 relative overflow-hidden flex flex-col">
+              <div className="absolute top-0 right-0 w-[500px] h-[500px] bg-dexRed/5 rounded-full blur-[120px] pointer-events-none" />
+              {detailLoading ? (
+                <div className="flex-1 flex items-center justify-center">
+                  <I.Loader s={32} c="text-dexRed" />
+                </div>
+              ) : sd ? (
+                <div className="h-full flex flex-col overflow-y-auto">
+                  {/* Header area */}
+                  <div className="p-8 pb-4 flex gap-8 items-start border-b border-border/50">
+                    <FlipCardImage imageUrl={sd.card_image_url || sd.ebay_image_url} className="w-64" />
+                    <div className="flex-1 pt-2">
+                      <h2 className="text-4xl font-bold text-white mb-2 font-sans tracking-tight">
+                        {sd.card_name ?? sd.cardName ?? sd.ebay_title}
+                      </h2>
+                      <p className="text-xl text-gray-400 font-light mb-6">
+                        {sd.expansion_name ?? ''} <span className="text-gray-600">|</span> {sd.variant_name ?? sd.condition}
+                      </p>
+                      <div className="grid grid-cols-4 gap-3">
+                        <a
+                          href={sd.ebay_url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="col-span-2 bg-white text-black rounded font-bold font-mono text-sm hover:bg-gray-200 hover:scale-[1.02] transition-all flex items-center justify-center gap-2 chamfer-r py-3"
+                        >
+                          SNAG DEAL <I.ArrowUpRight s={14} />
+                        </a>
+                        <button
+                          onClick={() => setView('catalogue')}
+                          className="col-span-2 bg-charcoal border border-border text-gray-300 rounded font-bold font-mono text-sm hover:bg-panel hover:text-white transition-all flex items-center justify-center gap-2 chamfer-r py-3"
+                        >
+                          VIEW IN CATALOGUE <I.Book s={14} />
+                        </button>
+                        <div className="col-span-1 px-2 py-3 border border-border rounded text-sm font-mono text-gray-400 flex flex-col items-center justify-center chamfer-r bg-panel/50">
+                          <span className="text-[9px] uppercase tracking-wider text-gray-600 mb-0.5">Confidence</span>
+                          <span className={`font-bold ${(sd.confidence ?? 0) > 0.8 ? 'text-dexGreen' : 'text-dexYellow'}`}>
+                            {((sd.confidence ?? 0) * 100).toFixed(1)}%
+                          </span>
+                        </div>
+                        <div className="col-span-1 px-2 py-3 border border-border rounded text-sm font-mono text-gray-400 flex flex-col items-center justify-center chamfer-r bg-panel/50">
+                          <span className="text-[9px] uppercase tracking-wider text-gray-600 mb-0.5">Liquidity</span>
+                          <span className={`font-bold ${(sd.liquidity_score ?? 0) > 0.7 ? 'text-dexBlue' : 'text-gray-400'}`}>
+                            {((sd.liquidity_score ?? 0) * 100).toFixed(0)}/100
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Cards Grid */}
+                  <div className="p-8 grid grid-cols-3 gap-6">
+                    {sd.match_signals?.confidence && (
+                      <SilphScope reason={
+                        (sd.profit_percent ?? 0) > 30
+                          ? `High-value arbitrage. ${(sd.profit_percent ?? 0).toFixed(0)}% ROI with ${sd.liquidity_grade ?? 'unknown'} liquidity.${sd.trend_7d != null && sd.trend_7d > 0 ? ` Upward trend (${sd.trend_7d.toFixed(1)}% / 7d).` : ''} Safe acquire.`
+                          : `Moderate opportunity at ${(sd.profit_percent ?? 0).toFixed(0)}% ROI. ${sd.condition ?? 'Unknown'} condition. Verify before purchase.`
+                      } />
+                    )}
+
+                    {/* Net Profit */}
+                    <div className="col-span-1 bg-panel border border-border p-5 rounded-xl chamfer-br relative overflow-hidden group">
+                      <div className="absolute top-0 right-0 p-3 opacity-10 group-hover:opacity-20 transition-opacity">
+                        <I.Zap s={64} />
+                      </div>
+                      <h3 className="text-gray-500 font-mono text-xs uppercase tracking-widest mb-1">Net Profit</h3>
+                      <div className={`text-4xl font-mono font-bold tabular-nums mb-2 ${(sd.profit_gbp ?? 0) >= 0 ? 'text-dexGreen' : 'text-dexRed'}`}>
+                        &pound;{(sd.profit_gbp ?? 0).toFixed(2)}
+                      </div>
+                      <div className="flex gap-4 text-xs font-mono text-gray-400">
+                        <span>Cost: &pound;{sd.total_cost_gbp.toFixed(0)}</span>
+                        <span>Val: &pound;{(sd.market_price_gbp ?? 0).toFixed(0)}</span>
+                      </div>
+                    </div>
+
+                    <RecentComps comps={sd.condition_comps} />
+                    <MarketRange costGBP={sd.total_cost_gbp} marketGBP={sd.market_price_gbp ?? 0} />
+
+                    {/* Seller Info */}
+                    <div className="col-span-3 bg-panel border border-border p-4 rounded-xl flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        <div className="w-8 h-8 rounded bg-gray-800 flex items-center justify-center font-bold text-gray-500 text-xs shrink-0">
+                          {(sd.seller_name ?? 'UK').substring(0, 2).toUpperCase()}
+                        </div>
+                        <div>
+                          <div className="text-sm font-bold text-white leading-none mb-1">{sd.seller_name ?? 'Unknown'}</div>
+                          <div className="text-[10px] text-gray-500 font-mono">
+                            <span className="text-gray-400 mr-2">ID: {sd.ebay_item_id}</span>
+                            {sd.seller_feedback != null && <>{sd.seller_feedback.toLocaleString()} FEEDBACK</>}
+                          </div>
+                        </div>
+                      </div>
+                      <div className="text-right">
+                        <div className="text-[10px] text-gray-500 font-mono uppercase">Status</div>
+                        <div className={`text-sm font-bold flex items-center gap-2 justify-end ${sd.status === 'active' ? 'text-dexGreen' : sd.status === 'expired' ? 'text-dexYellow' : 'text-gray-400'}`}>
+                          {sd.status === 'active' && (
+                            <span className="relative flex h-2 w-2">
+                              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-dexGreen opacity-75" />
+                              <span className="relative inline-flex rounded-full h-2 w-2 bg-dexGreen" />
+                            </span>
+                          )}
+                          {sd.status.toUpperCase()} LISTING
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div className="flex-1 flex flex-col items-center justify-center text-gray-600">
+                  <I.Grid s={48} c="mb-4 opacity-20" />
+                  <p className="font-mono text-sm">SELECT DATA NODE</p>
+                </div>
+              )}
+            </main>
+          </>
+        ) : (
+          <main className="flex-1 bg-obsidian relative overflow-hidden flex flex-col">
+            {view === 'system' && <SystemView />}
+            {view === 'audit' && <AuditView />}
+            {view === 'catalogue' && <CatalogueView />}
+            {view === 'lookup' && <LookupView />}
+            {view === 'settings' && <SettingsView />}
+          </main>
         )}
       </div>
-
-      {/* CTA */}
-      <div className="p-6 border-t border-border bg-surface shrink-0">
-        {stale && <div className="text-center text-[10px] text-warn bg-warn/10 border border-warn/20 rounded-lg py-1.5 mb-3">This listing may no longer be available</div>}
-        <a href={d.ebay_url} target="_blank" rel="noopener noreferrer" className="w-full bg-brand hover:bg-brand/90 text-white font-bold py-3.5 px-4 rounded-xl flex items-center justify-center gap-2 transition-all shadow-[0_0_20px_rgba(99,102,241,0.3)] hover:shadow-[0_0_25px_rgba(99,102,241,0.5)] hover:-translate-y-0.5">
-          <I.ExtLink c="w-5 h-5" />SNAG ON EBAY &rarr;
-        </a>
-        <div className="text-center text-[10px] text-muted mt-2">{d.seller_name}{d.seller_feedback != null ? ' \u00b7 ' + d.seller_feedback.toLocaleString() + ' feedback' : ''} &middot; Enter &#8629; to open</div>
-      </div>
-    </div>
-  );
-}
-
-// ═══════════ LOGIN SCREEN ═══════════
-function LoginScreen({ onLogin, error, loading }: { onLogin: (pw: string) => void; error: string | null; loading: boolean }) {
-  const [pw, setPw] = useState('');
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (pw.trim()) onLogin(pw);
-  };
-  return (
-    <div className="h-screen w-screen flex items-center justify-center bg-obsidian">
-      <form onSubmit={handleSubmit} className="w-full max-w-sm mx-auto p-8">
-        <div className="flex items-center justify-center gap-2 mb-8">
-          <div className="w-10 h-10 rounded-lg bg-linear-to-br from-brand to-purple-600 flex items-center justify-center shadow-[0_0_15px_rgba(99,102,241,0.4)]">
-            <I.Crosshair c="text-white w-6 h-6" />
-          </div>
-          <span className="font-bold text-xl tracking-tight text-white">
-            Pok&eacute;Snipe <span className="text-brand font-mono text-xs ml-1 bg-brand/10 px-1.5 py-0.5 rounded">PRO</span>
-          </span>
-        </div>
-        <div className="bg-surface border border-border rounded-xl p-6 space-y-4">
-          <div>
-            <label htmlFor="password" className="text-xs font-bold text-muted uppercase tracking-wider block mb-2">Password</label>
-            <input
-              id="password"
-              type="password"
-              value={pw}
-              onChange={e => setPw(e.target.value)}
-              placeholder="Enter access password"
-              autoFocus
-              className="w-full bg-obsidian border border-border rounded-lg px-4 py-2.5 text-sm font-mono text-white focus:outline-none focus:border-brand placeholder:text-muted/50"
-            />
-          </div>
-          {error && <div className="text-xs text-risk bg-risk/10 border border-risk/20 rounded-lg px-3 py-2">{error}</div>}
-          <button
-            type="submit"
-            disabled={loading || !pw.trim()}
-            className="w-full bg-brand hover:bg-brand/90 disabled:opacity-50 disabled:cursor-not-allowed text-white font-bold py-2.5 px-4 rounded-xl transition-all shadow-[0_0_15px_rgba(99,102,241,0.3)]"
-          >
-            {loading ? 'Signing in\u2026' : 'Sign In'}
-          </button>
-        </div>
-      </form>
     </div>
   );
 }

@@ -11,7 +11,7 @@ export const Ring = ({ v, tier, sz = 36 }: { v: number; tier: string; sz?: numbe
   return (
     <div className="relative shrink-0" style={{ width: sz, height: sz }} title={'Confidence: ' + v + '%'}>
       <svg className="conf-ring" width={sz} height={sz} viewBox={'0 0 ' + sz + ' ' + sz}>
-        <circle cx={sz / 2} cy={sz / 2} r={r} fill="none" stroke="#23262F" strokeWidth="2.5" />
+        <circle cx={sz / 2} cy={sz / 2} r={r} fill="none" stroke="#2A2A35" strokeWidth="2.5" />
         <circle cx={sz / 2} cy={sz / 2} r={r} fill="none" stroke={co} strokeWidth="2.5" strokeLinecap="round" strokeDasharray={da + ' ' + ci} />
       </svg>
       <span className="absolute inset-0 flex items-center justify-center font-mono text-[9px] font-bold text-white/80">{v}</span>
@@ -28,7 +28,7 @@ export const MiniRing = ({ v, sz = 28 }: { v: number; sz?: number }) => {
   return (
     <div className="relative shrink-0" style={{ width: sz, height: sz }}>
       <svg className="conf-ring" width={sz} height={sz} viewBox={'0 0 ' + sz + ' ' + sz}>
-        <circle cx={sz / 2} cy={sz / 2} r={r} fill="none" stroke="#23262F" strokeWidth="2" />
+        <circle cx={sz / 2} cy={sz / 2} r={r} fill="none" stroke="#2A2A35" strokeWidth="2" />
         <circle cx={sz / 2} cy={sz / 2} r={r} fill="none" stroke={co} strokeWidth="2" strokeLinecap="round" strokeDasharray={da + ' ' + ci} />
       </svg>
       <span className="absolute inset-0 flex items-center justify-center font-mono text-[7px] font-bold text-white/80">{v}</span>
@@ -41,7 +41,7 @@ export const Tier = ({ t }: { t: string }) => (
   <span className={'tier-' + t + ' text-[9px] font-mono font-bold px-2 py-0.5 rounded tracking-wider'} title={TIER_CFG[t]?.d}>{t}</span>
 );
 
-// Sidebar item
+// Sidebar item (kept for compat, not used in demo2 layout)
 export const SideItem = ({ icon: Ic, label, active, badge, onClick }: {
   icon: IconComponent;
   label: string;
@@ -49,12 +49,12 @@ export const SideItem = ({ icon: Ic, label, active, badge, onClick }: {
   badge?: number | null;
   onClick: () => void;
 }) => (
-  <button onClick={onClick} className={'w-full flex items-center justify-between px-4 py-3 rounded-xl transition-all ' + (active ? 'bg-brand/10 text-brand' : 'text-muted hover:text-white hover:bg-surfaceHover')}>
+  <button onClick={onClick} className={'w-full flex items-center justify-between px-4 py-3 rounded-xl transition-all ' + (active ? 'bg-dexRed/10 text-dexRed' : 'text-muted hover:text-white hover:bg-surfaceHover')}>
     <div className="flex items-center gap-3">
       <Ic s={20} c={active ? 'stroke-[2.5px]' : 'stroke-2'} />
       <span className="font-medium text-sm">{label}</span>
     </div>
-    {badge != null && <span className={'text-[10px] font-bold px-2 py-0.5 rounded-full ' + (active ? 'bg-brand text-white' : 'bg-surface border border-border text-muted')}>{badge}</span>}
+    {badge != null && <span className={'text-[10px] font-bold px-2 py-0.5 rounded-full ' + (active ? 'bg-dexRed text-white' : 'bg-surface border border-border text-muted')}>{badge}</span>}
   </button>
 );
 
@@ -79,7 +79,7 @@ export const EmptyFeed = ({ hasFilter }: { hasFilter: boolean }) => (
       ) : (
         <>
           <div className="relative mx-auto mb-4 w-12 h-12">
-            <I.Radar s={48} c="text-brand/40 scan-anim" />
+            <I.Radar s={48} c="text-dexRed/40 scan-anim" />
           </div>
           <h3 className="text-base font-bold text-white mb-1">Scanning eBay&hellip;</h3>
           <p className="text-xs text-muted">New deals will appear here as they&apos;re found.</p>
@@ -109,7 +109,7 @@ export const MetricCard = ({ icon: Ic, label, value, sub, color = 'text-white', 
 );
 
 // Progress bar
-export const Progress = ({ value, max, color = 'bg-profit', warn, label }: {
+export const Progress = ({ value, max, color = 'bg-dexGreen', warn, label }: {
   value: number;
   max: number;
   color?: string;
@@ -135,7 +135,7 @@ export const Progress = ({ value, max, color = 'bg-profit', warn, label }: {
 
 // Status dot
 export const StatusDot = ({ ok }: { ok: boolean }) => (
-  <div className={'w-2.5 h-2.5 rounded-full ' + (ok ? 'bg-profit pulse-dot' : 'bg-risk')} />
+  <div className={'w-2.5 h-2.5 rounded-full ' + (ok ? 'bg-dexGreen pulse-dot' : 'bg-dexRed')} />
 );
 
 // Signal grid for confidence/liquidity breakdowns

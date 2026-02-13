@@ -1,24 +1,40 @@
 @import "tailwindcss";
 
 @theme {
-  --color-obsidian: #0B0C10;
-  --color-surface: #12141A;
-  --color-surfaceHover: #1A1D24;
-  --color-border: #23262F;
-  --color-brand: #6366F1;
+  /* Demo2 "Silph Terminal" Color Palette */
+  --color-obsidian: #050505;
+  --color-charcoal: #0F0F12;
+  --color-panel: #16161D;
+  --color-border: #2A2A35;
+
+  /* Pokemon-inspired semantic tokens */
+  --color-dexRed: #FF3E3E;
+  --color-dexBlue: #3B82F6;
+  --color-dexGreen: #10B981;
+  --color-dexYellow: #FACC15;
+
+  /* Tiers */
+  --color-grail: #F59E0B;
+  --color-hit: #10B981;
+  --color-flip: #6366F1;
+
+  /* Compat aliases */
+  --color-surface: #16161D;
+  --color-surfaceHover: #1E1E28;
+  --color-brand: #FF3E3E;
   --color-profit: #10B981;
   --color-risk: #EF4444;
   --color-warn: #F59E0B;
   --color-info: #60A5FA;
   --color-muted: #8B92A5;
-  --color-grail: #FFB020;
 
-  --font-sans: 'Inter', sans-serif;
+  --font-sans: 'Space Grotesk', sans-serif;
   --font-mono: 'JetBrains Mono', monospace;
 }
 
+/* Base Aesthetic */
 body {
-  background: #0B0C10;
+  background-color: #050505;
   color: #E2E8F0;
   overflow: hidden;
   margin: 0;
@@ -28,63 +44,101 @@ body {
   box-sizing: border-box;
 }
 
-::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+/* Chamfered Corners utility (Clip Path) */
+.chamfer-br { clip-path: polygon(100% 0, 100% calc(100% - 10px), calc(100% - 10px) 100%, 0 100%, 0 0); }
+.chamfer-all { clip-path: polygon(10px 0, 100% 0, 100% calc(100% - 10px), calc(100% - 10px) 100%, 0 100%, 0 10px); }
+.chamfer-r { clip-path: polygon(0 0, 100% 0, 100% calc(100% - 12px), calc(100% - 12px) 100%, 0 100%); }
+
+/* Holographic Effect */
+.holo-card::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(135deg, rgba(255,255,255,0) 30%, rgba(255,255,255,0.1) 50%, rgba(255,255,255,0) 70%);
+  background-size: 200% 200%;
+  opacity: 0;
+  transition: opacity 0.3s;
+  pointer-events: none;
+  mix-blend-mode: overlay;
+}
+.holo-card:hover::after { opacity: 1; animation: shine 2s infinite; }
+
+@keyframes shine { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+
+/* 3D Flip Utility */
+.perspective-1000 { perspective: 1000px; }
+.preserve-3d { transform-style: preserve-3d; }
+.backface-hidden { backface-visibility: hidden; }
+.rotate-y-180 { transform: rotateY(180deg); }
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 4px; height: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #333; border-radius: 2px; }
+::-webkit-scrollbar-thumb:hover { background: #FF3E3E; }
+
+/* Hex pattern BG */
+.bg-hex-pattern {
+  background-image: url('data:image/svg+xml,%3Csvg width="24" height="40" viewBox="0 0 24 40" xmlns="http://www.w3.org/2000/svg"%3E%3Cpath d="M0 40c5.523 0 10-4.477 10-10V30c0-5.523-4.477-10-10-10S0 15.523 0 10V0h24v10c0 5.523 4.477 10 10 10s10 4.477 10 10v10c0 5.523-4.477 10-10 10S0 35.523 0 30v10z" fill="%232A2A35" fill-opacity="0.05" fill-rule="evenodd"/%3E%3C/svg%3E');
 }
 
-::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-::-webkit-scrollbar-thumb {
-  background: #23262F;
-  border-radius: 10px;
-}
-
-.glass-panel {
-  background: rgba(18, 20, 26, 0.7);
-  backdrop-filter: blur(12px);
-  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-}
-
-.image-glow {
-  box-shadow: 0 0 40px rgba(99, 102, 241, 0.15);
-}
-
+/* Confidence Ring */
 .conf-ring {
   transform: rotate(-90deg);
 }
 
+/* Tier badges */
 .tier-GRAIL {
-  background: linear-gradient(135deg, #FFB020, #ff6b2b);
-  color: #0B0C10;
+  color: #F59E0B;
+  background: rgba(245,158,11,0.1);
+  border: 1px solid rgba(245,158,11,0.2);
 }
 
 .tier-HIT {
-  background: rgba(16, 185, 129, 0.12);
   color: #10B981;
-  border: 1px solid rgba(16, 185, 129, 0.2);
+  background: rgba(16,185,129,0.1);
+  border: 1px solid rgba(16,185,129,0.2);
 }
 
 .tier-FLIP {
-  background: rgba(96, 165, 250, 0.12);
-  color: #60A5FA;
-  border: 1px solid rgba(96, 165, 250, 0.2);
+  color: #6366F1;
+  background: rgba(99,102,241,0.1);
+  border: 1px solid rgba(99,102,241,0.2);
 }
 
 .tier-SLEEP {
-  background: rgba(139, 146, 165, 0.1);
   color: #8B92A5;
+  background: rgba(139,146,165,0.1);
+}
+
+/* Animations */
+@keyframes scan {
+  0% { background-position: 0% 0%; }
+  100% { background-position: 0% 100%; }
+}
+
+@keyframes reveal {
+  0% { opacity: 0; transform: translateY(10px); }
+  100% { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes fadeIn {
+  0% { opacity: 0; transform: scale(0.95); }
+  100% { opacity: 1; transform: scale(1); }
+}
+
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
 }
 
 @keyframes pd {
   0%, 100% { box-shadow: 0 0 4px #10B981; }
   50% { box-shadow: 0 0 12px #10B981; }
-}
-
-.pulse-dot {
-  animation: pd 2.5s ease-in-out infinite;
 }
 
 @keyframes scan-pulse {
@@ -93,12 +147,25 @@ body {
   100% { opacity: 0.4; }
 }
 
+.animate-scan { animation: scan 2s linear infinite; }
+.animate-reveal { animation: reveal 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
+.animate-in { animation: fadeIn 0.2s ease-out; }
+.animate-blink { animation: blink 1.5s infinite; }
+
+.spinner {
+  animation: spin 0.8s linear infinite;
+}
+
+.pulse-dot {
+  animation: pd 2.5s ease-in-out infinite;
+}
+
 .scan-anim {
   animation: scan-pulse 1.5s ease-in-out infinite;
 }
 
 .deal-row:focus-visible {
-  outline: 2px solid #6366F1;
+  outline: 2px solid #FF3E3E;
   outline-offset: -2px;
   border-radius: 12px;
 }
@@ -108,17 +175,17 @@ body {
   filter: grayscale(0.35);
 }
 
-@keyframes spin {
-  to { transform: rotate(360deg); }
+/* No scrollbar utility */
+.no-scrollbar::-webkit-scrollbar { display: none; }
+.no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+
+/* Glass panel */
+.glass-panel {
+  background: rgba(15, 15, 18, 0.7);
+  backdrop-filter: blur(12px);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
 }
 
-.spinner {
-  animation: spin 0.8s linear infinite;
-}
-
-.exp-logo {
-  width: 20px;
-  height: 20px;
-  object-fit: contain;
-  image-rendering: auto;
+.image-glow {
+  box-shadow: 0 0 40px rgba(255, 62, 62, 0.15);
 }
