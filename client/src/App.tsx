@@ -93,44 +93,54 @@ const FlipCardImage = ({ imageUrl, className = 'w-64' }: { imageUrl: string | nu
   );
 };
 
-// SilphScope AI reasoning
+// SilphScope AI reasoning — terminal-style with icon bar
 const SilphScope = ({ reason }: { reason: string | null }) => {
   if (!reason) return null;
   return (
-    <div className="col-span-1 bg-panel border border-dexBlue/20 p-5 rounded-xl relative overflow-hidden">
-      <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-dexBlue/50 to-transparent" />
-      <h3 className="text-gray-400 font-mono text-xs uppercase tracking-widest mb-3 flex items-center gap-2">
-        <I.Microscope s={14} c="text-dexBlue" /> Silph Scope
-      </h3>
-      <p className="text-sm text-gray-300 leading-relaxed font-light italic">&quot;{reason}&quot;</p>
-    </div>
-  );
-};
-
-// Recent Comps
-const RecentComps = ({ comps }: { comps: Record<string, { lowGBP: number; marketGBP: number }> | null }) => {
-  if (!comps || Object.keys(comps).length === 0) return null;
-  return (
-    <div className="col-span-1 bg-panel border border-border p-5 rounded-xl">
-      <h3 className="text-gray-500 font-mono text-xs uppercase tracking-widest mb-3 flex items-center gap-2">
-        <I.TrendingUp s={14} c="text-dexGreen" /> Recent Comps
-      </h3>
-      <div className="space-y-2">
-        {Object.entries(comps).map(([cond, prices]) => (
-          <div key={cond} className="flex justify-between items-center text-sm font-mono">
-            <span className="text-gray-400 text-xs">{cond}</span>
-            <div className="flex gap-4">
-              <span className="text-gray-500 text-xs">Low: <span className="text-white">&pound;{prices.lowGBP.toFixed(0)}</span></span>
-              <span className="text-gray-500 text-xs">Mkt: <span className="text-dexGreen">&pound;{prices.marketGBP.toFixed(0)}</span></span>
-            </div>
-          </div>
-        ))}
+    <div className="col-span-3 bg-panel border border-border/50 rounded-xl flex overflow-hidden group">
+      <div className="w-10 bg-dexBlue/10 flex items-start justify-center pt-4 border-r border-dexBlue/10 shrink-0">
+        <I.Microscope s={18} c="text-dexBlue" />
+      </div>
+      <div className="flex-1 p-4">
+        <div className="text-[10px] uppercase font-bold text-dexBlue tracking-wider mb-2 flex items-center gap-2">
+          Silph Scope <span className="relative flex h-1.5 w-1.5"><span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-dexBlue opacity-75" /><span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-dexBlue" /></span>
+        </div>
+        <div className="font-mono text-xs text-gray-300 leading-relaxed bg-black/20 p-3 rounded border border-white/5 shadow-inner">
+          <span className="text-dexBlue mr-2">root@silph:~$</span>{reason}<span className="inline-block w-2 h-4 bg-dexBlue/50 ml-1 animate-pulse" />
+        </div>
       </div>
     </div>
   );
 };
 
-// Market range card
+// Recent Comps — sales-style list
+const RecentComps = ({ comps }: { comps: Record<string, { lowGBP: number; marketGBP: number }> | null }) => {
+  return (
+    <div className="col-span-1 bg-panel border border-border/50 rounded-xl p-4 h-full">
+      <div className="flex items-center justify-between mb-3">
+        <span className="text-[10px] uppercase font-bold text-gray-500 tracking-wider">Recent Comps</span>
+        <I.Activity s={12} c="text-gray-600" />
+      </div>
+      {comps && Object.keys(comps).length > 0 ? (
+        <div className="space-y-2">
+          {Object.entries(comps).map(([cond, prices]) => (
+            <div key={cond} className="flex justify-between items-center">
+              <div>
+                <span className="text-gray-500 text-xs font-mono">{cond}</span>
+                <span className="text-gray-400 text-xs ml-2">Market</span>
+              </div>
+              <span className="text-white font-bold text-xs font-mono">&pound;{prices.marketGBP.toFixed(0)}</span>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="text-[10px] text-gray-600 text-center py-2">No recent data</div>
+      )}
+    </div>
+  );
+};
+
+// Market range card with expand icon
 const MarketRange = ({ costGBP, marketGBP }: { costGBP: number; marketGBP: number }) => {
   const low = marketGBP * 0.6;
   const mn = Math.min(low, costGBP) * 0.9;
@@ -139,9 +149,10 @@ const MarketRange = ({ costGBP, marketGBP }: { costGBP: number; marketGBP: numbe
   const getPos = (val: number) => Math.max(0, Math.min(100, ((val - mn) / range) * 100));
 
   return (
-    <div className="col-span-1 bg-panel border border-border p-5 rounded-xl relative overflow-hidden">
-      <h3 className="text-gray-500 font-mono text-xs uppercase tracking-widest mb-4">Market Range</h3>
-      <div className="flex flex-col gap-6 justify-center">
+    <div className="col-span-1 bg-panel border border-border p-5 rounded-xl cursor-pointer hover:border-gray-600 transition-colors relative overflow-hidden group">
+      <h3 className="text-gray-500 font-mono text-xs uppercase tracking-widest mb-4 absolute top-5 left-5">Market Range</h3>
+      <div className="absolute top-3 right-3 text-gray-600 opacity-50 group-hover:opacity-100"><I.Maximize s={12} /></div>
+      <div className="mt-6 h-32 flex flex-col gap-6 justify-center">
         <div className="w-full h-8 relative mt-2 select-none">
           <div className="absolute top-3 left-0 right-0 h-1.5 bg-border rounded-full overflow-hidden">
             <div className="absolute top-0 bottom-0 bg-gray-700" style={{ left: `${getPos(low)}%`, width: `${getPos(marketGBP) - getPos(low)}%` }} />
@@ -159,13 +170,54 @@ const MarketRange = ({ costGBP, marketGBP }: { costGBP: number; marketGBP: numbe
         <div className="flex justify-between items-baseline border-t border-border pt-2">
           <div className="flex items-center gap-2">
             <div className="w-2 h-2 rounded-full bg-dexGreen" />
-            <span className="text-[9px] text-gray-400 font-mono uppercase">Your Cost</span>
+            <span className="text-[9px] text-gray-400 font-mono uppercase">Ref Price</span>
           </div>
           <div className="text-right">
-            <span className="text-[10px] text-gray-500 font-mono uppercase mr-2">Market</span>
+            <span className="text-[10px] text-gray-500 font-mono uppercase mr-2">Market NM</span>
             <span className="text-xl font-mono font-bold text-white tabular-nums">&pound;{marketGBP.toFixed(0)}</span>
           </div>
         </div>
+      </div>
+    </div>
+  );
+};
+
+// Grading arbitrage card
+const GradingCard = ({ detail }: { detail: DealDetail }) => {
+  const costGBP = detail.total_cost_gbp;
+  const gradeCost = 15;
+  const totalInvestment = costGBP + gradeCost;
+  const mktGBP = detail.market_price_gbp ?? 0;
+  const grades = [
+    { grade: '9', multiplier: 1.3 },
+    { grade: '10', multiplier: 3.5 },
+  ];
+
+  return (
+    <div className="col-span-1 bg-panel border border-dexGreen/30 rounded-xl p-4 shadow-[0_0_15px_rgba(16,185,129,0.05)] relative overflow-hidden">
+      <div className="absolute top-0 right-0 p-2 opacity-10"><I.TrendingUp s={48} /></div>
+      <div className="flex items-center gap-1.5 mb-3">
+        <I.Zap s={12} c="text-dexGreen" />
+        <span className="text-[10px] uppercase font-bold text-dexGreen tracking-wider">Grading Arbitrage</span>
+      </div>
+      <div className="grid grid-cols-2 gap-4">
+        {grades.map(g => {
+          const estVal = Math.round(mktGBP * g.multiplier);
+          const profit = estVal - totalInvestment;
+          const roi = totalInvestment > 0 ? ((profit / totalInvestment) * 100) : 0;
+          return (
+            <div key={g.grade} className="bg-charcoal/80 rounded border border-border p-2 backdrop-blur-sm">
+              <div className="flex justify-between items-end mb-1">
+                <span className="text-xs font-bold text-white">PSA {g.grade}</span>
+                <span className="text-[10px] text-gray-500">Est. &pound;{estVal}</span>
+              </div>
+              <div className={`text-lg font-mono font-bold tabular-nums ${profit >= 0 ? 'text-dexGreen' : 'text-dexRed'}`}>
+                {profit >= 0 ? '+' : ''}&pound;{profit}
+              </div>
+              <div className="text-[9px] font-mono text-gray-400 text-right">{roi.toFixed(0)}% ROI</div>
+            </div>
+          );
+        })}
       </div>
     </div>
   );
@@ -543,13 +595,11 @@ export default function App() {
 
                   {/* Cards Grid */}
                   <div className="p-8 grid grid-cols-3 gap-6">
-                    {sd.match_signals?.confidence && (
-                      <SilphScope reason={
-                        (sd.profit_percent ?? 0) > 30
-                          ? `High-value arbitrage. ${(sd.profit_percent ?? 0).toFixed(0)}% ROI with ${sd.liquidity_grade ?? 'unknown'} liquidity.${sd.trend_7d != null && sd.trend_7d > 0 ? ` Upward trend (${sd.trend_7d.toFixed(1)}% / 7d).` : ''} Safe acquire.`
-                          : `Moderate opportunity at ${(sd.profit_percent ?? 0).toFixed(0)}% ROI. ${sd.condition ?? 'Unknown'} condition. Verify before purchase.`
-                      } />
-                    )}
+                    <SilphScope reason={
+                      (sd.profit_percent ?? 0) > 30
+                        ? `High-value arbitrage. ${(sd.profit_percent ?? 0).toFixed(0)}% ROI with ${sd.liquidity_grade ?? 'unknown'} liquidity.${sd.trend_7d != null && sd.trend_7d > 0 ? ` Upward trend (${sd.trend_7d.toFixed(1)}% / 7d).` : ''} Safe acquire.`
+                        : `Moderate opportunity at ${(sd.profit_percent ?? 0).toFixed(0)}% ROI. ${sd.condition ?? 'Unknown'} condition. Verify before purchase.`
+                    } />
 
                     {/* Net Profit */}
                     <div className="col-span-1 bg-panel border border-border p-5 rounded-xl chamfer-br relative overflow-hidden group">
@@ -567,7 +617,11 @@ export default function App() {
                     </div>
 
                     <RecentComps comps={sd.condition_comps} />
-                    <MarketRange costGBP={sd.total_cost_gbp} marketGBP={sd.market_price_gbp ?? 0} />
+                    {sd.is_graded ? (
+                      <GradingCard detail={sd} />
+                    ) : (
+                      <MarketRange costGBP={sd.total_cost_gbp} marketGBP={sd.market_price_gbp ?? 0} />
+                    )}
 
                     {/* Seller Info */}
                     <div className="col-span-3 bg-panel border border-border p-4 rounded-xl flex items-center justify-between">
