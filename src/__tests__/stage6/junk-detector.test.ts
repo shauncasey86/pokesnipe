@@ -100,6 +100,22 @@ describe('detectJunk', () => {
     it('detects thai cards by word', () => {
       expect(detectJunk('pikachu vmax thai pokemon card')).toEqual({ isJunk: true, reason: 'non_english' });
     });
+
+    it('detects jpn abbreviation', () => {
+      expect(detectJunk('charizard ex 006/197 jpn')).toEqual({ isJunk: true, reason: 'non_english' });
+    });
+
+    it('detects kor abbreviation', () => {
+      expect(detectJunk('pikachu vmax 044/185 kor')).toEqual({ isJunk: true, reason: 'non_english' });
+    });
+
+    it('detects french cards by word', () => {
+      expect(detectJunk('dracaufeu ex french pokemon card')).toEqual({ isJunk: true, reason: 'non_english' });
+    });
+
+    it('detects german cards by word', () => {
+      expect(detectJunk('glurak ex german pokemon card')).toEqual({ isJunk: true, reason: 'non_english' });
+    });
   });
 
   describe('real cards pass through', () => {

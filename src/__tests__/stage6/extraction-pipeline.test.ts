@@ -90,4 +90,56 @@ describe('extractSignals (full pipeline)', () => {
     expect(result.rejected).toBe(true);
     expect(result.reason).toBe('non_card');
   });
+
+  it('rejects listings with non-English structured language data', () => {
+    const result = extractSignals({
+      itemId: '4',
+      title: 'Charizard ex 006/197 LP',
+      localizedAspects: [
+        { name: 'Card Name', value: 'Charizard ex' },
+        { name: 'Language', value: 'Japanese' },
+      ],
+    });
+    expect(result.rejected).toBe(true);
+    expect(result.reason).toBe('non_english');
+  });
+
+  it('allows listings with English structured language data', () => {
+    const result = extractSignals({
+      itemId: '5',
+      title: 'Charizard ex 006/197 LP',
+      localizedAspects: [
+        { name: 'Card Name', value: 'Charizard ex' },
+        { name: 'Language', value: 'English' },
+      ],
+    });
+    expect(result.rejected).toBe(false);
+    expect(result.listing).toBeDefined();
+    expect(result.listing!.language).toBe('English');
+  });
+
+  it('allows listings without language structured data', () => {
+    const result = extractSignals({
+      itemId: '6',
+      title: 'Charizard ex 006/197 LP',
+      localizedAspects: [
+        { name: 'Card Name', value: 'Charizard ex' },
+      ],
+    });
+    expect(result.rejected).toBe(false);
+    expect(result.listing).toBeDefined();
+    expect(result.listing!.language).toBeNull();
+  });
+
+  it('rejects Korean structured language', () => {
+    const result = extractSignals({
+      itemId: '7',
+      title: 'Pikachu VMAX 044/185',
+      localizedAspects: [
+        { name: 'Language', value: 'Korean' },
+      ],
+    });
+    expect(result.rejected).toBe(true);
+    expect(result.reason).toBe('non_english');
+  });
 });
