@@ -98,7 +98,8 @@ pokesnipe-v2/
 │       ├── pages/            # Route pages
 │       │   ├── Dashboard.tsx
 │       │   ├── Expansions.tsx
-│       │   ├── Cards.tsx
+│       │   ├── ExpansionDetail.tsx
+│       │   ├── CardDetail.tsx
 │       │   ├── Inventory.tsx
 │       │   ├── ApiTools.tsx
 │       │   ├── Arbitrage.tsx
@@ -162,9 +163,9 @@ PORT=3000
 
 ---
 
-### Stage 1 — Empty Frontend Shell
+### Stage 1 — Feature-Complete UI Mockup
 
-**Goal**: Structural foundation only. Layout, routing, navigation, empty pages. Zero backend logic.
+**Goal**: Production-quality UI mockup with hardcoded data. Every page contains all functional elements the final app will have, using static fixture data. This mockup will be reviewed and approved before any backend work begins. Art direction (layout, styling, colors, typography) is determined during implementation — this spec defines features and elements only.
 
 **What Gets Built**:
 
@@ -178,60 +179,259 @@ PORT=3000
    - `.env.example`
 
 2. **Layout System**
-   - App shell: fixed sidebar (left) + main content area (right)
-   - Sidebar navigation with icons and labels
-   - Responsive: sidebar collapses to icons on narrow viewports
-   - Header bar: page title + user avatar/logout
-   - Theme: dark mode default (card trading apps are dark-themed)
+   - App shell with navigation and content area
+   - Navigation with links to all pages, active state indicator
+   - Responsive navigation for different viewport sizes
+   - Page header area with title and action buttons
+   - No API calls, no database — all data is hardcoded fixtures
 
 3. **Routing** (React Router 7)
-   - `/` → Dashboard
-   - `/expansions` → Expansions
-   - `/cards` → Cards
+   - `/login` → Login
+   - `/` → Dashboard (deal feed)
+   - `/expansions` → Expansions browser
+   - `/expansions/:id` → Expansion detail (cards within expansion)
+   - `/expansions/:id/cards/:cardId` → Card detail
    - `/inventory` → Inventory
    - `/api-tools` → API Tools
-   - `/arbitrage` → Arbitrage
+   - `/arbitrage` → Arbitrage metrics
    - `/settings` → Settings
-   - `/login` → Login (unauthenticated)
 
-4. **Empty Pages** (placeholder content only)
-   Each page renders:
-   - Page title
-   - Brief description of what it will do
-   - "Coming in Stage N" badge
-   - No API calls, no data fetching, no business logic
+4. **Login Page**
+   - Username + password form
+   - App logo/title
+   - "Sign In" button
+   - Submitting logs in with hardcoded credentials (no backend)
+   - Auth context provider: stub that validates against hardcoded credentials
+   - Protected route wrapper: redirects to /login when not authenticated
 
-5. **Shared Components** (structural only)
-   - `Sidebar` — nav links with active state
-   - `PageHeader` — title + optional action buttons
-   - `EmptyState` — placeholder for pages with no data yet
-   - `Card` (UI card wrapper) — reusable content container
-   - `Button` — primary/secondary/ghost variants
-   - `Input` — text input with label
-   - `Badge` — status/tier badges
+5. **Dashboard Page (Deal Feed)**
+   - Deal list/feed showing all active deals (newest first)
+   - Each deal entry displays:
+     - Card name + card image
+     - eBay listing price (GBP)
+     - Market price (GBP)
+     - Profit % and profit GBP
+     - Tier badge (GRAIL / HIT / FLIP / SLEEP)
+     - Condition (NM / LP / MP / HP / DM)
+     - Graded indicator (company + grade if graded, e.g. "PSA 10")
+     - Deal score (composite 0-1)
+     - Query source tag (graded / nm_targeted / general)
+     - Time since listed
+     - Seller name
+   - Filter controls:
+     - Tier filter (GRAIL / HIT / FLIP / SLEEP)
+     - Condition filter (NM / LP / MP / HP / DM)
+     - Liquidity grade filter (High / Medium / Low / Illiquid)
+     - Minimum confidence slider
+     - Graded toggle (show graded only)
+     - Query source filter (graded / nm_targeted / general)
+     - Time window filter (1h / 6h / 24h / 7d / all)
+   - Deal detail view (on selection):
+     - Full profit breakdown: listing price, shipping, buyer protection fee, total cost, market price, profit GBP, profit %
+     - Match confidence per-signal breakdown: name score, number score, denominator score, expansion score, variant score, extraction quality score (each with weight and value)
+     - Liquidity assessment: all 6 signal scores (trend activity, price completeness, price spread, eBay supply, quantity sold, sales velocity) + composite grade
+     - Condition source explanation (which priority level detected condition)
+     - Card image (large)
+     - eBay link button
+   - System status area:
+     - Scanner status indicator (running / paused)
+     - Deals today count
+     - 7-day accuracy %
+     - eBay API budget (calls today / 5,000) with progress indicator
+     - Scrydex credit budget (credits used / 50,000) with progress indicator
+   - Live indicator (mocked: shows "Live" status)
+   - Manual eBay URL lookup: input field + "Evaluate" button + result display area
+   - **Hardcoded fixture data**: 8-10 sample deals covering all 4 tiers, NM/LP/MP conditions, graded and raw cards, all 3 query sources
 
-6. **Auth Placeholder**
-   - Login page with username + password form (no backend wiring)
-   - Protected route wrapper (redirects to /login — hardcoded, no real auth)
-   - Auth context provider (stub: always returns authenticated in dev)
+6. **Expansions Page**
+   - Expansion list grouped by series (e.g. Scarlet & Violet, Sword & Shield, Sun & Moon, XY, Black & White)
+   - Each expansion entry displays:
+     - Logo/symbol placeholder
+     - Expansion name
+     - Set code
+     - Card count
+     - Release date
+   - Search bar: filter expansions by name (client-side filtering)
+   - Series grouping: collapsible series sections
+   - Click expansion → navigates to Expansion Detail page
+   - **Hardcoded fixture data**: 15-20 sample expansions across 4-5 series
+
+7. **Expansion Detail Page** (`/expansions/:id`)
+   - Expansion header:
+     - Expansion name, series, code
+     - Release date
+     - Total card count
+     - Logo/symbol placeholder
+   - Card grid within expansion:
+     - Card image thumbnail placeholder
+     - Card name
+     - Card number
+     - Rarity
+     - Market price (USD)
+   - Sort controls: by number, name, price (ascending/descending)
+   - Filter controls: supertype (Pokemon / Trainer / Energy), rarity dropdown
+   - Search bar: filter cards within this expansion by name
+   - Click card → navigates to Card Detail page
+   - Back navigation to Expansions list
+   - **Hardcoded fixture data**: 20-30 sample cards with realistic Pokemon names, numbers, rarities, and prices
+
+8. **Card Detail Page** (`/expansions/:id/cards/:cardId`)
+   - Card header:
+     - Card image placeholder (large)
+     - Card name
+     - Card number + printed number
+     - Expansion name (breadcrumb link back to expansion)
+     - Rarity
+     - Artist
+   - Card metadata section:
+     - Supertype and subtypes
+     - Types (e.g. Fire, Water, Grass)
+     - HP
+     - Attacks (name, cost, damage, text)
+     - Weaknesses and resistances
+     - Retreat cost
+     - Regulation mark
+   - Tabbed content area:
+     - **Prices tab**: Variant list (e.g. holofoil, reverse holo, normal), per-condition prices table with columns: Condition (NM/LP/MP/HP/DM), Low price, Market price, Currency
+     - **Graded tab**: Price table by grading company (PSA/CGC/BGS/SGC) and grade (10, 9.5, 9, 8.5, 8, 7, 6, 5), with columns: Grade, Low, Mid, High, Market
+     - **Trends tab**: Price change table across time periods: 1d, 7d, 14d, 30d, 90d, 180d — showing price change and percent change for each condition
+     - **eBay Listings tab**: Table of linked eBay listings with columns: Title, Price, Condition, Seller, Date listed
+     - **Raw Data tab**: Collapsible JSON viewer showing sample Scrydex response + sample eBay response (syntax highlighted)
+   - **Hardcoded fixture data**: 2-3 variants with full pricing across all conditions and graded prices
+
+9. **Inventory Page**
+   - Stats summary area (4 metric cards):
+     - Total inventory value (sum of market values for owned items)
+     - Cost basis (sum of all purchase prices)
+     - Realized profit (sum of net_profit for sold items)
+     - Unrealized profit (sum of market_value - purchase_price for owned items)
+   - Inventory table with columns:
+     - Card name
+     - Expansion
+     - Variant
+     - Condition / Grade (e.g. "NM" or "PSA 10")
+     - Status badge (owned / listed / sold)
+     - Purchase price (GBP)
+     - Listing price (GBP)
+     - Sale price (GBP)
+     - Net profit (GBP, colored: green for positive, red for negative)
+   - Filter controls:
+     - Status (owned / listed / sold)
+     - Expansion dropdown
+     - Graded vs raw toggle
+     - Grading company (PSA / CGC / BGS / SGC)
+     - Date range picker
+   - Sort controls: by date, price, profit, name
+   - "Add Item" button → opens form:
+     - Card search input (typeahead)
+     - Condition selector OR grading company + grade inputs
+     - Purchase price, purchase date, source (manual / eBay URL)
+     - Notes field
+   - Item detail/edit panel (on row click):
+     - All fields editable
+     - Status transition buttons: owned → listed → sold
+     - Fee and profit auto-calculation display
+   - Breakdown views:
+     - By expansion
+     - By graded vs raw
+     - By grading company
+   - **Hardcoded fixture data**: 10-15 sample inventory items across owned/listed/sold states, mix of raw and graded (PSA, CGC, BGS)
+
+10. **API Tools Page**
+    - Tab bar: Scrydex | eBay
+    - **Scrydex tab**:
+      - Query builder:
+        - Endpoint dropdown (Expansions / Cards / Single Card / Listings / Usage)
+        - Parameter inputs (expansion ID, card ID, page, page_size, include prices toggle)
+        - "Execute" button
+      - Response area:
+        - Raw JSON view (syntax highlighted, collapsible, copyable)
+        - Parsed view: card metadata, pricing data, expansion metadata displayed in structured format
+      - API usage panel:
+        - Credits consumed this period
+        - Period start/end dates
+        - Remaining estimate
+        - Progress bar
+      - Sync controls:
+        - "Full Sync" button + "Expansion Sync" button (with expansion ID input)
+        - Sync log table: job type, status, duration, items processed, errors, timestamp
+      - **Hardcoded fixture data**: sample JSON response for each endpoint type, sample sync log entries
+    - **eBay tab**:
+      - Strategy selector: Graded / NM-Targeted / General / Custom query
+      - Custom query input (when Custom selected)
+      - "Execute Search" button
+      - Results area: listing entries showing title, price, condition, seller, image placeholder, card match info (matched card name, confidence %)
+      - Enrichment panel:
+        - Item ID input + "Enrich" button
+        - Condition descriptors display (Professional Grader, Grade, Cert Number)
+        - Localized aspects display (Card Name, Set, Card Number, Card Condition)
+        - Description excerpt
+      - Budget display: calls today / 5,000 limit with progress bar
+      - Listing history: recent searches table (query strategy, result count, timestamp)
+      - **Hardcoded fixture data**: sample search results (5-10 listings), sample enrichment response with condition descriptors
+
+11. **Arbitrage Page**
+    - Pipeline funnel visualization:
+      - Stage counts: Listings Found → After Dedup → After Junk Filter → After Matching → After Enrichment → Deals Created
+      - Broken down by query source (graded / nm_targeted / general)
+    - Condition distribution: deal count by condition (NM / LP / MP / HP / DM)
+    - Graded vs Raw: share of graded deals vs raw deals
+    - Dedup effectiveness: breakdown of skips by reason (exact item_id / content fingerprint)
+    - Score distribution: distribution of deal_scores across ranges (0-0.2, 0.2-0.4, 0.4-0.6, 0.6-0.8, 0.8-1.0)
+    - Scanner controls:
+      - Pause/resume toggle
+      - "Manual Scan" button
+      - Scanner status indicator (running / paused / error)
+      - Current cycle number
+    - Accuracy panel:
+      - 7-day rolling accuracy %
+      - Breakdown by review reason (wrong_card, wrong_set, wrong_variant, wrong_condition, wrong_price, junk_listing)
+      - Total reviewed count
+    - **Hardcoded fixture data**: sample metrics for all visualizations
+
+12. **Settings Page**
+    - Notification settings:
+      - Telegram bot token field
+      - Telegram chat ID field
+      - Tier threshold selector (GRAIL only / GRAIL+HIT / All tiers)
+      - "Test Connection" button
+      - Connection status indicator
+    - Scanner settings:
+      - Scan interval display (5 minutes)
+      - Enrichment budget slider
+      - Query strategy toggles (graded / NM-targeted / general — enable/disable each)
+    - Account:
+      - Change password form (current password, new password, confirm)
+    - System info:
+      - App version
+      - Uptime
+      - Database status
+      - Redis status
+      - Last sync timestamp
+    - **Hardcoded fixture data**: sample values in all fields
 
 **What Does NOT Get Built**:
 - No database connection
 - No API routes (except static file serving)
 - No Scrydex/eBay integration
-- No business logic of any kind
-- No real authentication
+- No real authentication backend
+- No business logic — all data is hardcoded fixtures
 
-**Deployable Artifact**: Fastify serves the React SPA. All routes render empty pages. Sidebar navigation works. Dark theme applied.
+**Deployable Artifact**: Fastify serves the React SPA. All routes render fully mocked pages with hardcoded data. All interactive elements (tabs, filters, sort, navigation) work client-side.
 
 **Acceptance Criteria**:
 - [ ] `npm run dev` starts Vite dev server with HMR
 - [ ] `npm run build` produces production client bundle + compiled server
 - [ ] `npm start` runs Fastify, serves SPA, all routes accessible
-- [ ] All 7 pages render with correct titles
-- [ ] Sidebar navigation highlights active page
+- [ ] Every page renders with full mockup UI and all specified elements
+- [ ] All hardcoded data is realistic and representative of production data
+- [ ] Navigation between all pages works (nav links, breadcrumbs, click-through from expansion → cards → card detail)
+- [ ] All interactive elements work (tabs, filters, sort controls, form inputs, modals/slide-overs)
+- [ ] Responsive layout works at common viewport sizes
+- [ ] Login flow works with hardcoded credentials
 - [ ] Docker build succeeds
 - [ ] Deploys to Railway successfully
+- [ ] **User reviews and approves all page layouts before Stage 2 begins**
 
 ---
 
@@ -302,14 +502,13 @@ PORT=3000
    - `GET /api/scrydex/sync/status` — Get latest sync_log entries
    - All routes require auth
 
-7. **Frontend: API Tools Page** (wired)
-   - **Scrydex Tab**:
-     - Query builder: select endpoint (expansions/cards/card), enter parameters
-     - "Execute" button → calls backend → displays raw JSON response
-     - Parsed view: card metadata, pricing data, expansion metadata
-     - API usage display: credits consumed, period, remaining estimate
-     - Sync controls: trigger full sync, trigger expansion sync, view sync log
-   - Raw JSON viewer: collapsible, syntax-highlighted, copyable
+7. **Wire API Tools Page — Scrydex Tab** (mockup exists from Stage 1)
+   - Replace hardcoded Scrydex fixture data with real API calls
+   - Query builder: execute button calls `POST /api/scrydex/query/*` endpoints
+   - Response area: display real raw JSON + parsed view from API response
+   - API usage: fetch from `GET /api/scrydex/usage` endpoint
+   - Sync controls: wire to `POST /api/scrydex/sync/*` endpoints, poll sync_log for progress
+   - Add loading states, error handling, and empty states to existing UI components
 
 **Scrydex API Integration Details** (from repo docs):
 - Base URL: `https://api.scrydex.com`
@@ -410,13 +609,14 @@ PORT=3000
    - `POST /api/ebay/search/nm` — Execute NM-targeted search strategy
    - `POST /api/ebay/search/general` — Execute general search strategy
 
-9. **Frontend: API Tools Page — eBay Tab**
-   - Search builder: select strategy (graded/NM/general) or custom query
-   - Execute button → calls backend → displays raw JSON
-   - Parsed listing view: title, price, condition, seller, images, match info
-   - Item enrichment: paste item ID → fetch getItem → display descriptors, aspects, description
-   - Budget display: calls today / 5,000 limit
-   - Listing history: recent searches with result counts
+9. **Wire API Tools Page — eBay Tab** (mockup exists from Stage 1)
+   - Replace hardcoded eBay fixture data with real API calls
+   - Strategy selector + execute: wire to `POST /api/ebay/search/*` endpoints
+   - Results: display real listings from API response
+   - Enrichment panel: wire to `POST /api/ebay/item/:id` endpoint
+   - Budget display: fetch from `GET /api/ebay/budget` endpoint
+   - Listing history: fetch from `GET /api/ebay/listings` endpoint
+   - Add loading states, error handling, and empty states to existing UI components
 
 **What Does NOT Get Built**:
 - No automated scanning (scanner loop)
@@ -450,41 +650,30 @@ PORT=3000
    - `GET /api/expansions` — List all expansions (grouped by series, sorted by release date)
    - `GET /api/expansions/:id` — Expansion detail + card count + price stats
    - `GET /api/expansions/:id/cards` — Cards in expansion (paginated, sortable, filterable)
-   - `GET /api/cards` — Search cards (full-text search with pg_trgm)
+   - `GET /api/cards/search` — Search cards across all expansions (full-text search with pg_trgm)
    - `GET /api/cards/:id` — Card detail with all variants, prices, trends, linked eBay listings
    - `GET /api/cards/:id/raw` — Raw Scrydex payload for card
    - `GET /api/cards/:id/ebay` — Linked eBay listings for card
 
-2. **Frontend: Expansions Page**
-   - Expansion list grouped by series
-   - Search/filter by name, series, release year
-   - Grid view with expansion logos + symbol
-   - Each card shows: name, code, card count, release date
-   - Click → Expansion detail page
+2. **Wire Expansions Page** (mockup exists from Stage 1)
+   - Replace hardcoded expansion fixtures with `GET /api/expansions`
+   - Wire search bar to client-side filter or server-side search
+   - Add loading states, error handling, empty states
 
-3. **Frontend: Expansion Detail Page**
-   - Expansion metadata header (name, series, code, release date, card count, logo)
-   - Card grid: thumbnail, name, number, rarity, market price
-   - Sort by: number, name, price (asc/desc)
-   - Filter by: supertype (Pokemon/Trainer/Energy), rarity
-   - Click card → Card detail page
+3. **Wire Expansion Detail Page** (mockup exists from Stage 1)
+   - Replace hardcoded card fixtures with `GET /api/expansions/:id/cards`
+   - Wire sort and filter controls to API query params
+   - Wire card search within expansion to `GET /api/cards/search` with expansion filter
+   - Add loading states, pagination
 
-4. **Frontend: Card Detail Page**
-   - **Header**: Card image (large), name, number, expansion, rarity, artist
-   - **Variants tab**: List variants with per-condition prices (NM/LP/MP/HP/DM)
-   - **Graded prices tab**: PSA/CGC/BGS/SGC prices by grade
-   - **Trends tab**: Price change data across 1d/7d/14d/30d/90d/180d (table, not chart yet)
-   - **eBay listings tab**: Linked eBay listings with price, condition, seller, date
-   - **Raw data tab**: Collapsible raw Scrydex JSON + raw eBay JSON
-   - All Scrydex fields accessible (subtypes, types, HP, attacks, weaknesses, etc.)
+4. **Wire Card Detail Page** (mockup exists from Stage 1)
+   - Replace hardcoded card data with `GET /api/cards/:id`
+   - Wire pricing/graded/trends tabs to real variant data
+   - Wire eBay listings tab to `GET /api/cards/:id/ebay`
+   - Wire raw data tab to `GET /api/cards/:id/raw`
+   - Add loading states
 
-5. **Frontend: Cards Search Page**
-   - Full-text search input (fuzzy matching)
-   - Results grid: card thumbnail, name, number, expansion, market price
-   - Filters: expansion, supertype, rarity
-   - Pagination
-
-6. **Database Additions**
+5. **Database Additions**
    - Full-text search index: `CREATE INDEX ... USING gin (name gin_trgm_ops)` on cards table
    - Views or materialized views for expansion stats (card count, avg price, etc.)
 
@@ -500,15 +689,16 @@ PORT=3000
 - No Telegram alerts
 
 **Acceptance Criteria**:
-- [ ] Expansion list loads with all ~350 English expansions grouped by series
+- [ ] Expansion list loads with all ~350 English expansions grouped by series (real data replaces hardcoded fixtures)
 - [ ] Expansion detail shows all cards with correct pricing
 - [ ] Card detail shows all variants, prices, graded prices, trends
 - [ ] eBay listings tab shows linked listings (from Stage 3 data)
 - [ ] Raw data tabs show full Scrydex + eBay JSON payloads
-- [ ] Card search returns fuzzy-matched results
+- [ ] Card search within expansions returns fuzzy-matched results
 - [ ] Sorting and filtering work on all list views
 - [ ] Hot refresh runs daily and updates recent sets
 - [ ] All pages load within 2 seconds
+- [ ] Loading states, error states, and empty states display correctly
 
 ---
 
@@ -629,20 +819,20 @@ PORT=3000
     - `POST /api/arbitrage/scanner/pause` — Pause/resume scanner
     - `GET /api/arbitrage/metrics` — Pipeline funnel metrics
 
-12. **Frontend: Dashboard Page** (wired)
-    - Deal feed: newest first, live SSE updates
-    - Deal cards: title, price, profit %, tier badge, condition, graded badge, deal_score, query_source
-    - Filter bar: tier, condition, liquidity, confidence, graded toggle, query_source, time window
-    - Deal detail panel: full profit breakdown, match confidence per-signal, liquidity assessment, condition explanation
-    - System status bar: scanner status, deals today, 7-day accuracy, API budgets
+12. **Wire Dashboard Page** (mockup exists from Stage 1)
+    - Replace hardcoded deal fixtures with `GET /api/deals` + SSE stream (`GET /api/deals/stream`)
+    - Wire filter controls to API query parameters
+    - Wire deal detail view to `GET /api/deals/:id`
+    - Wire manual lookup to `POST /api/lookup`
+    - Wire system status to `GET /api/arbitrage/status`
+    - Connect SSE for real-time deal updates
+    - Add loading states, error handling, empty states
 
-13. **Frontend: Arbitrage Page** (wired)
-    - Pipeline metrics: funnel visualization (listings → deduped → filtered → matched → enriched → deals)
-    - Condition distribution: breakdown of deal conditions
-    - Graded vs raw: share of graded deals
-    - Dedup effectiveness: fingerprint vs item_id breakdown
-    - Score distribution: histogram of deal_scores
-    - Scanner controls: pause/resume, trigger manual scan
+13. **Wire Arbitrage Page** (mockup exists from Stage 1)
+    - Replace hardcoded metrics fixtures with `GET /api/arbitrage/metrics`
+    - Wire scanner controls to `POST /api/arbitrage/scanner/pause`
+    - Wire accuracy panel to real accuracy data from status endpoint
+    - Add loading states, auto-refresh interval
 
 14. **BullMQ Jobs** (full set)
     - `ebay-scan`: Every 5min — scanner cycle
@@ -714,28 +904,24 @@ PORT=3000
    - `GET /api/inventory/stats` — Aggregated statistics
    - `GET /api/inventory/export` — CSV export
 
-4. **Frontend: Inventory Page** (wired)
-   - **Inventory list**: table view with columns:
-     - Card name, expansion, variant, condition/grade
-     - Status badge (owned/listed/sold)
-     - Purchase price, listing price, sale price
-     - Net profit (colored: green positive, red negative)
-   - **Filters**: status, expansion, graded vs raw, grading company, date range
-   - **Sort**: by date, price, profit, name
-   - **Add item form**:
-     - Card search (typeahead linked to cards table)
-     - Condition OR grading company + grade
+4. **Wire Inventory Page** (mockup exists from Stage 1)
+   - Replace hardcoded fixture data with live API calls to inventory endpoints
+   - Add loading states and error handling for all data fetching
+   - Wire **inventory table** to `GET /api/inventory` with server-side pagination, filtering, sorting
+   - Wire **filter bar** (status, expansion, graded/raw, grading company, date range) to query parameters
+   - Wire **sort controls** (date, price, profit, name) to query parameters
+   - Wire **"Add Item" form** to `POST /api/inventory`:
+     - Card search typeahead linked to cards table via API
+     - Condition OR grading company + grade fields
      - Purchase price, date, source
-   - **Item detail/edit panel**:
-     - All fields editable
-     - Status transitions: owned → listed → sold
+   - Wire **item detail/edit panel** to `PUT /api/inventory/:id`:
+     - All fields editable with save-to-server
+     - Status transitions (owned → listed → sold) via API
      - Auto-calculate fees and profit on status change to sold
-   - **Stats dashboard** (top of page):
-     - Total inventory value
-     - Cost basis
-     - Realized profit
-     - Unrealized profit (based on current Scrydex market prices)
+   - Wire **stats bar** to `GET /api/inventory/stats`:
+     - Total inventory value, cost basis, realized profit, unrealized profit (based on current Scrydex market prices)
      - Breakdown charts: by expansion, graded vs raw, by grading company
+   - Wire **CSV export** button to `GET /api/inventory/export`
 
 5. **Deal → Inventory Integration**
    - "Add to Inventory" button on deal detail panel
