@@ -338,7 +338,7 @@ PORT=3000
    - **Hardcoded fixture data**: 10-15 sample inventory items across owned/listed/sold states, mix of raw and graded (PSA, CGC, BGS)
 
 10. **API Tools Page**
-    - Tab bar: Scrydex | eBay
+    - Tab bar: Scrydex | eBay | Matcher
     - **Scrydex tab**:
       - Query builder:
         - Endpoint dropdown (Expansions / Cards / Single Card / Listings / Usage)
@@ -369,6 +369,35 @@ PORT=3000
       - Budget display: calls today / 5,000 limit with progress bar
       - Listing history: recent searches table (query strategy, result count, timestamp)
       - **Hardcoded fixture data**: sample search results (5-10 listings), sample enrichment response with condition descriptors
+    - **Matcher tab**:
+      - JSON input area: large textarea for pasting raw eBay API JSON (single item)
+      - "Load Example" buttons: one for search result format, one for enriched item format (pre-fills textarea with sample JSON)
+      - "Run Match" button
+      - Extraction results panel:
+        - Extracted card number (number / denominator)
+        - Extracted card name
+        - Extracted set name
+        - Detected variant
+        - Cleaned title
+        - Signal sources table (which field each signal came from: title / structured / descriptor)
+        - Junk detection result (pass / rejected with reason)
+      - Match results panel:
+        - Matched card name + number + expansion
+        - Card image
+        - Matched variant name
+        - Match strategy used (number+set / number+denominator / fuzzy name)
+        - Pass/fail gate indicator (confidence >= 0.45)
+      - Confidence breakdown panel:
+        - Composite confidence score (0-1)
+        - Per-signal scores with visual bars: name score, number score, denominator score, expansion score, variant score, extraction quality score
+        - Each signal shows its weight
+      - Condition assessment panel:
+        - Final condition (NM / LP / MP / HP / DM)
+        - Condition source and priority level (1-5: descriptors → aspects → conditionText → title → default)
+        - Graded indicator (yes/no)
+        - If graded: grading company, grade, cert number
+      - "No match found" state when matching fails (shows extraction results only, so user can debug why)
+      - **Hardcoded fixture data**: pre-filled example showing a successful match with all panels populated, including sample confidence breakdown and condition from priority level 1 (descriptors)
 
 11. **Arbitrage Page**
     - Pipeline funnel visualization:
@@ -618,6 +647,30 @@ PORT=3000
    - Listing history: fetch from `GET /api/ebay/listings` endpoint
    - Add loading states, error handling, and empty states to existing UI components
 
+10. **Card Matcher Service** (`src/services/matcher/`)
+    - Accepts raw eBay API JSON (single item — either search result or enriched `getItem` format)
+    - Normalizes input into the shape expected by the extraction pipeline:
+      - Maps `condition` string → `conditionText` for Priority 3 condition chain
+      - Normalizes `conditionDescriptors` format variations (both `{ values: [{ content: "..." }] }` and `{ value: "..." }` shapes)
+      - Passes through `localizedAspects` for structured extraction
+    - Pipes through existing extraction pipeline (`extractSignals()`) → `NormalizedListing`
+    - Pipes through existing matching pipeline (`matchListing()`) → `MatchResult | null`
+    - Returns: extraction output, match result (card + variant + confidence signals), condition assessment with priority level source
+    - No live eBay API calls — uses pasted JSON as input
+    - Uses already-synced Scrydex data in database for card lookup
+
+11. **Matcher API Route** (`src/routes/matcher.ts`)
+    - `POST /api/matcher` — Accept raw eBay JSON, run extraction + matching, return full results
+    - Request: `{ item: <raw eBay JSON object> }`
+    - Response: extraction results, match results (or null), confidence breakdown, condition assessment
+    - Requires auth
+
+12. **Wire API Tools Page — Matcher Tab** (mockup exists from Stage 1)
+    - Replace hardcoded Matcher fixture data with real API call to `POST /api/matcher`
+    - JSON input textarea: submit pasted JSON to endpoint
+    - Display real extraction output, match results, confidence breakdown, condition assessment
+    - Add loading states, error handling (invalid JSON, no match found)
+
 **What Does NOT Get Built**:
 - No automated scanning (scanner loop)
 - No deal scoring or profit calculation
@@ -637,6 +690,10 @@ PORT=3000
 - [ ] Rate limiting prevents exceeding 5 req/sec
 - [ ] Budget counter tracks daily API usage
 - [ ] Exchange rate refreshes every 4h
+- [ ] Card Matcher: pasting eBay search result JSON returns correct card match with confidence breakdown
+- [ ] Card Matcher: pasting eBay enriched item JSON returns correct card match with condition from descriptors (priority 1)
+- [ ] Card Matcher: condition priority source correctly reported (1-5 scale)
+- [ ] Card Matcher: achieves ≥85% match success rate on test corpus of 50+ real eBay listings
 
 ---
 
